@@ -1,8 +1,8 @@
 package entrypoints
 
 import (
-	"github.com/olahol/melody"
-	"indri/internal/repo/env"
+	melodyClient "github.com/robbiebyrd/indri/internal/clients/melody"
+	"github.com/robbiebyrd/indri/internal/repo/env"
 	"log"
 	"net/http"
 	"strconv"
@@ -11,7 +11,9 @@ import (
 
 type GameDataKeys map[string]interface{}
 
-func Serve(m *melody.Melody) {
+func Serve() {
+	m, _ := melodyClient.New()
+
 	envVars := env.GetEnv()
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +28,8 @@ func Serve(m *melody.Melody) {
 		ReadHeaderTimeout: 3 * time.Second,
 	}
 
-	log.Println("starting web server at address " + envVars.ListenAddress + ":" + strconv.Itoa(envVars.ListenPort) + "...")
+	log.Println("starting web server at address " + envVars.ListenAddress +
+		":" + strconv.Itoa(envVars.ListenPort) + "...")
 
 	err := server.ListenAndServe()
 	if err != nil {

@@ -5,7 +5,19 @@ import "github.com/chenmingyong0423/go-mongox/v2"
 type Script struct {
 	mongox.Model `bson:",inline"`
 
-	Stage         *Stage `bson:"stages,omitempty" json:"stages,omitempty"`
+	Name      string `bson:"name"`
+	CreatedBy string `bson:"createdBy"`
+	Shared    bool   `bson:"shared"`
 
-	CommonDataFields `bson:",inline" json:"commonDataFields"`
+	Stage *Stage `bson:"stages,omitempty" json:"stages,omitempty"`
+
+	CommonDataFields
+}
+
+type CreateScript struct {
+	Stage Stage `json:"stage"`
+}
+
+type UpdateScript struct {
+	Stage *Stage `json:"stage,omitempty"`
 }

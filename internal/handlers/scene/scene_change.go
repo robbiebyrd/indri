@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"github.com/olahol/melody"
 	"github.com/robbiebyrd/indri/internal/entrypoints"
+	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	"github.com/robbiebyrd/indri/internal/services/session"
 	"github.com/robbiebyrd/indri/internal/services/user"
 )
 
-var us = user.NewService()
+var gs = gameService.NewService()
 
 // HandleLogin processes a user login request.
 func HandleLogin(
@@ -16,14 +17,12 @@ func HandleLogin(
 	decodedMsg map[string]interface{},
 ) error {
 	ss := session.NewService(s)
+	us := user.NewService()
 	authSuccessMessage := []byte(`{"authenticated": true}`)
 
 	_, err := ss.GetKeyAsString("userId")
 	if err == nil {
-		err = s.Write(authSuccessMessage)
-		if err != nil {
-			return err
-		}
+		s.Write(authSuccessMessage)
 		return nil
 	}
 

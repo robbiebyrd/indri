@@ -1,4 +1,4 @@
-package user
+package script
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 type Repo struct {
 	ctx        *context.Context
-	collection *mongox.Collection[models.User]
+	collection *mongox.Collection[models.Script]
 	client     *mongodb.Client
 }
 
@@ -24,24 +24,18 @@ func NewRepo() *Repo {
 		panic(err)
 	}
 
-	userColl := mongox.NewCollection[models.User](client.Database, "users")
+	scriptColl := mongox.NewCollection[models.Script](client.Database, "scripts")
 	ctx := context.Background()
 
 	return &Repo{
 		ctx:        &ctx,
 		client:     client,
-		collection: userColl,
+		collection: scriptColl,
 	}
 }
 
 // New creates a new user, given an ID.
-func (s *Repo) New(user models.CreateUser) (*models.User, error) {
-	matchingUser, _ := s.collection.Finder().Filter(query.Eq("email", user.Email)).FindOne(*s.ctx)
-
-	if matchingUser != nil {
-		return nil, fmt.Errorf("a user with email address %v already exists", user.Email)
-	}
-
+func (s *Repo) New(user models.CreateScript) (*models.Script, error) {
 	doc, err := utils.CreateBSONDoc(user)
 	if err != nil {
 		return nil, err
@@ -63,17 +57,17 @@ func (s *Repo) New(user models.CreateUser) (*models.User, error) {
 }
 
 // Find retrieves user data records for a specific key/value.
-func (s *Repo) Find(key string, value string) ([]*models.User, error) {
+func (s *Repo) Find(key string, value string) ([]*models.Script, error) {
 	return s.collection.Finder().Filter(query.Eq(key, value)).Find(*s.ctx)
 }
 
 // FindFirst retrieves the first user data record, given a key/value.
-func (s *Repo) FindFirst(key string, value string) (*models.User, error) {
+func (s *Repo) FindFirst(key string, value string) (*models.Script, error) {
 	return s.collection.Finder().Filter(query.Eq(key, value)).FindOne(*s.ctx)
 }
 
 // Get retrieves user data for a specific user ID.
-func (s *Repo) Get(id string) (*models.User, error) {
+func (s *Repo) Get(id string) (*models.Script, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, err
@@ -98,14 +92,19 @@ func (s *Repo) Exists(id string) (bool, error) {
 }
 
 // Update saves user data to the repository.
-func (s *Repo) Update(user *models.UpdateUser) error {
+func (s *Repo) Update(id string, script *models.UpdateScript) error {
+	if id == "" {
+		return fmt.Errorf("id is required")
+	}
+
 	// Convert the hex-based, string id we get to an actual ObjectID
-	objectId, err := bson.ObjectIDFromHex(user.ID)
+	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return err
 	}
 
-	doc, err := utils.CreateBSONDoc(user)
+	// Unmarshall the bytes to a BSON Document type
+	doc, err := utils.CreateBSONDoc(script)
 	if err != nil {
 		return err
 	}
@@ -114,7 +113,7 @@ func (s *Repo) Update(user *models.UpdateUser) error {
 	// as they are dropped in the conversion. We specify a filter for the requested user ID, so only
 	// one document should ever be updated.
 	result, err := s.collection.Collection().UpdateOne(
-		context.TODO(),
+		*s.ctx,
 		bson.D{{Key: "_id", Value: objectId}},
 		bson.D{{Key: "$set", Value: doc}},
 	)
@@ -124,6 +123,38 @@ func (s *Repo) Update(user *models.UpdateUser) error {
 
 	if result.MatchedCount == 0 {
 		return fmt.Errorf("user with id %v does not exists", objectId)
+	}
+
+	return nil
+}
+
+func (s *Repo) AddScene(gameCode string, id string, scene models.Scene) error {
+	if gameCode == "" {
+		return fmt.Errorf("gameCode is required")
+	} else if id == "" {
+		return fmt.Errorf("id is required")
+	}
+
+	retrievedScript, err := s.Get(gameCode)
+	if err != nil {
+		return err
+	}
+
+	_, ok := retrievedScript.Stage.Scenes[id]
+	if ok {
+		return fmt.Errorf("scene with id %v already exists", id)
+	}
+
+	retrievedScript.Stage.Scenes[id] = scene
+	updateScript := &models.UpdateScript{
+		Stage: &models.Stage{
+			Scenes: map[string]models.Scene{id: scene},
+		},
+	}
+
+	err = s.Update(id, updateScript)
+	if err != nil {
+		return err
 	}
 
 	return nil

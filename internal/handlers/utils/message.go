@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/olahol/melody"
-	"indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/models"
 	"log"
 )
 

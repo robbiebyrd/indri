@@ -4,21 +4,21 @@ services:
   mongodb:
     image: mongo:latest # Use the official MongoDB image
     container_name: my_mongodb_instance
+    env_file:
+      - .env
     ports:
-      - "27017:27017" # Map host port 27017 to container port 27017
+      - "${INDRI_MONGOPORT}:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: test # Optional: Set root username
-      MONGO_INITDB_ROOT_PASSWORD: test # Optional: Set root password
+      - MONGO_INITDB_ROOT_USERNAME=${INDRI_MONGOUSERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${INDRI_MONGOPASSWORD}
     volumes:
-      - mongodb_data:/data/db # Persist data in a named volume
+      - mongodb_data:/data/db
   redis:
     image: 'bitnami/redis:latest'
     environment:
-      - ALLOW_EMPTY_PASSWORD=yes
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${INDRI_REDISPASSWORD}
     ports:
-      - '6379:6379'
+      - '${INDRI_REDISPORT}:6379'
 
 volumes:
-  mongodb_data: # Define the named volume
+  mongodb_data:

@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/olahol/melody"
-	"indri/internal/services/session"
+	"github.com/robbiebyrd/indri/internal/services/session"
 	"log"
 )
 
-func Broadcast(m *melody.Melody, gameId *string, teamId *string, data interface{}) error {
-
-	if gameId == nil {
+func (cs *Service) Broadcast(gameCode *string, teamId *string, data interface{}) error {
+	if gameCode == nil {
 		return errors.New("game id is required")
 	}
 
@@ -20,28 +19,31 @@ func Broadcast(m *melody.Melody, gameId *string, teamId *string, data interface{
 	}
 
 	if teamId != nil {
-		return broadcastToTeam(m, *gameId, *teamId, jsonData)
+		return cs.broadcastToTeam(*gameCode, *teamId, jsonData)
 	}
 
-	return broadcastToGame(m, *gameId, jsonData)
+	return cs.broadcastToGame(*gameCode, jsonData)
 }
 
-func BroadcastAll(m *melody.Melody, data interface{}) error {
+func (cs *Service) BroadcastAll(data interface{}) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
 
-	return broadcastToAll(m, jsonData)
+	return cs.broadcastToAll(jsonData)
 }
 
-func broadcastToGame(m *melody.Melody, gameId string, jsonData []byte) error {
-	log.Printf("Broadcasting to game %v\n", gameId)
+func (cs *Service) broadcastToGame(gameCode string, jsonData []byte) error {
+	log.Printf("Broadcasting to game %v\n", gameCode)
 
-	if err := m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		ss := session.NewService(s)
-		thisGameId, _ := ss.GetKeyAsString("gameId")
-		return *thisGameId == gameId
+	if err := cs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
+		thisGameCode, ok := s.Get("code")
+		if !ok {
+			return false
+		}
+
+		return thisGameCode == gameCode
 	}); err != nil {
 		return err
 	}
@@ -49,13 +51,13 @@ func broadcastToGame(m *melody.Melody, gameId string, jsonData []byte) error {
 	return nil
 }
 
-func broadcastToTeam(m *melody.Melody, gameId string, teamId string, jsonData []byte) error {
-	log.Printf("Broadcasting to game %v and team %v\n", gameId, teamId)
+func (cs *Service) broadcastToTeam(gameCode string, teamId string, jsonData []byte) error {
+	log.Printf("Broadcasting to game %v and team %v\n", gameCode, teamId)
 
-	if err := m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
+	if err := cs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
 		ss := session.NewService(s)
-		thisGameId, thisTeamId, _, err := ss.GetStandardKeys()
-		return err != nil && *thisGameId == gameId && *thisTeamId == teamId
+		thisGameCode, thisTeamId, _, err := ss.GetStandardKeys()
+		return err != nil && *thisGameCode == gameCode && *thisTeamId == teamId
 	}); err != nil {
 		return err
 	}
@@ -63,10 +65,10 @@ func broadcastToTeam(m *melody.Melody, gameId string, teamId string, jsonData []
 	return nil
 }
 
-func broadcastToAll(m *melody.Melody, jsonData []byte) error {
+func (cs *Service) broadcastToAll(jsonData []byte) error {
 	log.Printf("Broadcasting to all\n")
 
-	err := m.Broadcast(jsonData)
+	err := cs.m.Broadcast(jsonData)
 	if err != nil {
 		return err
 	}

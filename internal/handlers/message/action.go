@@ -3,9 +3,6 @@ package message
 import (
 	"fmt"
 	"github.com/olahol/melody"
-	"indri/internal/handlers/utils"
-	"indri/internal/models"
-	gameService "indri/internal/services/game"
 )
 
 type RegisterHandlersInput struct {
@@ -15,12 +12,10 @@ type RegisterHandlersInput struct {
 
 type actionHandlerFuncSig func(
 	s *melody.Session,
-	m *melody.Melody,
-	g *models.Game,
 	decodedMsg map[string]interface{},
 ) error
 
-var registeredHandlerMap map[string]actionHandlerFuncSig
+var registeredHandlerMap = map[string]actionHandlerFuncSig{}
 
 func RegisterHandler(action string, handler actionHandlerFuncSig) error {
 	if _, ok := registeredHandlerMap[action]; ok {
@@ -48,20 +43,11 @@ func RegisterHandlers(handlers []RegisterHandlersInput) []error {
 
 func Act(
 	s *melody.Session,
-	m *melody.Melody,
-	gs *gameService.Service,
 	decodedMsg *map[string]interface{},
 	action *string,
 ) error {
 	if decodedMsg == nil {
 		return fmt.Errorf("decoded message is nil")
-	}
-
-	gameId, _ := utils.ParseGameIDAndTeamID(*decodedMsg)
-
-	g, _ := gs.Fetch(gameId)
-	if g == nil {
-		fmt.Printf("could not find game %v, continuing anyway\n", *gameId)
 	}
 
 	var err error
@@ -70,7 +56,7 @@ func Act(
 		return fmt.Errorf("unknown action %v", *action)
 	}
 
-	err = registeredHandlerMap[*action](s, m, g, *decodedMsg)
+	err = registeredHandlerMap[*action](s, *decodedMsg)
 	if err != nil {
 		return err
 	}

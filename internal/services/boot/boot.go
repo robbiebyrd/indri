@@ -1,14 +1,19 @@
 package boot
 
 import (
-	"indri/internal/handlers/join"
-	"indri/internal/handlers/login"
-	"indri/internal/handlers/message"
+	"github.com/robbiebyrd/indri/internal/handlers/join"
+	"github.com/robbiebyrd/indri/internal/handlers/login"
+	"github.com/robbiebyrd/indri/internal/handlers/message"
+	"github.com/robbiebyrd/indri/internal/handlers/register"
 	"log"
 )
 
 func Register() error {
-	a := []message.RegisterHandlersInput{
+	actionToHandlerMap := []message.RegisterHandlersInput{
+		{
+			Action:  "register",
+			Handler: register.HandleRegister,
+		},
 		{
 			Action:  "join",
 			Handler: join.HandleJoin,
@@ -27,13 +32,14 @@ func Register() error {
 		},
 	}
 
-	errs := message.RegisterHandlers(a)
+	errs := message.RegisterHandlers(actionToHandlerMap)
 	if len(errs) > 0 {
+		log.Println("an error occurred while registering handlers")
 		for _, err := range errs {
 			log.Println(err)
 		}
 
-		panic("error during loading handlers, exiting")
+		panic("error during registering handlers, exiting")
 	}
 
 	return nil

@@ -5,6 +5,8 @@ type Player struct {
 	Score        int    `bson:"score"        json:"score"`
 	Disconnected bool   `bson:"disconnected" json:"disconnected"`
 	Host         bool   `bson:"host"         json:"host"`
+	Controller   bool   `bson:"controller"   json:"controller"`
 
-	CommonDataFields `bson:",inline"`
+	PublicData  *map[string]interface{}            `bson:"data"        json:"data,omitempty"`
+	PrivateData *map[string]interface{}            `bson:"privateData" json:"privateData,omitempty"`
 }

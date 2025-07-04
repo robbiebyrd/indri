@@ -4,17 +4,17 @@ import (
 	"errors"
 )
 
-func ParseGameIDAndTeamID(decodedMsg map[string]interface{}) (*string, *string) {
-	gameId, _ := decodedMsg["gameId"].(string)
+func ParseGameCodeAndTeamID(decodedMsg map[string]interface{}) (*string, *string) {
+	gameCode, _ := decodedMsg["code"].(string)
 	teamId, _ := decodedMsg["teamId"].(string)
 
-	return &gameId, &teamId
+	return &gameCode, &teamId
 }
 
-func RequireGameIDAndTeamID(decodedMsg map[string]interface{}) (*string, *string, error) {
-	gameId, ok := decodedMsg["gameId"].(string)
+func RequireGameCodeAndTeamID(decodedMsg map[string]interface{}) (*string, *string, error) {
+	gameCode, ok := decodedMsg["code"].(string)
 	if !ok {
-		return nil, nil, errors.New("could not parse gameId from request")
+		return nil, nil, errors.New("could not parse gameCode from request")
 	}
 
 	teamId, ok := decodedMsg["teamId"].(string)
@@ -22,5 +22,5 @@ func RequireGameIDAndTeamID(decodedMsg map[string]interface{}) (*string, *string
 		return nil, nil, errors.New("could not parse teamId from request")
 	}
 
-	return &gameId, &teamId, nil
+	return &gameCode, &teamId, nil
 }

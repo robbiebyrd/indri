@@ -4,29 +4,24 @@ import (
 	"errors"
 	"fmt"
 	"github.com/olahol/melody"
+	melodyClient "github.com/robbiebyrd/indri/internal/clients/melody"
 )
 
 type Service struct {
 	s *melody.Session
+	m *melody.Melody
 }
-
-var sessionService *Service
 
 // NewService creates a new repository for accessing game data.
 func NewService(s *melody.Session) *Service {
-	if sessionService == nil {
-		sessionService = &Service{
-			s: s,
-		}
-	}
-
-	return sessionService
+	m, _ := melodyClient.New()
+	return &Service{s, m}
 }
 
 // GetStandardKeys returns a set of standard session attributes that identify a user in a game.
-// StandardKeys include gameId, teamId and userId.
+// StandardKeys include gameCode, teamId and userId.
 func (ss *Service) GetStandardKeys() (*string, *string, *string, error) {
-	gameIdPtr, err := ss.GetKeyAsString("gameId")
+	gameCodePtr, err := ss.GetKeyAsString("code")
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -41,14 +36,14 @@ func (ss *Service) GetStandardKeys() (*string, *string, *string, error) {
 		return nil, nil, nil, err
 	}
 
-	return gameIdPtr, teamIdPtr, userIdPtr, nil
+	return gameCodePtr, teamIdPtr, userIdPtr, nil
 }
 
 // SetStandardKeys returns a set of standard session attributes that identify a user in a game.
-// StandardKeys include gameId, teamId and userId.
-func (ss *Service) SetStandardKeys(gameId *string, teamId *string, userId *string) error {
-	if gameId == nil {
-		return errors.New("gameId id is required")
+// StandardKeys include gameCode, teamId and userId.
+func (ss *Service) SetStandardKeys(gameCode *string, teamId *string, userId *string) error {
+	if gameCode == nil {
+		return errors.New("gameCode id is required")
 	}
 
 	if teamId == nil {
@@ -59,7 +54,7 @@ func (ss *Service) SetStandardKeys(gameId *string, teamId *string, userId *strin
 		return errors.New("userId id is required")
 	}
 
-	ss.SetKey("gameId", *gameId)
+	ss.SetKey("code", *gameCode)
 	ss.SetKey("teamId", *teamId)
 	ss.SetKey("userId", *userId)
 
@@ -96,35 +91,35 @@ func (ss *Service) SetKey(key string, data string) {
 	ss.s.Set(key, data)
 }
 
-func (ss *Service) Get(m *melody.Melody, gameId *string, teamId *string, userId *string) (*melody.Session, error) {
-	if gameId != nil && teamId != nil && userId != nil {
-		return ss.getSessionForPlayer(m, *gameId, *teamId, *userId)
+func (ss *Service) Get(gameCode *string, teamId *string, userId *string) (*melody.Session, error) {
+	if gameCode != nil && teamId != nil && userId != nil {
+		return ss.getSessionForPlayer(*gameCode, *teamId, *userId)
 	}
 
-	return nil, errors.New("invalid gameId, teamId or userId")
+	return nil, errors.New("invalid gameCode, teamId or userId")
 }
 
 // Find returns either a session for a specific player, sessions for all players in a given team, or sessions for
-// all players in a game, depending on inputs. teamId and playerId can be passed in as nil, but a gameId is required.
-func (ss *Service) Find(m *melody.Melody, gameId *string, teamId *string, userId *string) ([]*melody.Session, error) {
-	if gameId != nil && teamId != nil && userId != nil {
-		retrievedSession, err := ss.getSessionForPlayer(m, *gameId, *teamId, *userId)
+// all players in a game, depending on inputs. teamId and playerId can be passed in as nil, but a gameCode is required.
+func (ss *Service) Find(gameCode *string, teamId *string, userId *string) ([]*melody.Session, error) {
+	if gameCode != nil && teamId != nil && userId != nil {
+		retrievedSession, err := ss.getSessionForPlayer(*gameCode, *teamId, *userId)
 		return []*melody.Session{retrievedSession}, err
 	}
 
-	if gameId != nil && teamId != nil {
-		return ss.getSessionsForTeam(m, *gameId, *teamId)
+	if gameCode != nil && teamId != nil {
+		return ss.getSessionsForTeam(*gameCode, *teamId)
 	}
 
-	if gameId != nil {
-		return ss.getSessionsForGame(m, *gameId)
+	if gameCode != nil {
+		return ss.getSessionsForGame(*gameCode)
 	}
 
-	return nil, errors.New("invalid gameId, teamId or userId")
+	return nil, errors.New("invalid gameCode, teamId or userId")
 }
 
-func (ss *Service) getSessionsForGame(m *melody.Melody, gameId string) ([]*melody.Session, error) {
-	allSessions, err := m.Sessions()
+func (ss *Service) getSessionsForGame(gameCode string) ([]*melody.Session, error) {
+	allSessions, err := ss.m.Sessions()
 	if err != nil {
 		return nil, err
 	}
@@ -132,21 +127,21 @@ func (ss *Service) getSessionsForGame(m *melody.Melody, gameId string) ([]*melod
 	var matchedSessions []*melody.Session
 
 	for _, thisSession := range allSessions {
-		checkGameId, _, _, err := ss.GetStandardKeys()
-		if err == nil && *checkGameId == gameId {
+		checkgameCode, _, _, err := ss.GetStandardKeys()
+		if err == nil && *checkgameCode == gameCode {
 			matchedSessions = append(matchedSessions, thisSession)
 		}
 	}
 
 	if len(matchedSessions) == 0 {
-		return nil, fmt.Errorf("no sessions were found for game %v", gameId)
+		return nil, fmt.Errorf("no sessions were found for game %v", gameCode)
 	}
 
 	return matchedSessions, nil
 }
 
-func (ss *Service) getSessionsForTeam(m *melody.Melody, gameId string, teamId string) ([]*melody.Session, error) {
-	allSessions, err := m.Sessions()
+func (ss *Service) getSessionsForTeam(gameCode string, teamId string) ([]*melody.Session, error) {
+	allSessions, err := ss.m.Sessions()
 	if err != nil {
 		return nil, err
 	}
@@ -154,36 +149,35 @@ func (ss *Service) getSessionsForTeam(m *melody.Melody, gameId string, teamId st
 	var matchedSessions []*melody.Session
 
 	for _, thisSession := range allSessions {
-		checkGameId, checkTeamId, _, err := ss.GetStandardKeys()
-		if err == nil && *checkGameId == gameId && *checkTeamId == teamId {
+		checkgameCode, checkTeamId, _, err := ss.GetStandardKeys()
+		if err == nil && *checkgameCode == gameCode && *checkTeamId == teamId {
 			matchedSessions = append(matchedSessions, thisSession)
 		}
 	}
 
 	if len(matchedSessions) == 0 {
-		return nil, fmt.Errorf("no sessions were found for game %v and team %v", gameId, teamId)
+		return nil, fmt.Errorf("no sessions were found for game %v and team %v", gameCode, teamId)
 	}
 
 	return matchedSessions, nil
 }
 
 func (ss *Service) getSessionForPlayer(
-	m *melody.Melody,
-	gameId string,
+	gameCode string,
 	teamId string,
 	userId string,
 ) (*melody.Session, error) {
-	allSessions, err := m.Sessions()
+	allSessions, err := ss.m.Sessions()
 	if err != nil {
 		return nil, err
 	}
 
 	for _, thisSession := range allSessions {
-		checkGameId, checkTeamId, checkUserId, err := ss.GetStandardKeys()
-		if err == nil && *checkGameId == gameId && *checkTeamId == teamId && *checkUserId == userId {
+		checkGameCode, checkTeamId, checkUserId, err := ss.GetStandardKeys()
+		if err == nil && *checkGameCode == gameCode && *checkTeamId == teamId && *checkUserId == userId {
 			return thisSession, nil
 		}
 	}
 
-	return nil, fmt.Errorf("no sessions were found for userId %v in game %v and team %v", userId, gameId, teamId)
+	return nil, fmt.Errorf("no sessions were found for userId %v in game %v and team %v", userId, gameCode, teamId)
 }

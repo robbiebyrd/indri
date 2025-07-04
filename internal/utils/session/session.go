@@ -2,9 +2,9 @@ package session
 
 import "fmt"
 
-func ValidateStandardKeys(gameId *string, teamId *string, userId *string) (string, string, string, error) {
-	if gameId == nil {
-		return "", "", "", fmt.Errorf("gameId is required")
+func ValidateStandardKeys(gameCode *string, teamId *string, userId *string) (string, string, string, error) {
+	if gameCode == nil {
+		return "", "", "", fmt.Errorf("gameCode is required")
 	}
 
 	if teamId == nil || *teamId == "" {
@@ -15,6 +15,6 @@ func ValidateStandardKeys(gameId *string, teamId *string, userId *string) (strin
 		return "", "", "", fmt.Errorf("userId is required")
 	}
 
-	return *gameId, *teamId, *userId, nil
+	return *gameCode, *teamId, *userId, nil
 
 }
