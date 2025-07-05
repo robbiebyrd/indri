@@ -34,24 +34,24 @@ func HandleJoin(
 		return err
 	}
 
-	if !gs.Exists(gameCode) {
-		_, err = gs.New(gameCode)
-		if err != nil {
-			return err
-		}
+	g, err := gs.GetByCode(gameCode)
+	if err != nil {
+		return err
 	}
 
-	if gs.HasPlayer(gameCode, teamId, userId) {
-		_, err = gs.ConnectPlayer(gameCode, teamId, userId)
+	gameId := g.ID.Hex()
+
+	if gs.HasPlayer(&gameId, teamId, userId) {
+		err = gs.ConnectPlayer(&gameId, teamId, userId)
 	} else {
-		_, err = gs.AddPlayer(gameCode, teamId, userId)
+		err = gs.AddPlayer(&gameId, teamId, userId)
 	}
 
 	if err != nil {
 		log.Printf("error adding player %v to game %v on team %v: %v\n", *userId, *gameCode, *teamId, err)
 	}
 
-	err = gs.Update(gameCode, nil)
+	err = gs.Update(&gameId, nil)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func HandleLeave(
 		return fmt.Errorf("playerId and teamId of player to kick must be provided")
 	}
 
-	g, err := gs.Get(gameCode)
+	g, err := gs.GetByCode(gameCode)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func HandleLeave(
 		return fmt.Errorf("player is in game %v but asking to leave game %v", *gameCode, g.Code)
 	}
 
-	g, err = gs.RemovePlayer(gameCode, teamId, playerId)
+	err = gs.RemovePlayer(gameCode, teamId, playerId)
 	if err != nil {
 		log.Printf("could not disconnect player %v from game %v: %v\n", playerId, gameCode, err)
 	}
@@ -129,7 +129,7 @@ func HandleKick(
 			"isn't in the same game", userId, *gameCode, *actorPlayerId)
 	}
 
-	g, err := gs.Get(gameCode)
+	g, err := gs.GetByCode(gameCode)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func HandleKick(
 		return err
 	}
 
-	g, err = gs.RemovePlayer(gameCode, teamId, &userId)
+	err = gs.RemovePlayer(gameCode, teamId, &userId)
 	if err != nil {
 		log.Printf("could not disconnect player %v from game %v: %v\n", userId, gameCode, err)
 	}

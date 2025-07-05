@@ -14,10 +14,14 @@ type Service struct {
 var scriptService *Service
 
 // NewService creates a new repository for accessing script data.
-func NewService() *Service {
+func NewService(scriptRepo *script.Repo) *Service {
+	if scriptRepo == nil {
+		scriptRepo = script.NewRepo()
+	}
+
 	if scriptService == nil {
 		scriptService = &Service{
-			scriptRepo: script.NewRepo(),
+			scriptRepo: scriptRepo,
 		}
 	}
 

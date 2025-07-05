@@ -31,12 +31,12 @@ func (us *Service) Sanitize(user *models.User) *models.User {
 }
 
 // Get retrieves user data for a specific user ID, and returns an error if not found.
-func (us *Service) Get(id *string) (*models.User, error) {
-	if id == nil {
-		return nil, fmt.Errorf("id is  nil")
+func (us *Service) Get(id string) (*models.User, error) {
+	if id == "" {
+		return nil, fmt.Errorf("id is empty")
 	}
 
-	return us.userRepo.Get(*id)
+	return us.userRepo.Get(id)
 }
 
 func (us *Service) Authenticate(email *string, password *string) (*models.User, error) {

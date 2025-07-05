@@ -27,17 +27,15 @@ func HandleMessage(
 		return
 	}
 
-	// TODO: In the future, we want to compare the and modified games to send a diff rather than the full scene payload.
-	//originalgameCode, err := session.GetKeyAsString(s, "code")
-	//if err != nil {
-	//	log.Printf("error getting game id from session: %v\n", err)
-	//}
-	//
-	// originalGame, err := gs.Get(originalgameCode)
-	// if err != nil {
-	// 	log.Printf("error getting originalGame with id %v: %v\n", originalgameCode, err)
-	// }
-	//
+	originalGameCode, err := ss.GetKeyAsString("code")
+	if err != nil {
+		log.Printf("error getting game id from session: %v\n", err)
+	}
+
+	_, err = gs.GetByCode(originalGameCode)
+	if err != nil {
+		log.Printf("error getting originalGame with id %v: %v\n", originalGameCode, err)
+	}
 
 	// Next, we pass the message to Act, which decides which handler to invoke based on the incoming `action`
 	// parameter in the message body.
@@ -55,7 +53,7 @@ func HandleMessage(
 	}
 
 	// Get the modified game
-	modifiedGame, err := gs.Fetch(gameCode)
+	modifiedGame, err := gs.FetchByCode(gameCode)
 	if err != nil {
 		log.Printf("error getting game with id %v: %v\n", gameCode, err)
 	}

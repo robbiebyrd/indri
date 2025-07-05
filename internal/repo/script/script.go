@@ -12,9 +12,9 @@ import (
 )
 
 type Repo struct {
-	ctx        *context.Context
-	collection *mongox.Collection[models.Script]
-	client     *mongodb.Client
+	Ctx        *context.Context
+	Collection *mongox.Collection[models.Script]
+	Client     *mongodb.Client
 }
 
 // NewRepo creates a new repository for accessing user data.
@@ -28,9 +28,9 @@ func NewRepo() *Repo {
 	ctx := context.Background()
 
 	return &Repo{
-		ctx:        &ctx,
-		client:     client,
-		collection: scriptColl,
+		Ctx:        &ctx,
+		Client:     client,
+		Collection: scriptColl,
 	}
 }
 
@@ -44,7 +44,7 @@ func (s *Repo) New(user models.CreateScript) (*models.Script, error) {
 	// Create the update document, specifying the fields to update. `nil` fields are not updated,
 	// as they are dropped in the conversion. We specify a filter for the requested user ID, so only
 	// one document should ever be updated.
-	result, err := s.collection.Collection().InsertOne(*s.ctx, &doc)
+	result, err := s.Collection.Collection().InsertOne(*s.Ctx, &doc)
 	if err != nil {
 		return nil, err
 	}
@@ -58,12 +58,12 @@ func (s *Repo) New(user models.CreateScript) (*models.Script, error) {
 
 // Find retrieves user data records for a specific key/value.
 func (s *Repo) Find(key string, value string) ([]*models.Script, error) {
-	return s.collection.Finder().Filter(query.Eq(key, value)).Find(*s.ctx)
+	return s.Collection.Finder().Filter(query.Eq(key, value)).Find(*s.Ctx)
 }
 
 // FindFirst retrieves the first user data record, given a key/value.
 func (s *Repo) FindFirst(key string, value string) (*models.Script, error) {
-	return s.collection.Finder().Filter(query.Eq(key, value)).FindOne(*s.ctx)
+	return s.Collection.Finder().Filter(query.Eq(key, value)).FindOne(*s.Ctx)
 }
 
 // Get retrieves user data for a specific user ID.
@@ -73,7 +73,7 @@ func (s *Repo) Get(id string) (*models.Script, error) {
 		return nil, err
 	}
 
-	return s.collection.Finder().Filter(query.Id(objectId)).FindOne(*s.ctx)
+	return s.Collection.Finder().Filter(query.Id(objectId)).FindOne(*s.Ctx)
 }
 
 // Exists checks to see if a user with the given ID already exists.
@@ -83,7 +83,7 @@ func (s *Repo) Exists(id string) (bool, error) {
 		return false, err
 	}
 
-	count, err := s.collection.Finder().Filter(query.Id(objectId)).Count(*s.ctx)
+	count, err := s.Collection.Finder().Filter(query.Id(objectId)).Count(*s.Ctx)
 	if err != nil {
 		return false, err
 	}
@@ -97,23 +97,18 @@ func (s *Repo) Update(id string, script *models.UpdateScript) error {
 		return fmt.Errorf("id is required")
 	}
 
-	// Convert the hex-based, string id we get to an actual ObjectID
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return err
 	}
 
-	// Unmarshall the bytes to a BSON Document type
 	doc, err := utils.CreateBSONDoc(script)
 	if err != nil {
 		return err
 	}
 
-	// Create the update document, specifying the fields to update. `nil` fields are not updated,
-	// as they are dropped in the conversion. We specify a filter for the requested user ID, so only
-	// one document should ever be updated.
-	result, err := s.collection.Collection().UpdateOne(
-		*s.ctx,
+	result, err := s.Collection.Collection().UpdateOne(
+		*s.Ctx,
 		bson.D{{Key: "_id", Value: objectId}},
 		bson.D{{Key: "$set", Value: doc}},
 	)
@@ -128,6 +123,7 @@ func (s *Repo) Update(id string, script *models.UpdateScript) error {
 	return nil
 }
 
+// AddScene adds a scene to the script's stage.
 func (s *Repo) AddScene(gameCode string, id string, scene models.Scene) error {
 	if gameCode == "" {
 		return fmt.Errorf("gameCode is required")

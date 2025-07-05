@@ -3,10 +3,12 @@ package connection
 import (
 	"github.com/olahol/melody"
 	melodyClient "github.com/robbiebyrd/indri/internal/clients/melody"
+	"github.com/robbiebyrd/indri/internal/services/user"
 )
 
 type Service struct {
 	m *melody.Melody
+	us *user.Service
 }
 
 var connectionService *Service
@@ -18,8 +20,9 @@ func NewService() *Service {
 	}
 
 	m, _ := melodyClient.New()
+	us := user.NewService()
 
-	connectionService = &Service{m}
+	connectionService = &Service{m, us}
 
 	return connectionService
 }

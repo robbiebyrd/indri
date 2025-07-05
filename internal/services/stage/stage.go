@@ -1,6 +1,7 @@
 package stage
 
 import (
+	"errors"
 	"fmt"
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/repo/game"
@@ -17,11 +18,19 @@ type Service struct {
 var stageService *Service
 
 // NewService creates a new repository for accessing game data.
-func NewService() *Service {
+func NewService(gameRepo *game.Repo, scriptService *script.Service) *Service {
+	if gameRepo == nil {
+		gameRepo = game.NewRepo()
+	}
+
+	if scriptService == nil {
+		scriptService = script.NewService(nil)
+	}
+
 	if stageService == nil {
 		stageService = &Service{
-			gameRepo:      game.NewRepo(),
-			scriptService: script.NewService(),
+			gameRepo,
+			scriptService,
 		}
 	}
 
@@ -97,25 +106,15 @@ func (gs *Service) AddScene(gameCode string, sceneId string, scene *models.Scene
 // AddScenes adds multiple scenes to the Stage.
 func (gs *Service) AddScenes(gameCode string, scenes map[string]models.Scene) error {
 	if gameCode == "" {
-		return fmt.Errorf("game code cannot be empty")
+		return errors.New("game code cannot be nil")
 	}
 
 	if len(scenes) == 0 {
-		return fmt.Errorf("scenes cannot be empty")
-	}
-
-	g, err := gs.gameRepo.FindByCode(gameCode)
-	if err != nil {
-		return err
+		return errors.New("scenes cannot be empty")
 	}
 
 	for sceneId, scene := range scenes {
-		_, ok := g.Stage.Scenes[sceneId]
-		if ok {
-			return fmt.Errorf("scene with id %s already exists", sceneId)
-		}
-
-		err = gs.gameRepo.UpdateField(g.ID.Hex(), "stage.scenes."+sceneId, scene)
+		err := gs.AddScene(gameCode, sceneId, &scene)
 		if err != nil {
 			return err
 		}
@@ -165,7 +164,65 @@ func (gs *Service) SetScript(gameCode string, id string) error {
 	return nil
 }
 
-// SetSceneOrder
+// LoadFromScript loads a script's stage data into the current game's stage.
+func (gs *Service) LoadFromScript(gameCode string, scriptId string) error {
+	if gameCode == "" {
+		return fmt.Errorf("game code cannot be nil")
+	}
+
+	gameId, err := gs.gameRepo.GetCode(gameCode)
+	if err != nil {
+		return err
+	}
+
+	loadedScript, err := gs.scriptService.Get(&scriptId)
+	if err != nil {
+		return err
+	}
+
+	err = gs.gameRepo.UpdateField(*gameId, "stage", loadedScript.Stage)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// LoadSceneFromScript loads a script's data for a given scene into the current game's stage.
+func (gs *Service) LoadSceneFromScript(
+	gameCode string,
+	scriptId string,
+	sceneId string,
+	dataType *models.DataStoreType,
+) error {
+	if gameCode == "" {
+		return fmt.Errorf("game code cannot be nil")
+	}
+
+	gameId, err := gs.gameRepo.GetCode(gameCode)
+	if err != nil {
+		return err
+	}
+
+	loadedScript, err := gs.scriptService.Get(&scriptId)
+	if err != nil {
+		return err
+	}
+
+	updatedPath := "stage.scene." + sceneId
+	if dataType != nil {
+		updatedPath += "." + dataType.String()
+	}
+
+	err = gs.gameRepo.UpdateField(*gameId, updatedPath, loadedScript.Stage)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// SetSceneOrder sets the order the scenes should display; specifying a scene not on the stage results in an error.
 func (gs *Service) SetSceneOrder(gameCode string, sceneOrder []string) error {
 	if gameCode == "" {
 		return fmt.Errorf("game code cannot be nil")
@@ -178,12 +235,6 @@ func (gs *Service) SetSceneOrder(gameCode string, sceneOrder []string) error {
 	g, err := gs.gameRepo.FindByCode(gameCode)
 	if err != nil {
 		return err
-	}
-
-	var validScenes []string
-
-	for key := range g.Stage.Scenes {
-		validScenes = append(validScenes, key)
 	}
 
 	for _, sceneId := range sceneOrder {
@@ -202,16 +253,26 @@ func (gs *Service) SetSceneOrder(gameCode string, sceneOrder []string) error {
 	return nil
 }
 
-// SetSceneData
-func (gs *Service) SetSceneData(gameCode string, sceneId string, dataType models.DataStoreType, data interface{}) error {
+// UpdateScene saves a field (or all fields if path is nil) into one of the data stores for a given scene.
+func (gs *Service) UpdateScene(
+	gameCode string,
+	sceneId string,
+	dataType models.DataStoreType,
+	path *string,
+	data interface{},
+) error {
 	g, err := gs.validateAndFetchGame(gameCode, sceneId)
 	if err != nil {
 		return err
 	}
 
-	path := "stage.scenes." + sceneId + "." + dataType.String()
+	fullPath := "stage.scenes." + sceneId + "." + dataType.String()
 
-	err = gs.gameRepo.UpdateField(g.ID.Hex(), path, data)
+	if path != nil && *path != "" {
+		fullPath += "." + *path
+	}
+
+	err = gs.gameRepo.UpdateField(g.ID.Hex(), fullPath, data)
 	if err != nil {
 		return err
 	}
@@ -219,7 +280,7 @@ func (gs *Service) SetSceneData(gameCode string, sceneId string, dataType models
 	return nil
 }
 
-// SetCurrentScene
+// SetCurrentScene sets the current scene.
 func (gs *Service) SetCurrentScene(gameCode string, sceneId string) error {
 	g, err := gs.validateAndFetchGame(gameCode, sceneId)
 	if err != nil {
