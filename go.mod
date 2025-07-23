@@ -13,6 +13,7 @@ require (
 )
 
 require (
+	github.com/TwiN/go-away v1.6.16 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/golang/snappy v1.0.0 // indirect
@@ -20,7 +21,12 @@ require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/redis/go-redis/v9 v9.11.0 // indirect
 	github.com/sanity-io/mendoza v0.0.0-20250409162336-6aa953e52649 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/tjarratt/babble v0.0.0-20210505082055-cbca2a4833c1 // indirect
+	github.com/wI2L/jsondiff v0.7.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect

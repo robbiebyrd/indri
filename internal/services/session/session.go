@@ -14,12 +14,12 @@ type Service struct {
 
 // NewService creates a new repository for accessing game data.
 func NewService(s *melody.Session) *Service {
-	m, _ := melodyClient.New()
+	m := melodyClient.New()
 	return &Service{s, m}
 }
 
 // GetStandardKeys returns a set of standard session attributes that identify a user in a game.
-// StandardKeys include gameCode, teamId and userId.
+// StandardKeys include gameCode, teamId, and userId.
 func (ss *Service) GetStandardKeys() (*string, *string, *string, error) {
 	gameCodePtr, err := ss.GetKeyAsString("code")
 	if err != nil {
@@ -40,14 +40,10 @@ func (ss *Service) GetStandardKeys() (*string, *string, *string, error) {
 }
 
 // SetStandardKeys returns a set of standard session attributes that identify a user in a game.
-// StandardKeys include gameCode, teamId and userId.
+// StandardKeys include gameCode, teamId, and userId.
 func (ss *Service) SetStandardKeys(gameCode *string, teamId *string, userId *string) error {
 	if gameCode == nil {
 		return errors.New("gameCode id is required")
-	}
-
-	if teamId == nil {
-		return errors.New("teamId id is required")
 	}
 
 	if userId == nil {
@@ -55,8 +51,11 @@ func (ss *Service) SetStandardKeys(gameCode *string, teamId *string, userId *str
 	}
 
 	ss.SetKey("code", *gameCode)
-	ss.SetKey("teamId", *teamId)
 	ss.SetKey("userId", *userId)
+
+	if teamId != nil {
+		ss.SetKey("teamId", *teamId)
+	}
 
 	return nil
 }
@@ -89,6 +88,10 @@ func (ss *Service) GetKey(key string) (any, error) {
 // SetKey sets a session key.
 func (ss *Service) SetKey(key string, data string) {
 	ss.s.Set(key, data)
+}
+
+func (ss *Service) UnsetKey(key string) {
+	ss.s.UnSet(key)
 }
 
 func (ss *Service) Get(gameCode *string, teamId *string, userId *string) (*melody.Session, error) {

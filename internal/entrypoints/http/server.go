@@ -1,4 +1,4 @@
-package entrypoints
+package http
 
 import (
 	melodyClient "github.com/robbiebyrd/indri/internal/clients/melody"
@@ -11,8 +11,8 @@ import (
 
 type GameDataKeys map[string]interface{}
 
-func Serve() {
-	m, _ := melodyClient.New()
+func Serve() error {
+	m := melodyClient.New()
 
 	envVars := env.GetEnv()
 
@@ -28,11 +28,13 @@ func Serve() {
 		ReadHeaderTimeout: 3 * time.Second,
 	}
 
-	log.Println("starting web server at address " + envVars.ListenAddress +
-		":" + strconv.Itoa(envVars.ListenPort) + "...")
+	log.Println("Starting web server at address " + envVars.ListenAddress +
+		":" + strconv.Itoa(envVars.ListenPort))
 
 	err := server.ListenAndServe()
 	if err != nil {
-		log.Fatalf("web server failed to start: %v", err)
+		return err
 	}
+
+	return nil
 }

@@ -33,3 +33,5 @@ go.work.sum
 codealike.json
 /.idea
 .DS_Store
+/tmp
+/.air.toml

@@ -1,6 +1,7 @@
 package join
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/olahol/melody"
 	"github.com/robbiebyrd/indri/internal/entrypoints"
@@ -10,17 +11,19 @@ import (
 	"log"
 )
 
+var gs = game.NewService(nil, nil)
+
 // HandleJoin processes a join game request, and adds a player to a game.
 func HandleJoin(
 	s *melody.Session,
 	decodedMsg map[string]interface{},
 ) error {
-	gs := game.NewService()
 	ss := session.NewService(s)
+	fmt.Println(decodedMsg)
 
-	gameCode, teamId, err := utils.RequireGameCodeAndTeamID(decodedMsg)
-	if err != nil {
-		return err
+	gameCode, teamId := utils.ParseGameCodeAndTeamID(decodedMsg)
+	if gameCode == nil {
+		return fmt.Errorf("game code not provided")
 	}
 
 	userId, err := ss.GetKeyAsString("userId")
@@ -29,54 +32,44 @@ func HandleJoin(
 		return fmt.Errorf("unable to get userId: %w", err)
 	}
 
-	err = ss.SetStandardKeys(gameCode, teamId, userId)
+	err = ss.SetStandardKeys(gameCode, nil, userId)
 	if err != nil {
 		return err
 	}
 
-	g, err := gs.GetByCode(gameCode)
+	g, err := gs.GetByCode(*gameCode)
 	if err != nil {
 		return err
 	}
 
-	gameId := g.ID.Hex()
-
-	if gs.HasPlayer(&gameId, teamId, userId) {
-		err = gs.ConnectPlayer(&gameId, teamId, userId)
-	} else {
-		err = gs.AddPlayer(&gameId, teamId, userId)
-	}
-
+	err = gs.ConnectPlayer(g.ID.Hex(), *teamId, *userId)
 	if err != nil {
-		log.Printf("error adding player %v to game %v on team %v: %v\n", *userId, *gameCode, *teamId, err)
+		log.Printf("error adding player %v to game %v: %v\n", *userId, *gameCode, err)
 	}
 
-	err = gs.Update(&gameId, nil)
+	gs, err := json.Marshal(g)
 	if err != nil {
 		return err
 	}
+	s.Write(gs)
 
 	return nil
 }
 
-// HandleLeave processes a leave game request, and remove a player from a game.
+// HandleLeave processes a leave game request and removes a player from a game.
 func HandleLeave(
 	s *melody.Session,
 	_ map[string]interface{},
 ) error {
-	gs := game.NewService()
+	gs := game.NewService(nil, nil)
 	ss := session.NewService(s)
 
-	gameCode, teamId, playerId, err := ss.GetStandardKeys()
+	gameCode, _, playerId, err := ss.GetStandardKeys()
 	if err != nil {
 		return err
 	}
 
-	if playerId == nil || teamId == nil {
-		return fmt.Errorf("playerId and teamId of player to kick must be provided")
-	}
-
-	g, err := gs.GetByCode(gameCode)
+	g, err := gs.GetByCode(*gameCode)
 	if err != nil {
 		return err
 	}
@@ -85,27 +78,20 @@ func HandleLeave(
 		return fmt.Errorf("player is in game %v but asking to leave game %v", *gameCode, g.Code)
 	}
 
-	err = gs.RemovePlayer(gameCode, teamId, playerId)
+	err = gs.RemovePlayer(g.ID.Hex(), *playerId)
 	if err != nil {
 		log.Printf("could not disconnect player %v from game %v: %v\n", playerId, gameCode, err)
 	}
 
-	err = gs.Update(gameCode, nil)
-	if err != nil {
-		return err
-	}
-
-	entrypoints.HandleDisconnect(s)
-
 	return nil
 }
 
-// HandleKick processes a kick request, and removes a player from a game if the requesting player is host.
+// HandleKick processes a kick request and removes a player from a game if the requesting player is host.
 func HandleKick(
 	s *melody.Session,
 	decodedMsg map[string]interface{},
 ) error {
-	gs := game.NewService()
+	gs := game.NewService(nil, nil)
 	ss := session.NewService(s)
 
 	gameCode, teamId, err := utils.RequireGameCodeAndTeamID(decodedMsg)
@@ -118,8 +104,7 @@ func HandleKick(
 		return fmt.Errorf("userId to kick must be provided")
 	}
 
-	actorGameCode, actorTeamId, actorPlayerId, err := ss.GetStandardKeys()
-
+	actorGameCode, _, actorPlayerId, err := ss.GetStandardKeys()
 	if err != nil {
 		return err
 	}
@@ -129,12 +114,12 @@ func HandleKick(
 			"isn't in the same game", userId, *gameCode, *actorPlayerId)
 	}
 
-	g, err := gs.GetByCode(gameCode)
+	g, err := gs.GetByCode(*gameCode)
 	if err != nil {
 		return err
 	}
 
-	if !g.Teams[*actorTeamId].Players[*actorPlayerId].Host {
+	if !g.Players[*actorPlayerId].Host {
 		return fmt.Errorf("attempt to kick %v from game %v failed because %v "+
 			"isn't the game host", userId, *gameCode, *actorPlayerId)
 	}
@@ -144,17 +129,12 @@ func HandleKick(
 		return err
 	}
 
-	err = gs.RemovePlayer(gameCode, teamId, &userId)
+	err = gs.RemovePlayer(*gameCode, userId)
 	if err != nil {
 		log.Printf("could not disconnect player %v from game %v: %v\n", userId, gameCode, err)
 	}
 
-	err = gs.Update(gameCode, nil)
-	if err != nil {
-		return err
-	}
-
-	entrypoints.HandleDisconnect(userSession)
+	entrypoints.DisconnectPlayer(userSession)
 
 	return nil
 }

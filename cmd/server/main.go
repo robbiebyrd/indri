@@ -1,27 +1,17 @@
 package main
 
 import (
-	melodyClient "github.com/robbiebyrd/indri/internal/clients/melody"
-	"github.com/robbiebyrd/indri/internal/entrypoints"
-	"github.com/robbiebyrd/indri/internal/handlers/message"
+	"fmt"
+	"github.com/robbiebyrd/indri/internal/repo/script"
 	"github.com/robbiebyrd/indri/internal/services/boot"
-
-	"log"
 )
 
 func main() {
-	m, err := melodyClient.New()
+	gameScript := script.Get("./config.json")
+	_, err := boot.Boot(gameScript)
 	if err != nil {
-		log.Fatal(err)
+		panic(fmt.Errorf("could not start: %v", err))
 	}
 
-	err = boot.Register()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	m.HandleConnect(entrypoints.HandleConnect)
-	m.HandleDisconnect(entrypoints.HandleDisconnect)
-	m.HandleMessage(message.HandleMessage)
-	entrypoints.Serve()
+	boot.Start()
 }

@@ -2,6 +2,7 @@ package entrypoints
 
 import (
 	"github.com/olahol/melody"
+	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	"github.com/robbiebyrd/indri/internal/services/session"
 	"log"
 )
@@ -10,12 +11,16 @@ func HandleConnect(s *melody.Session) {
 	err := s.Write([]byte(`{ "ready": true }"`))
 	if err != nil {
 		log.Printf("Error sending ready message to session: %v\n", err)
+		HandleDisconnect(s)
 	}
 }
 
 func HandleDisconnect(s *melody.Session) {
-	//gs := gameService.NewService()
-	//cs := connection.NewService()
+	DisconnectPlayer(s)
+}
+
+func DisconnectPlayer(s *melody.Session) {
+	gs := gameService.NewService(nil, nil)
 	ss := session.NewService(s)
 
 	gameCode, teamId, playerId, err := ss.GetStandardKeys()
@@ -34,21 +39,13 @@ func HandleDisconnect(s *melody.Session) {
 		log.Printf("error closing session: %v\n", err)
 	}
 
-	//g, err := gs.DisconnectPlayer(gameCode, teamId, playerId)
-	//if err != nil {
-	//	log.Printf("could not set player as disconnected: %v\n", err)
-	//}
-	//
-	//if g != nil {
-	//	err = gs.Update(gameCode, g)
-	//	if err != nil {
-	//		log.Printf("could not update game after player was disconnected: %v\n", err)
-	//	}
-	//}
+	g, err := gs.GetByCode(*gameCode)
+	if err != nil {
+		log.Printf("could not set get game: %v\n", err)
+	}
 
-	//err = cs.Broadcast(gameCode, nil, g)
-	//if err != nil {
-	//	log.Printf("error broadcoasting on disconnect of %v in game %v: %v\n", playerId, gameCode, err)
-	//	return
-	//}
+	err = gs.DisconnectPlayer(g.ID.Hex(), *playerId)
+	if err != nil {
+		log.Printf("could not set player as disconnected: %v\n", err)
+	}
 }

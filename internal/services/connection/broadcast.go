@@ -8,7 +8,9 @@ import (
 	"github.com/robbiebyrd/indri/internal/services/session"
 	"log"
 	"slices"
+	"sort"
 )
+
 
 func (cs *Service) Broadcast(gameCode *string, teamId *string, data interface{}) error {
 	if gameCode == nil {
@@ -27,7 +29,7 @@ func (cs *Service) Broadcast(gameCode *string, teamId *string, data interface{})
 	return cs.sendToGame(*gameCode, jsonData)
 }
 
-func (cs *Service) BroadcastTo(gameCode *string, data interface{}, playerId string) error {
+func (cs *Service) BroadcastToPlayer(gameCode *string, data interface{}, playerId string) error {
 	if gameCode == nil {
 		return errors.New("game id is required")
 	}
@@ -45,6 +47,8 @@ func (cs *Service) BroadcastToPlayers(gameCode *string, data interface{}, player
 		return errors.New("game id is required")
 	}
 
+	sort.Strings(playerIds)
+
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -53,7 +57,7 @@ func (cs *Service) BroadcastToPlayers(gameCode *string, data interface{}, player
 	return cs.sendToPlayers(*gameCode, playerIds, jsonData)
 }
 
-func (cs *Service) BroadcastAll(data interface{}) error {
+func (cs *Service) BroadcastToAll(data interface{}) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -66,12 +70,11 @@ func (cs *Service) sendToGame(gameCode string, jsonData []byte) error {
 	log.Printf("Broadcasting to game %v\n", gameCode)
 
 	if err := cs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		thisGameCode, ok := s.Get("code")
-		if !ok {
-			return false
+		if thisGameCode, ok := s.Get("code"); ok {
+			return thisGameCode == gameCode
 		}
 
-		return thisGameCode == gameCode
+		return false
 	}); err != nil {
 		return err
 	}

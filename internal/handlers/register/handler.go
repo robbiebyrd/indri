@@ -21,11 +21,7 @@ func HandleRegister(
 
 	_, err := ss.GetKeyAsString("userId")
 	if err == nil {
-		err = s.Write(authExistsErrorMessage)
-		if err != nil {
-			return err
-		}
-
+		s.Write(authExistsErrorMessage)
 		return nil
 	}
 
@@ -46,7 +42,6 @@ func HandleRegister(
 
 	return nil
 }
-
 
 func remarshal(decodedMsg map[string]interface{}) (*models.CreateUser, error) {
 	jsonStr, err := json.Marshal(decodedMsg)

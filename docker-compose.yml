@@ -17,8 +17,9 @@ services:
     image: 'bitnami/redis:latest'
     environment:
       - REDIS_PASSWORD=${INDRI_REDISPASSWORD}
+      - ALLOW_EMPTY_PASSWORD=${INDRI_REDISEMPTYPASSWORD:-no}
     ports:
-      - '${INDRI_REDISPORT}:6379'
+      - '${INDRI_REDISPORT:-6379}:6379'
 
 volumes:
   mongodb_data:

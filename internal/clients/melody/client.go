@@ -5,13 +5,14 @@ import (
 	"time"
 )
 
-var globalClient *melody.Melody
+/*
+New returns a singleton instance of a configured Melody client.
+It ensures only one Melody client is created and reused throughout the application.
 
-func New() (*melody.Melody, error) {
-	if globalClient != nil {
-		return globalClient, nil
-	}
-
+Returns:
+    *melody.Melody: A pointer to the singleton Melody client instance.
+*/
+func New() *melody.Melody {
 	m := melody.New()
 
 	m.Config = &melody.Config{
@@ -23,7 +24,5 @@ func New() (*melody.Melody, error) {
 		MessageBufferSize:         1024,
 	}
 
-	globalClient = m
-
-	return globalClient, nil
+	return m
 }

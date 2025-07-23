@@ -12,20 +12,27 @@ import (
 	"strconv"
 )
 
+/*
+Client encapsulates the MongoDB client, ORM, and database connection.
+It provides a structured way to interact with MongoDB resources within the application.
+*/
 type Client struct {
 	Database    *mongox.Database
 	ORM         *mongox.Client
 	MongoClient *mongo.Client
 }
 
-var globalClient *Client
+/*
+New returns an instance of the MongoDB client, establishing a connection if one does not already exist.
+It configures the client using environment variables and ensures the connection is valid before returning.
 
+Returns:
+
+	*Client: A pointer to the singleton Client instance.
+	error: An error if the connection or configuration fails, otherwise nil.
+*/
 func New() (*Client, error) {
 	envVars := env.GetEnv()
-
-	if globalClient != nil {
-		return globalClient, nil
-	}
 
 	url := "mongodb://" + envVars.MongoHost + ":" + strconv.Itoa(envVars.MongoPort)
 	log.Printf("Connecting to MongoDB at %s\n", url)
@@ -49,11 +56,9 @@ func New() (*Client, error) {
 
 	log.Println("successfully connected to MongoDB")
 
-	globalClient = &Client{
+	return &Client{
 		Database:    database,
 		ORM:         client,
 		MongoClient: mongoClient,
-	}
-
-	return globalClient, nil
+	}, nil
 }

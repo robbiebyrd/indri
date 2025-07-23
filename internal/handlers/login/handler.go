@@ -24,6 +24,7 @@ func HandleLogin(
 		if err != nil {
 			return err
 		}
+
 		return nil
 	}
 

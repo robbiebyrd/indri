@@ -30,7 +30,7 @@ func (us *Service) Sanitize(user *models.User) *models.User {
 	return user
 }
 
-// Get retrieves user data for a specific user ID, and returns an error if not found.
+// Get retrieves user data for a specific user ID and returns an error if not found.
 func (us *Service) Get(id string) (*models.User, error) {
 	if id == "" {
 		return nil, fmt.Errorf("id is empty")
@@ -58,7 +58,7 @@ func (us *Service) Authenticate(email *string, password *string) (*models.User, 
 	return storedUser, nil
 }
 
-// Find retrieves user data for a specific user via email address, and returns an error if not found.
+// Find retrieves user data for a specific user via email address and returns an error if not found.
 func (us *Service) Find(email *string) (*models.User, error) {
 	if email == nil {
 		return nil, fmt.Errorf("email address is required")

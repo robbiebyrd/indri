@@ -7,25 +7,25 @@ import (
 )
 
 type Vars struct {
-	ListenAddress     string `envconfig:"LISTENADDRESS" default:"localhost"`
-	ListenPort        int    `envconfig:"LISTENPORT" default:"5002"`
-	RedisHost         string `envconfig:"REDISHOST" default:"localhost"`
-	RedisPort         int    `envconfig:"REDISPORT" default:"6379"`
-	RedisPassword     string `envconfig:"REDISPASSWORD" default:""`
-	RedisDatabase     int    `envconfig:"REDISDATABASE" default:"0"`
-	MongoHost         string `envconfig:"MONGOHOST" default:"localhost"`
-	MongoPort         int    `envconfig:"MONGOPORT" default:"27017"`
-	MongoUsername     string `envconfig:"MONGOUSERNAME" default:""`
-	MongoPassword     string `envconfig:"MONGOPASSWORD" default:""`
-	MongoDatabase     string `envconfig:"MONGODATABASE" default:"indri"`
-	MongoAuthDatabase string `envconfig:"MONGOAUTHDATABASE" default:"admin"`
+	ListenAddress     string `envconfig:"LISTEN_ADDRESS" default:"localhost"`
+	ListenPort        int    `envconfig:"LISTEN_PORT" default:"5002"`
+	RedisHost         string `envconfig:"REDIS_HOST" default:"localhost"`
+	RedisPort         int    `envconfig:"REDIS_PORT" default:"6379"`
+	RedisPassword     string `envconfig:"REDIS_PASSWORD" default:""`
+	RedisDatabase     int    `envconfig:"REDIS_DATABASE" default:"0"`
+	MongoHost         string `envconfig:"MONGO_HOST" default:"localhost"`
+	MongoPort         int    `envconfig:"MONGO_PORT" default:"27017"`
+	MongoUsername     string `envconfig:"MONGO_USERNAME" default:""`
+	MongoPassword     string `envconfig:"MONGO_PASSWORD" default:""`
+	MongoDatabase     string `envconfig:"MONGO_DATABASE" default:"indri"`
+	MongoAuthDatabase string `envconfig:"MONGO_AUTH_DATABASE" default:"admin"`
 }
 
-var loadedVars *Vars
+var globalClient *Vars
 
 func GetEnv() *Vars {
-	if loadedVars != nil {
-		return loadedVars
+	if globalClient != nil {
+		return globalClient
 	}
 
 	var v Vars
@@ -42,7 +42,7 @@ func GetEnv() *Vars {
 		log.Println(err)
 	}
 
-	loadedVars = &v
+	globalClient = &v
 
 	return &v
 }

@@ -7,7 +7,7 @@ import (
 )
 
 type Service struct {
-	m *melody.Melody
+	m  *melody.Melody
 	us *user.Service
 }
 
@@ -19,7 +19,7 @@ func NewService() *Service {
 		return connectionService
 	}
 
-	m, _ := melodyClient.New()
+	m := melodyClient.New()
 	us := user.NewService()
 
 	connectionService = &Service{m, us}

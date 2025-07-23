@@ -13,7 +13,8 @@ type User struct {
 	Password    *string `bson:"password"    json:"-"`
 	Score       *int    `bson:"score"       json:"score"`
 
-	CommonDataFields
+	PublicData  map[string]interface{}            `bson:"data"        json:"data,omitempty"`
+	PrivateData map[string]interface{}            `bson:"privateData" json:"privateData,omitempty"`
 }
 
 type CreateUser struct {

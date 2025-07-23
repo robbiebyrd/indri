@@ -1,0 +1,36 @@
+{
+  "config": {
+    "pvp": true,
+    "maxTeams": 2,
+    "maxPlayersPerTeam": 2,
+    "profanityFilter": true
+  },
+  "defaultTeams": {
+    "team1": {
+      "name": "Team 1",
+      "playerIds": [],
+      "data": {},
+      "privateData": {}
+    },
+    "team2": {
+      "name": "Team 2",
+      "playerIds": [],
+      "data": {},
+      "privateData": {}
+    }
+  },
+  "defaultStage": {
+    "currentScene": "lobby",
+    "sceneOrder": [
+      "lobby"
+    ],
+    "scenes": {
+      "lobby": {
+        "data": {},
+        "privateData": {}
+      }
+    }
+  },
+  "data": {},
+  "privateData": {}
+}
