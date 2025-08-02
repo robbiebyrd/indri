@@ -35,3 +35,4 @@ codealike.json
 .DS_Store
 /tmp
 /.air.toml
+/mongodb.key

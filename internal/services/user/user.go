@@ -3,25 +3,19 @@ package user
 import (
 	"fmt"
 	"github.com/robbiebyrd/indri/internal/models"
-	ur "github.com/robbiebyrd/indri/internal/repo/user"
+	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type Service struct {
-	userRepo *ur.Repo
+	userRepo *userRepo.Repo
 }
 
-var userService *Service
-
 // NewService creates a new repository for accessing user data.
-func NewService() *Service {
-	if userService == nil {
-		userService = &Service{
-			userRepo: ur.NewRepo(),
-		}
+func NewService(ur *userRepo.Repo) *Service {
+	return &Service{
+		userRepo: ur,
 	}
-
-	return userService
 }
 
 // Sanitize removes private items.
@@ -40,13 +34,16 @@ func (us *Service) Get(id string) (*models.User, error) {
 }
 
 func (us *Service) Authenticate(email *string, password *string) (*models.User, error) {
-	if password == nil {
-		return nil, fmt.Errorf("password cannot be empty")
+	if password == nil || *password == "" {
+		return nil, fmt.Errorf("password cannot be nil or empty")
+	}
+	if email == nil || *email == "" {
+		return nil, fmt.Errorf("email cannot be nil or empty")
 	}
 
 	storedUser, err := us.Find(email)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("user not found when authenticating: %v", err)
 	} else if storedUser.Password == nil {
 		return nil, fmt.Errorf("user has not password set")
 	}

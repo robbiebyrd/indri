@@ -7,18 +7,20 @@ import (
 )
 
 type Vars struct {
-	ListenAddress     string `envconfig:"LISTEN_ADDRESS" default:"localhost"`
-	ListenPort        int    `envconfig:"LISTEN_PORT" default:"5002"`
-	RedisHost         string `envconfig:"REDIS_HOST" default:"localhost"`
-	RedisPort         int    `envconfig:"REDIS_PORT" default:"6379"`
-	RedisPassword     string `envconfig:"REDIS_PASSWORD" default:""`
-	RedisDatabase     int    `envconfig:"REDIS_DATABASE" default:"0"`
-	MongoHost         string `envconfig:"MONGO_HOST" default:"localhost"`
-	MongoPort         int    `envconfig:"MONGO_PORT" default:"27017"`
-	MongoUsername     string `envconfig:"MONGO_USERNAME" default:""`
-	MongoPassword     string `envconfig:"MONGO_PASSWORD" default:""`
-	MongoDatabase     string `envconfig:"MONGO_DATABASE" default:"indri"`
-	MongoAuthDatabase string `envconfig:"MONGO_AUTH_DATABASE" default:"admin"`
+	ListenAddress         string `default:"localhost" envconfig:"LISTEN_ADDRESS"`
+	ListenPort            int    `default:"5002"      envconfig:"LISTEN_PORT"`
+	RedisHost             string `default:"localhost" envconfig:"REDIS_HOST"`
+	RedisPort             int    `default:"6379"      envconfig:"REDIS_PORT"`
+	RedisPassword         string `default:""          envconfig:"REDIS_PASSWORD"`
+	RedisDatabase         int    `default:"0"         envconfig:"REDIS_DATABASE"`
+	MongoURI              string `default:"localhost" envconfig:"MONGO_URI"`
+	MongoDatabase         string `default:"indri"     envconfig:"MONGO_DATABASE"`
+	MongoAuthDatabase     string `default:"admin"     envconfig:"MONGO_AUTH_DATABASE"`
+	WSWriteTimeout        int    `default:"10"        envconfig:"WS_WRITE_TIMEOUT"`
+	WSPingPeriodSeconds   int    `default:"54"        envconfig:"WS_PING_PERIOD"`
+	WSPongTimeoutSeconds  int    `default:"60"        envconfig:"WS_PONG_TIMEOUT"`
+	WSMaxMessageSizeBytes int    `default:"32768"     envconfig:"WS_MAX_MESSAGE_SIZE"`
+	WSMessageBufferSize   int    `default:"1024"      envconfig:"WS_MESSAGE_BUFFER_SIZE"`
 }
 
 var globalClient *Vars

@@ -9,7 +9,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"log"
-	"strconv"
 )
 
 /*
@@ -29,24 +28,19 @@ It configures the client using environment variables and ensures the connection 
 Returns:
 
 	*Client: A pointer to the singleton Client instance.
-	error: An error if the connection or configuration fails, otherwise nil.
+	Error: An error if the connection or configuration fails, otherwise nil.
 */
-func New() (*Client, error) {
+func New(ctx context.Context) (*Client, error) {
 	envVars := env.GetEnv()
 
-	url := "mongodb://" + envVars.MongoHost + ":" + strconv.Itoa(envVars.MongoPort)
-	log.Printf("Connecting to MongoDB at %s\n", url)
+	log.Printf("Connecting to MongoDB at %s\n", envVars.MongoURI)
 
-	mongoClient, err := mongo.Connect(options.Client().ApplyURI(url).SetAuth(options.Credential{
-		Username:   envVars.MongoUsername,
-		Password:   envVars.MongoPassword,
-		AuthSource: envVars.MongoAuthDatabase,
-	}))
+	mongoClient, err := mongo.Connect(options.Client().ApplyURI(envVars.MongoURI))
 	if err != nil {
 		log.Fatal(fmt.Errorf("could not configure connection to MongoDB, exiting: %v", err))
 	}
 
-	err = mongoClient.Ping(context.Background(), readpref.Primary())
+	err = mongoClient.Ping(ctx, readpref.Primary())
 	if err != nil {
 		log.Fatal(fmt.Errorf("could not ping MongoDB because it appears offline, exiting: %v", err))
 	}

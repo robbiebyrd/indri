@@ -30,7 +30,7 @@ func getChangeStream(ctx context.Context, collection *mongo.Collection, filter *
 }
 
 func getChangeStreamGlobal(ctx context.Context, db *mongo.Database) (*mongo.ChangeStream, error) {
-	changeStreamOptions := options.ChangeStream().SetFullDocument(options.UpdateLookup)
+	changeStreamOptions := options.ChangeStream().SetFullDocument(options.Default)
 	cs, err := db.Watch(ctx, mongo.Pipeline{}, changeStreamOptions)
 	return cs, err
 }

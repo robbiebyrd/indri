@@ -4,24 +4,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/session"
-	"github.com/robbiebyrd/indri/internal/services/user"
 )
 
-var us = user.NewService()
+type Handler struct {
+	i *injector.Injector
+}
 
-// HandleRegister processes a user login request.
-func HandleRegister(
+func New(i *injector.Injector) *Handler {
+	return &Handler{i}
+}
+
+func (h *Handler) Handle(
 	s *melody.Session,
 	decodedMsg map[string]interface{},
 ) error {
-	ss := session.NewService(s)
+	ss := session.NewService(s, h.i.MelodyClient)
 	authExistsErrorMessage := []byte(`{"registered": false, "error": "user already logged in"}`)
 
 	_, err := ss.GetKeyAsString("userId")
 	if err == nil {
-		s.Write(authExistsErrorMessage)
+		_ = s.Write(authExistsErrorMessage)
 		return nil
 	}
 
@@ -30,12 +35,12 @@ func HandleRegister(
 		return err
 	}
 
-	createdUser, err := us.New(*msg)
+	createdUser, err := h.i.UserService.New(*msg)
 	if err != nil {
 		return err
 	}
 
-	err = s.Write([]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID)))
+	err = s.Write([]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID.Hex())))
 	if err != nil {
 		return err
 	}

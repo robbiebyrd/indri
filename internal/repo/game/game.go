@@ -13,7 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-var globalClient *Repo
+var collectionName = "game"
 
 type Repo struct {
 	ctx        *context.Context
@@ -22,36 +22,25 @@ type Repo struct {
 }
 
 // NewRepo creates a new repository for accessing game data.
-func NewRepo() *Repo {
-	if globalClient != nil {
-		return globalClient
-	}
-
-	client, err := mongodb.New()
-	if err != nil {
-		panic(err)
-	}
-
-	gameColl := mongox.NewCollection[models.Game](client.Database, "game")
-	ctx := context.Background()
+func NewRepo(ctx context.Context, client *mongodb.Client) (*Repo, error) {
+	gameColl := mongox.NewCollection[models.Game](client.Database, collectionName)
 
 	indexModel := mongo.IndexModel{
 		Keys:    bson.M{"code": 1}, // Ascending index on 'email'
 		Options: options.Index().SetUnique(true),
 	}
 
-	_, err = gameColl.Collection().Indexes().CreateOne(ctx, indexModel)
+	_, err := gameColl.Collection().Indexes().CreateOne(ctx, indexModel)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	globalClient = &Repo{
+	return &Repo{
 		ctx:        &ctx,
 		client:     client,
 		collection: gameColl,
-	}
+	}, nil
 
-	return globalClient
 }
 
 // New creates a new game, given an ID.
@@ -143,7 +132,7 @@ func (s *Repo) Update(id string, game *models.UpdateGame) error {
 	}
 
 	if result.MatchedCount == 0 {
-		return fmt.Errorf("user with id %v does not exists", id)
+		return fmt.Errorf("game with id %v does not exists", id)
 	}
 
 	return nil

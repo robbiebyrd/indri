@@ -1,17 +1,19 @@
 package main
 
 import (
+	"flag"
 	"fmt"
-	"github.com/robbiebyrd/indri/internal/repo/script"
 	"github.com/robbiebyrd/indri/internal/services/boot"
 )
 
 func main() {
-	gameScript := script.Get("./config.json")
-	_, err := boot.Boot(gameScript)
+	scriptFilePath := flag.String("script", "", "The name to greet")
+	flag.Parse()
+
+	i, err := boot.Boot(scriptFilePath)
 	if err != nil {
-		panic(fmt.Errorf("could not start: %v", err))
+		panic(fmt.Errorf("could not bootstrap: %v", err))
 	}
 
-	boot.Start()
+	boot.Start(i)
 }

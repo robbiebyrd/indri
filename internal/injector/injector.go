@@ -1,52 +1,40 @@
 package injector
 
 import (
+	"context"
 	"github.com/olahol/melody"
-	mClient "github.com/robbiebyrd/indri/internal/clients/melody"
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/entrypoints/changestream"
+	"github.com/robbiebyrd/indri/internal/repo/env"
+	"github.com/robbiebyrd/indri/internal/repo/game"
+	"github.com/robbiebyrd/indri/internal/repo/user"
+	"github.com/robbiebyrd/indri/internal/services/connection"
+	gameService "github.com/robbiebyrd/indri/internal/services/game"
+	userService "github.com/robbiebyrd/indri/internal/services/user"
 )
 
-type Injector interface {
-	Inject()
+type ReposInjector struct {
+	EnvVars  *env.Vars
+	GameRepo *game.Repo
+	UserRepo *user.Repo
 }
 
-type Data struct {
+type ClientsInjector struct {
 	MongoDBClient *mongodb.Client
 	MelodyClient  *melody.Melody
 	GlobalMonitor *changestream.MongoChangeMonitor
+	Context       context.Context
 }
 
-var globalInjector *Data
+type ServicesInjector struct {
+	GameService       *gameService.Service
+	ConnectionService *connection.Service
+	UserService       *userService.Service
+}
 
-func New(mongodbClient *mongodb.Client, melodyClient *melody.Melody, globalMonitor *changestream.MongoChangeMonitor) (*Data, error) {
-
-	if globalInjector != nil {
-		return globalInjector, nil
-	}
-
-	if mongodbClient == nil {
-		newMongodbClient, err := mongodb.New()
-		if err != nil {
-			return nil, err
-		}
-
-		mongodbClient = newMongodbClient
-	}
-
-	if melodyClient == nil {
-		melodyClient = mClient.New()
-	}
-
-	if globalMonitor == nil {
-		newGlobalMonitor, err := changestream.New(nil, nil, nil)
-		if err != nil {
-			return nil, err
-		}
-		globalMonitor = newGlobalMonitor
-	}
-	return &Data{
-		MongoDBClient: mongodbClient,
-		MelodyClient:  melodyClient,
-	}, nil
+type Injector struct {
+	*ReposInjector
+	*ClientsInjector
+	*ServicesInjector
+	GlobalContext context.Context
 }

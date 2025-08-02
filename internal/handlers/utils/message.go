@@ -3,14 +3,8 @@ package utils
 import (
 	"encoding/json"
 	"errors"
-	"github.com/olahol/melody"
-	"github.com/robbiebyrd/indri/internal/models"
 	"log"
 )
-
-type MessageHandlerInterface interface {
-	HandleMessage(s *melody.Session, decodedMsg map[string]interface{}) *models.Game
-}
 
 func DecodeMessageWithAction(msg []byte) (*string, *map[string]interface{}, error) {
 	var decodedMsg map[string]interface{}

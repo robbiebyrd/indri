@@ -50,4 +50,5 @@ const (
 	StatusUpdate  OperationType = "update"
 	StatusReplace OperationType = "replace"
 	StatusDelete  OperationType = "delete"
+	StatusFullDoc OperationType = "fullDoc"
 )

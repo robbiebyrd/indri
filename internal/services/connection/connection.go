@@ -1,28 +1,30 @@
 package connection
 
 import (
+	"context"
+	"errors"
 	"github.com/olahol/melody"
-	melodyClient "github.com/robbiebyrd/indri/internal/clients/melody"
-	"github.com/robbiebyrd/indri/internal/services/user"
+	"github.com/robbiebyrd/indri/internal/repo/user"
 )
 
 type Service struct {
-	m  *melody.Melody
-	us *user.Service
+	m        *melody.Melody
+	userRepo *user.Repo
 }
 
-var connectionService *Service
-
 // NewService creates a new repository for accessing user data.
-func NewService() *Service {
-	if connectionService != nil {
-		return connectionService
+func NewService(ctx context.Context, m *melody.Melody, userRepo *user.Repo) (*Service, error) {
+	if ctx == nil {
+		return nil, errors.New("context was not passed to the connection service")
 	}
 
-	m := melodyClient.New()
-	us := user.NewService()
+	if m == nil {
+		return nil, errors.New("melody client was not passed to the connection service")
+	}
 
-	connectionService = &Service{m, us}
+	if userRepo == nil {
+		return nil, errors.New("user repo was not passed to the connection service")
+	}
 
-	return connectionService
+	return &Service{m, userRepo}, nil
 }

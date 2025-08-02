@@ -11,29 +11,21 @@ import (
 )
 
 type Service struct {
-	gameRepo *game.Repo
+	gameRepo    *game.Repo
+	gameService *gameService.Service
 }
-
-var stageService *Service
 
 // NewService creates a new repository for accessing game data.
-func NewService(gameRepo *game.Repo) *Service {
-	if gameRepo == nil {
-		gameRepo = game.NewRepo()
+func NewService(gameRepo *game.Repo, gameService *gameService.Service) *Service {
+	return &Service{
+		gameRepo,
+		gameService,
 	}
-
-	if stageService == nil {
-		stageService = &Service{
-			gameRepo,
-		}
-	}
-
-	return stageService
 }
 
-// Get will fetch the stage for a specific game code.
-func (ss *Service) Get(gameCode string) (*models.Stage, error) {
-	g, err := ss.gameRepo.Get(gameCode)
+// Get will fetch the stage for a specific gameId.
+func (ss *Service) Get(gameId string) (*models.Stage, error) {
+	g, err := ss.gameService.Get(gameId)
 	if err != nil {
 		return nil, err
 	}
@@ -47,16 +39,16 @@ func (ss *Service) New() (*models.Stage, error) {
 }
 
 // AddScene adds a scene to the Stage.
-func (ss *Service) AddScene(gameCode string, sceneId string, scene *models.Scene) error {
-	if gameCode == "" {
-		return fmt.Errorf("game code cannot be nil")
+func (ss *Service) AddScene(gameId string, sceneId string, scene *models.Scene) error {
+	if gameId == "" {
+		return fmt.Errorf("gameId cannot be nil")
 	}
 
 	if sceneId == "" {
 		return fmt.Errorf("scene id cannot be nil")
 	}
 
-	g, err := ss.gameRepo.FindByCode(gameCode)
+	g, err := ss.gameService.Fetch(gameId)
 	if err != nil {
 		return err
 	}
@@ -77,9 +69,9 @@ func (ss *Service) AddScene(gameCode string, sceneId string, scene *models.Scene
 }
 
 // AddScenes adds multiple scenes to the Stage.
-func (ss *Service) AddScenes(gameCode string, scenes map[string]models.Scene) error {
-	if gameCode == "" {
-		return errors.New("game code cannot be nil")
+func (ss *Service) AddScenes(gameId string, scenes map[string]models.Scene) error {
+	if gameId == "" {
+		return errors.New("gameId cannot be nil")
 	}
 
 	if len(scenes) == 0 {
@@ -87,7 +79,7 @@ func (ss *Service) AddScenes(gameCode string, scenes map[string]models.Scene) er
 	}
 
 	for sceneId, scene := range scenes {
-		err := ss.AddScene(gameCode, sceneId, &scene)
+		err := ss.AddScene(gameId, sceneId, &scene)
 		if err != nil {
 			return err
 		}
@@ -97,8 +89,8 @@ func (ss *Service) AddScenes(gameCode string, scenes map[string]models.Scene) er
 }
 
 // DeleteScene deletes a scene from the Stage.
-func (ss *Service) DeleteScene(gameCode string, sceneId string) error {
-	g, err := ss.validateAndFetchGame(gameCode, sceneId)
+func (ss *Service) DeleteScene(gameId string, sceneId string) error {
+	g, err := ss.validateAndFetchGame(gameId, sceneId)
 	if err != nil {
 		return err
 	}
@@ -114,12 +106,12 @@ func (ss *Service) DeleteScene(gameCode string, sceneId string) error {
 }
 
 // SetScript sets a script for the current stage.
-func (ss *Service) SetScript(gameCode string, id string) error {
-	if gameCode == "" {
-		return fmt.Errorf("game code cannot be nil")
+func (ss *Service) SetScript(gameId string, id string) error {
+	if gameId == "" {
+		return fmt.Errorf("gameId cannot be nil")
 	}
 
-	g, err := ss.gameRepo.FindByCode(gameCode)
+	g, err := ss.gameService.Fetch(gameId)
 	if err != nil {
 		return err
 	}
@@ -138,19 +130,12 @@ func (ss *Service) SetScript(gameCode string, id string) error {
 }
 
 // LoadFromScript loads a script's stage data into the current game's stage.
-func (ss *Service) LoadFromScript(gameCode string, scriptId string) error {
-	if gameCode == "" {
-		return fmt.Errorf("game code cannot be nil")
+func (ss *Service) LoadFromScript(gameId string, scriptId string) error {
+	if gameId == "" {
+		return fmt.Errorf("gameId cannot be nil")
 	}
 
-	gameId, err := ss.gameRepo.GetIDHex(gameCode)
-	if err != nil {
-		return err
-	}
-
-	gss := gameService.NewService(nil, nil)
-
-	err = ss.gameRepo.UpdateField(*gameId, "stage", gss.Script.DefaultStage)
+	err := ss.gameRepo.UpdateField(gameId, "stage", ss.gameService.Script.DefaultStage)
 	if err != nil {
 		return err
 	}
@@ -160,26 +145,19 @@ func (ss *Service) LoadFromScript(gameCode string, scriptId string) error {
 
 // LoadSceneFromScript loads a script's data for a given scene into the current game's stage.
 func (ss *Service) LoadSceneFromScript(
-	gameCode string,
+	gameId string,
 	sceneId string,
 	dataType *models.DataStoreType,
 ) error {
-	if gameCode == "" {
-		return fmt.Errorf("game code cannot be nil")
+	if gameId == "" {
+		return fmt.Errorf("gameId cannot be nil")
 	}
-
-	gameId, err := ss.gameRepo.GetIDHex(gameCode)
-	if err != nil {
-		return err
-	}
-
-	gs := gameService.NewService(nil, nil)
 
 	updatedPath := "stage.scene." + sceneId
 
 	var sceneData interface{}
 
-	sceneData, ok := gs.Script.DefaultStage.Scenes[sceneId]
+	sceneData, ok := ss.gameService.Script.DefaultStage.Scenes[sceneId]
 	if !ok {
 		return fmt.Errorf("scene %s does not exist in the default stage", sceneId)
 	}
@@ -189,15 +167,15 @@ func (ss *Service) LoadSceneFromScript(
 
 		switch *dataType {
 		case models.DataStorePrivate:
-			sceneData = gs.Script.DefaultStage.Scenes[sceneId].PrivateData
+			sceneData = ss.gameService.Script.DefaultStage.Scenes[sceneId].PrivateData
 		case models.DataStorePublic:
-			sceneData = gs.Script.DefaultStage.Scenes[sceneId].PublicData
+			sceneData = ss.gameService.Script.DefaultStage.Scenes[sceneId].PublicData
 		default:
 			return fmt.Errorf("invalid data store type %s", dataType.String())
 		}
 	}
 
-	err = ss.gameRepo.UpdateField(*gameId, updatedPath, sceneData)
+	err := ss.gameRepo.UpdateField(gameId, updatedPath, sceneData)
 	if err != nil {
 		return err
 	}
@@ -206,18 +184,18 @@ func (ss *Service) LoadSceneFromScript(
 }
 
 // SetSceneOrder sets the order the scenes should display; specifying a scene not on the stage results in an error.
-func (ss *Service) SetSceneOrder(gameCode string, sceneOrder []string) error {
-	if gameCode == "" {
-		return fmt.Errorf("game code cannot be nil")
+func (ss *Service) SetSceneOrder(gameId string, sceneOrder []string) error {
+	if gameId == "" {
+		return fmt.Errorf("gameId cannot be nil")
+	}
+
+	g, err := ss.gameService.Fetch(gameId)
+	if err != nil {
+		return err
 	}
 
 	if len(sceneOrder) == 0 {
 		return fmt.Errorf("must set scene order")
-	}
-
-	g, err := ss.gameRepo.FindByCode(gameCode)
-	if err != nil {
-		return err
 	}
 
 	for _, sceneId := range sceneOrder {
@@ -228,7 +206,7 @@ func (ss *Service) SetSceneOrder(gameCode string, sceneOrder []string) error {
 
 	path := "stage.sceneOrder"
 
-	err = ss.gameRepo.UpdateField(g.ID.Hex(), path, sceneOrder)
+	err = ss.gameRepo.UpdateField(gameId, path, sceneOrder)
 	if err != nil {
 		return err
 	}
@@ -238,13 +216,13 @@ func (ss *Service) SetSceneOrder(gameCode string, sceneOrder []string) error {
 
 // UpdateScene saves a field (or all fields if the path is nil) into one of the data stores for a given scene.
 func (ss *Service) UpdateScene(
-	gameCode string,
+	gameId string,
 	sceneId string,
 	dataType models.DataStoreType,
 	path *string,
 	data interface{},
 ) error {
-	g, err := ss.validateAndFetchGame(gameCode, sceneId)
+	g, err := ss.gameRepo.Get(gameId)
 	if err != nil {
 		return err
 	}
@@ -264,8 +242,8 @@ func (ss *Service) UpdateScene(
 }
 
 // SetCurrentScene sets the current scene.
-func (ss *Service) SetCurrentScene(gameCode string, sceneId string) error {
-	g, err := ss.validateAndFetchGame(gameCode, sceneId)
+func (ss *Service) SetCurrentScene(gameId string, sceneId string) error {
+	g, err := ss.validateAndFetchGame(gameId, sceneId)
 	if err != nil {
 		return err
 	}
@@ -291,16 +269,16 @@ func (ss *Service) getValidScenes(g *models.Game) []string {
 	return validScenes
 }
 
-func (ss *Service) validateAndFetchGame(gameCode string, sceneId string) (*models.Game, error) {
-	if gameCode == "" {
-		return nil, fmt.Errorf("game code cannot be nil")
+func (ss *Service) validateAndFetchGame(gameId string, sceneId string) (*models.Game, error) {
+	if gameId == "" {
+		return nil, fmt.Errorf("gameId cannot be nil")
 	}
 
 	if sceneId == "" {
 		return nil, fmt.Errorf("must specify scene")
 	}
 
-	g, err := ss.gameRepo.FindByCode(gameCode)
+	g, err := ss.gameRepo.Get(gameId)
 	if err != nil {
 		return nil, err
 	}

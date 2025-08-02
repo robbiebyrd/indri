@@ -1,25 +1,33 @@
-version: '3.8'
-
 services:
   mongodb:
-    image: mongo:latest # Use the official MongoDB image
-    container_name: my_mongodb_instance
+    image: mongo:latest
     env_file:
       - .env
     ports:
-      - "${INDRI_MONGOPORT}:27017"
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=${INDRI_MONGOUSERNAME}
-      - MONGO_INITDB_ROOT_PASSWORD=${INDRI_MONGOPASSWORD}
+      - "${INDRI_MONGO_PORT}:27017"
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "${INDRI_MONGO_PORT}",  "--dbpath", "/data/configdb"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'rs0',members:[{_id:0,host:'host.docker.internal:27017'}]}) }" | mongosh --port 27017 --quiet
+      interval: 5s
+      timeout: 30s
+      start_period: 0s
+      start_interval: 1s
+      retries: 30
     volumes:
-      - mongodb_data:/data/db
+      - "mongodb_data:/data/db"
+      - "mongodb_config:/data/configdb"
+      - ./mongodb.key:/etc/mongo/mongodb-keyfile:ro
+
   redis:
     image: 'bitnami/redis:latest'
     environment:
-      - REDIS_PASSWORD=${INDRI_REDISPASSWORD}
-      - ALLOW_EMPTY_PASSWORD=${INDRI_REDISEMPTYPASSWORD:-no}
+      - REDIS_PASSWORD=${INDRI_REDIS_PASSWORD}
+      - ALLOW_EMPTY_PASSWORD=${INDRI_REDIS_EMPTY_PASSWORD:-no}
     ports:
-      - '${INDRI_REDISPORT:-6379}:6379'
+      - '${INDRI_REDIS_PORT:-6379}:6379'
 
 volumes:
   mongodb_data:
+  mongodb_config:

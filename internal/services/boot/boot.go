@@ -2,73 +2,113 @@ package boot
 
 import (
 	"context"
-	"fmt"
+	"github.com/olahol/melody"
 	"github.com/robbiebyrd/indri/internal/entrypoints"
 	cs "github.com/robbiebyrd/indri/internal/entrypoints/changestream"
 	"github.com/robbiebyrd/indri/internal/entrypoints/http"
-	"github.com/robbiebyrd/indri/internal/handlers/join"
-	"github.com/robbiebyrd/indri/internal/handlers/login"
+	"github.com/robbiebyrd/indri/internal/handlers/actions/join"
+	"github.com/robbiebyrd/indri/internal/handlers/actions/kick"
+	"github.com/robbiebyrd/indri/internal/handlers/actions/leave"
+	"github.com/robbiebyrd/indri/internal/handlers/actions/login"
+	"github.com/robbiebyrd/indri/internal/handlers/actions/register"
 	"github.com/robbiebyrd/indri/internal/handlers/message"
-	"github.com/robbiebyrd/indri/internal/handlers/register"
 	"github.com/robbiebyrd/indri/internal/injector"
-	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/script"
 	"github.com/robbiebyrd/indri/internal/services/connection"
-	"github.com/robbiebyrd/indri/internal/services/game"
 	"golang.org/x/sync/errgroup"
 	"log"
+	"os"
 )
 
-func Start() {
-	g, ctx := errgroup.WithContext(context.Background())
+func Start(i *injector.Injector) {
+	g, ctx := errgroup.WithContext(i.GlobalContext)
 
-	g.Go(http.Serve)
-	g.Go(func() error { return monitorGameChanges(ctx) })
+	g.Go(func() error { return http.Serve(i.MelodyClient) })
+	g.Go(func() error {
+		return monitorGameChanges(ctx, i.ConnectionService, i.GlobalMonitor)
+	})
 
 	if err := g.Wait(); err != nil {
-		fmt.Printf("One or more goroutines failed: %v\n", err)
+		log.Printf("One or more goroutines failed: %v\n", err)
 	} else {
-		fmt.Println("All goroutines completed successfully.")
+		log.Println("All goroutines completed successfully.")
+	}
+}
+
+func Boot(scriptFilePath *string) (*injector.Injector, error) {
+	ctx := context.Background()
+
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
 	}
 
-}
-func Boot(script *models.Script) (*injector.Data, error) {
-	i, err := injector.New(nil, nil, nil)
+	if scriptFilePath == nil || *scriptFilePath == "" {
+		s := dir + "/config.json"
+		scriptFilePath = &s
+	}
+
+	gameScript := script.Get(*scriptFilePath)
+
+	clients, err := injector.GetClients(ctx, nil, nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	registerHandlers(i, script)
+	repos, err := injector.GetRepos(ctx, clients)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	services, err := injector.GetServices(ctx, gameScript, clients, repos)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	i := &injector.Injector{
+		ReposInjector:    repos,
+		ClientsInjector:  clients,
+		ServicesInjector: services,
+		GlobalContext:    ctx,
+	}
+
+	registerHandlers(i)
 
 	return i, nil
-
 }
 
-func registerHandlers(i *injector.Data, script *models.Script) {
+func registerHandlers(i *injector.Injector) {
 
-	i.MelodyClient.HandleConnect(entrypoints.HandleConnect)
-	i.MelodyClient.HandleDisconnect(entrypoints.HandleDisconnect)
-	i.MelodyClient.HandleMessage(message.HandleMessage)
+	i.MelodyClient.HandleConnect(func(s *melody.Session) {
+		entrypoints.HandleConnect(s, i.MelodyClient, i.GameService)
+	})
+	i.MelodyClient.HandleDisconnect(func(s *melody.Session) {
+		entrypoints.HandleDisconnect(s, i.MelodyClient, i.GameService)
+	})
+	i.MelodyClient.HandleMessage(func(s *melody.Session, msg []byte) {
+		message.HandleMessage(s, msg)
+	})
 
 	actionToHandlerMap := []message.RegisterHandlersInput{
 		{
 			Action:  "register",
-			Handler: register.HandleRegister,
+			Handler: register.New(i),
 		},
 		{
 			Action:  "join",
-			Handler: join.HandleJoin,
+			Handler: join.New(i),
 		},
 		{
 			Action:  "leave",
-			Handler: join.HandleLeave,
+			Handler: leave.New(i),
 		},
 		{
 			Action:  "kick",
-			Handler: join.HandleKick,
+			Handler: kick.New(i),
 		},
 		{
 			Action:  "login",
-			Handler: login.HandleLogin,
+			Handler: login.New(i),
 		},
 	}
 
@@ -80,35 +120,23 @@ func registerHandlers(i *injector.Data, script *models.Script) {
 
 		panic("error during registering handlers, exiting")
 	}
-
-	_ = game.NewService(nil, script)
 }
 
-func monitorGameChanges(ctx context.Context) error {
+func monitorGameChanges(ctx context.Context, connService *connection.Service, changeMonitor *cs.MongoChangeMonitor) error {
 	receiver := make(chan cs.ChangeEventOut)
 
 	_, cancel := context.WithCancel(ctx)
-	collection := "game"
-
-	cm, err := cs.New(ctx, &collection, nil)
-	if err != nil {
-		cancel()
-		return err
-	}
-
-	connService := connection.NewService()
-
 	defer cancel()
 
-	go cm.Monitor(ctx, receiver)
+	go changeMonitor.Monitor(ctx, receiver)
 
 	for val := range receiver {
-		err = connService.BroadcastToAll(val)
-		if err != nil {
-			fmt.Printf("Error broadcasting change event: %v\n", err)
-		}
+		hexId := val.ID.Hex()
 
-		fmt.Printf("Received change event: %v\n", val)
+		err := connService.Broadcast(&hexId, nil, val)
+		if err != nil {
+			log.Printf("Error broadcasting change event: %v\n", err)
+		}
 	}
 
 	return nil

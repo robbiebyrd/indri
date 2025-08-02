@@ -16,29 +16,27 @@ type MongoChangeMonitor struct {
 	filter       *bson.D
 }
 
-func New(ctx context.Context, collectionName *string, filterDoc *bson.D) (*MongoChangeMonitor, error) {
+func New(ctx context.Context, mongoClient *mongoClient.Client, collectionName *string, filterDoc *bson.D) (*MongoChangeMonitor, error) {
 	log.Printf("New change monitor starting on collection %v", collectionName)
-
-	client, err := mongoClient.New()
-	if err != nil {
-		return nil, err
-	}
 
 	var changeStream *mongo.ChangeStream
 
+	var err error
+
 	if collectionName == nil {
-		changeStream, err = getChangeStreamGlobal(ctx, client.Database.Database())
+		changeStream, err = getChangeStreamGlobal(ctx, mongoClient.Database.Database())
 	} else {
-		collection := getCollection(client.Database.Database(), *collectionName)
+		collection := getCollection(mongoClient.Database.Database(), *collectionName)
 		changeStream, err = getChangeStream(ctx, collection, filterDoc)
 	}
+
 	if err != nil {
 		return nil, err
 	}
 
 	return &MongoChangeMonitor{
-		client:       client.MongoClient,
-		database:     client.Database.Database(),
+		client:       mongoClient.MongoClient,
+		database:     mongoClient.Database.Database(),
 		changeStream: changeStream,
 		filter:       filterDoc,
 	}, nil

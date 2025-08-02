@@ -3,11 +3,12 @@ package message
 import (
 	"fmt"
 	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 )
 
 type RegisterHandlersInput struct {
 	Action  string
-	Handler actionHandlerFuncSig
+	Handler actions.MessageHandler
 }
 
 type actionHandlerFuncSig func(
@@ -17,12 +18,12 @@ type actionHandlerFuncSig func(
 
 var registeredHandlerMap = map[string]actionHandlerFuncSig{}
 
-func RegisterHandler(action string, handler actionHandlerFuncSig) error {
+func RegisterHandler(action string, handler actions.MessageHandler) error {
 	if _, ok := registeredHandlerMap[action]; ok {
 		return fmt.Errorf("the action %v already exists in the handler map", action)
 	}
 
-	registeredHandlerMap[action] = handler
+	registeredHandlerMap[action] = handler.Handle
 
 	return nil
 
@@ -39,27 +40,4 @@ func RegisterHandlers(handlers []RegisterHandlersInput) []error {
 	}
 
 	return errs
-}
-
-func Act(
-	s *melody.Session,
-	decodedMsg *map[string]interface{},
-	action *string,
-) error {
-	if decodedMsg == nil {
-		return fmt.Errorf("decoded message is nil")
-	}
-
-	var err error
-
-	if _, ok := registeredHandlerMap[*action]; !ok {
-		return fmt.Errorf("unknown action %v", *action)
-	}
-
-	err = registeredHandlerMap[*action](s, *decodedMsg)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }

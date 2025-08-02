@@ -1,35 +1,30 @@
 package game
 
 import (
+	"errors"
 	"fmt"
 	"github.com/kpechenenko/rword"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/repo/game"
+	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	"log"
 	"strings"
 )
 
 type Service struct {
-	gameRepo *game.Repo
+	gameRepo *gameRepo.Repo
 	Script   *models.Script
 }
 
-var globalClient *Service
-
 // NewService creates a new repository for accessing game data.
-func NewService(gameRepo *game.Repo, script *models.Script) *Service {
+func NewService(gameRepo *gameRepo.Repo, script *models.Script) (*Service, error) {
 	if gameRepo == nil {
-		gameRepo = game.NewRepo()
+		return nil, errors.New("the game service did not receive a game repo")
 	}
 
-	if globalClient == nil {
-		globalClient = &Service{
-			gameRepo: gameRepo,
-			Script:   script,
-		}
-	}
-
-	return globalClient
+	return &Service{
+		gameRepo: gameRepo,
+		Script:   script,
+	}, nil
 }
 
 // New creates a new game, with or without a Code.
@@ -58,7 +53,7 @@ func (gs *Service) New(gameCode string) (*models.Game, error) {
 	return g, nil
 }
 
-// Get will fetch game data for a specific game ID  or create a new one if it doesn't exist.
+// Get will fetch game data for a specific game ID or create a new one if it doesn't exist.
 func (gs *Service) Get(id string) (*models.Game, error) {
 	g, err := gs.gameRepo.Get(id)
 	if err != nil {
@@ -87,7 +82,7 @@ func (gs *Service) GetByCode(gameCode string) (*models.Game, error) {
 	return g, nil
 }
 
-// Fetch retrieves game data for a specific game ID  and returns an error if not found.
+// Fetch retrieves game data for a specific game ID and returns an error if not found.
 func (gs *Service) Fetch(id string) (*models.Game, error) {
 	if id == "" {
 		return nil, fmt.Errorf("id is  nil")
@@ -96,7 +91,7 @@ func (gs *Service) Fetch(id string) (*models.Game, error) {
 	return gs.gameRepo.Get(id)
 }
 
-// FetchByCode retrieves game data for a specific game code  and returns an error if not found.
+// FetchByCode retrieves game data for a specific game code and returns an error if not found.
 func (gs *Service) FetchByCode(gameCode string) (*models.Game, error) {
 	if gameCode == "" {
 		return nil, fmt.Errorf("game code is required")
@@ -166,7 +161,14 @@ func (gs *Service) Sanitize(game *models.Game) *models.Game {
 	return game
 }
 
-func (gs *Service) ConnectPlayer(id string, teamId string, userId string) error {
+func (gs *Service) ConnectPlayer(id string, teamId string, userId string, displayName string) error {
+	log.Printf("Adding player %v to game lobby\n", userId)
+
+	err := gs.gameRepo.AddPlayer(id, userId, displayName)
+	if err != nil {
+		log.Printf("Error adding player %v to game lobby: %v\n", userId, err)
+	}
+
 	switch {
 	case gs.gameRepo.HasPlayerOnTeam(id, teamId, userId):
 		log.Printf("Player %v is on team %v\n", userId, teamId)
@@ -178,8 +180,7 @@ func (gs *Service) ConnectPlayer(id string, teamId string, userId string) error 
 		log.Printf("Adding player %v to team %v\n", userId, teamId)
 		return gs.gameRepo.AddPlayerToTeam(id, teamId, userId)
 	default:
-		log.Printf("Adding player %v to game lobby\n", userId)
-		return gs.gameRepo.AddPlayer(id, userId)
+		return nil
 	}
 }
 

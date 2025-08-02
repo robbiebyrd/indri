@@ -4,7 +4,6 @@ import (
 	"fmt"
 	goaway "github.com/TwiN/go-away"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/user"
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
 	"slices"
 )
@@ -46,9 +45,7 @@ func (s *Repo) PlayerOnATeam(id string, userId string) bool {
 }
 
 // AddPlayer adds a player to the game.
-func (s *Repo) AddPlayer(id string, userId string) error {
-	us := user.NewService()
-
+func (s *Repo) AddPlayer(id string, userId string, displayName string) error {
 	if s.HasPlayer(id, userId) {
 		return fmt.Errorf("player with id %v already exists in game %v", userId, id)
 	}
@@ -72,25 +69,13 @@ func (s *Repo) AddPlayer(id string, userId string) error {
 		g.Players = map[string]models.Player{}
 	}
 
-	thisUser, err := us.Get(userId)
-	if err != nil {
-		return fmt.Errorf("failed retrieving user with userId %v", userId)
-	}
-
-	name := thisUser.Name
-	if thisUser.DisplayName != nil && *thisUser.DisplayName != "" {
-		name = *thisUser.DisplayName
-	}
-
-	name = goaway.Censor(name)
-
 	g.Players[userId] = models.Player{
-		Name:      name,
+		Name:      goaway.Censor(displayName),
 		Host:      !s.HasHost(id),
 		Connected: false,
 	}
 
-	if err = s.Update(id, &models.UpdateGame{Players: &g.Players}); err != nil {
+	if err = s.Update(id, &models.UpdateGame{Teams: &g.Teams, Players: &g.Players, Stage: &g.Stage}); err != nil {
 		return err
 	}
 
@@ -116,7 +101,7 @@ func (s *Repo) RemovePlayer(id string, userId string) error {
 
 	delete(g.Players, userId)
 
-	if err = s.Update(id, &models.UpdateGame{Players: &g.Players}); err != nil {
+	if err = s.Update(id, &models.UpdateGame{Players: &g.Players, Teams: &g.Teams, Stage: &g.Stage}); err != nil {
 		return err
 	}
 

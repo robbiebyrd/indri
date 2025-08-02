@@ -8,7 +8,7 @@ import (
 )
 
 func (cm *MongoChangeMonitor) Monitor(ctx context.Context, channel chan<- ChangeEventOut) {
-	log.Printf("Started watching changes on db %v and collection %v", cm.database.Name(), cm.collection.Name())
+	log.Printf("Started watching changes on db %v", cm.database.Name())
 
 	defer func() {
 		if err := cm.changeStream.Close(ctx); err != nil {

@@ -11,9 +11,8 @@ import (
 	"sort"
 )
 
-
-func (cs *Service) Broadcast(gameCode *string, teamId *string, data interface{}) error {
-	if gameCode == nil {
+func (cs *Service) Broadcast(gameId *string, teamId *string, data interface{}) error {
+	if gameId == nil {
 		return errors.New("game id is required")
 	}
 
@@ -23,14 +22,14 @@ func (cs *Service) Broadcast(gameCode *string, teamId *string, data interface{})
 	}
 
 	if teamId != nil {
-		return cs.sendToTeam(*gameCode, *teamId, jsonData)
+		return cs.sendToTeam(*gameId, *teamId, jsonData)
 	}
 
-	return cs.sendToGame(*gameCode, jsonData)
+	return cs.sendToGame(*gameId, jsonData)
 }
 
-func (cs *Service) BroadcastToPlayer(gameCode *string, data interface{}, playerId string) error {
-	if gameCode == nil {
+func (cs *Service) BroadcastToPlayer(gameId *string, data interface{}, playerId string) error {
+	if gameId == nil {
 		return errors.New("game id is required")
 	}
 
@@ -39,11 +38,11 @@ func (cs *Service) BroadcastToPlayer(gameCode *string, data interface{}, playerI
 		return err
 	}
 
-	return cs.sendToPlayer(*gameCode, playerId, jsonData)
+	return cs.sendToPlayer(*gameId, playerId, jsonData)
 }
 
-func (cs *Service) BroadcastToPlayers(gameCode *string, data interface{}, playerIds ...string) error {
-	if gameCode == nil {
+func (cs *Service) BroadcastToPlayers(gameId *string, data interface{}, playerIds ...string) error {
+	if gameId == nil {
 		return errors.New("game id is required")
 	}
 
@@ -54,7 +53,7 @@ func (cs *Service) BroadcastToPlayers(gameCode *string, data interface{}, player
 		return err
 	}
 
-	return cs.sendToPlayers(*gameCode, playerIds, jsonData)
+	return cs.sendToPlayers(*gameId, playerIds, jsonData)
 }
 
 func (cs *Service) BroadcastToAll(data interface{}) error {
@@ -66,12 +65,12 @@ func (cs *Service) BroadcastToAll(data interface{}) error {
 	return cs.sendToAll(jsonData)
 }
 
-func (cs *Service) sendToGame(gameCode string, jsonData []byte) error {
-	log.Printf("Broadcasting to game %v\n", gameCode)
+func (cs *Service) sendToGame(gameId string, jsonData []byte) error {
+	log.Printf("Broadcasting to game %v\n", gameId)
 
 	if err := cs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		if thisGameCode, ok := s.Get("code"); ok {
-			return thisGameCode == gameCode
+		if thisGameId, ok := s.Get("gameId"); ok {
+			return thisGameId == gameId
 		}
 
 		return false
@@ -82,13 +81,13 @@ func (cs *Service) sendToGame(gameCode string, jsonData []byte) error {
 	return nil
 }
 
-func (cs *Service) sendToTeam(gameCode string, teamId string, jsonData []byte) error {
-	log.Printf("Broadcasting to game %v and team %v\n", gameCode, teamId)
+func (cs *Service) sendToTeam(gameId string, teamId string, jsonData []byte) error {
+	log.Printf("Broadcasting to game %v and team %v\n", gameId, teamId)
 
 	if err := cs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		ss := session.NewService(s)
-		thisGameCode, thisTeamId, _, err := ss.GetStandardKeys()
-		return err != nil && *thisGameCode == gameCode && *thisTeamId == teamId
+		ss := session.NewService(s, cs.m)
+		thisGameId, thisTeamId, _, err := ss.GetStandardKeys()
+		return err != nil && *thisGameId == gameId && *thisTeamId == teamId
 	}); err != nil {
 		return err
 	}
@@ -107,34 +106,34 @@ func (cs *Service) sendToAll(jsonData []byte) error {
 	return nil
 }
 
-func (cs *Service) sendToPlayer(gameCode, playerId string, jsonData []byte) error {
-	log.Printf("Broadcasting to game %v and player %v\n", gameCode, playerId)
+func (cs *Service) sendToPlayer(gameId, playerId string, jsonData []byte) error {
+	log.Printf("Broadcasting to game %v and player %v\n", gameId, playerId)
 
-	if _, err := cs.us.Get(playerId); err != nil {
+	if _, err := cs.userRepo.Get(playerId); err != nil {
 		return fmt.Errorf("could not get player %v: %v", playerId, err)
 	}
 
 	return cs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		thisGameCode, ok1 := s.Get("code")
+		thisGameId, ok1 := s.Get("gameId")
 		thisPlayerId, ok2 := s.Get("userId")
 
-		return ok1 && ok2 && thisGameCode == gameCode && thisPlayerId == playerId
+		return ok1 && ok2 && thisGameId == gameId && thisPlayerId == playerId
 	})
 }
 
-func (cs *Service) sendToPlayers(gameCode string, playerIds []string, jsonData []byte) error {
-	log.Printf("Broadcasting to game %v and players %v\n", gameCode, playerIds)
+func (cs *Service) sendToPlayers(gameId string, playerIds []string, jsonData []byte) error {
+	log.Printf("Broadcasting to game %v and players %v\n", gameId, playerIds)
 
 	for _, playerId := range playerIds {
-		if _, err := cs.us.Get(playerId); err != nil {
+		if _, err := cs.userRepo.Get(playerId); err != nil {
 			return fmt.Errorf("could not get player %v: %v", playerId, err)
 		}
 	}
 
 	return cs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		thisGameCode, ok1 := s.Get("code")
+		thisGameId, ok1 := s.Get("code")
 		thisPlayerId, ok2 := s.Get("userId")
 
-		return ok1 && ok2 && thisGameCode == gameCode && slices.Contains(playerIds, thisPlayerId.(string))
+		return ok1 && ok2 && thisGameId == gameId && slices.Contains(playerIds, thisPlayerId.(string))
 	})
 }

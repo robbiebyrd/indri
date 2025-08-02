@@ -1,7 +1,7 @@
 package http
 
 import (
-	melodyClient "github.com/robbiebyrd/indri/internal/clients/melody"
+	"github.com/olahol/melody"
 	"github.com/robbiebyrd/indri/internal/repo/env"
 	"log"
 	"net/http"
@@ -11,8 +11,7 @@ import (
 
 type GameDataKeys map[string]interface{}
 
-func Serve() error {
-	m := melodyClient.New()
+func Serve(m *melody.Melody) error {
 
 	envVars := env.GetEnv()
 

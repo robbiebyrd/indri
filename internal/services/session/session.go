@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/olahol/melody"
-	melodyClient "github.com/robbiebyrd/indri/internal/clients/melody"
 )
 
 type Service struct {
@@ -13,15 +12,14 @@ type Service struct {
 }
 
 // NewService creates a new repository for accessing game data.
-func NewService(s *melody.Session) *Service {
-	m := melodyClient.New()
+func NewService(s *melody.Session, m *melody.Melody) *Service {
 	return &Service{s, m}
 }
 
 // GetStandardKeys returns a set of standard session attributes that identify a user in a game.
-// StandardKeys include gameCode, teamId, and userId.
+// StandardKeys include gameId, teamId, and userId.
 func (ss *Service) GetStandardKeys() (*string, *string, *string, error) {
-	gameCodePtr, err := ss.GetKeyAsString("code")
+	gameIdPtr, err := ss.GetKeyAsString("gameId")
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -36,21 +34,21 @@ func (ss *Service) GetStandardKeys() (*string, *string, *string, error) {
 		return nil, nil, nil, err
 	}
 
-	return gameCodePtr, teamIdPtr, userIdPtr, nil
+	return gameIdPtr, teamIdPtr, userIdPtr, nil
 }
 
 // SetStandardKeys returns a set of standard session attributes that identify a user in a game.
-// StandardKeys include gameCode, teamId, and userId.
-func (ss *Service) SetStandardKeys(gameCode *string, teamId *string, userId *string) error {
-	if gameCode == nil {
-		return errors.New("gameCode id is required")
+// StandardKeys include gameId, teamId, and userId.
+func (ss *Service) SetStandardKeys(gameId *string, teamId *string, userId *string) error {
+	if gameId == nil {
+		return errors.New("gameId id is required")
 	}
 
 	if userId == nil {
 		return errors.New("userId id is required")
 	}
 
-	ss.SetKey("code", *gameCode)
+	ss.SetKey("gameId", *gameId)
 	ss.SetKey("userId", *userId)
 
 	if teamId != nil {
@@ -94,34 +92,34 @@ func (ss *Service) UnsetKey(key string) {
 	ss.s.UnSet(key)
 }
 
-func (ss *Service) Get(gameCode *string, teamId *string, userId *string) (*melody.Session, error) {
-	if gameCode != nil && teamId != nil && userId != nil {
-		return ss.getSessionForPlayer(*gameCode, *teamId, *userId)
+func (ss *Service) Get(gameId *string, teamId *string, userId *string) (*melody.Session, error) {
+	if gameId != nil && teamId != nil && userId != nil {
+		return ss.getSessionForPlayer(*gameId, *teamId, *userId)
 	}
 
-	return nil, errors.New("invalid gameCode, teamId or userId")
+	return nil, errors.New("invalid gameId, teamId or userId")
 }
 
 // Find returns either a session for a specific player, sessions for all players in a given team, or sessions for
-// all players in a game, depending on inputs. teamId and playerId can be passed in as nil, but a gameCode is required.
-func (ss *Service) Find(gameCode *string, teamId *string, userId *string) ([]*melody.Session, error) {
-	if gameCode != nil && teamId != nil && userId != nil {
-		retrievedSession, err := ss.getSessionForPlayer(*gameCode, *teamId, *userId)
+// all players in a game, depending on inputs. teamId and playerId can be passed in as nil, but a gameId is required.
+func (ss *Service) Find(gameId *string, teamId *string, userId *string) ([]*melody.Session, error) {
+	if gameId != nil && teamId != nil && userId != nil {
+		retrievedSession, err := ss.getSessionForPlayer(*gameId, *teamId, *userId)
 		return []*melody.Session{retrievedSession}, err
 	}
 
-	if gameCode != nil && teamId != nil {
-		return ss.getSessionsForTeam(*gameCode, *teamId)
+	if gameId != nil && teamId != nil {
+		return ss.getSessionsForTeam(*gameId, *teamId)
 	}
 
-	if gameCode != nil {
-		return ss.getSessionsForGame(*gameCode)
+	if gameId != nil {
+		return ss.getSessionsForGame(*gameId)
 	}
 
-	return nil, errors.New("invalid gameCode, teamId or userId")
+	return nil, errors.New("invalid gameId, teamId or userId")
 }
 
-func (ss *Service) getSessionsForGame(gameCode string) ([]*melody.Session, error) {
+func (ss *Service) getSessionsForGame(gameId string) ([]*melody.Session, error) {
 	allSessions, err := ss.m.Sessions()
 	if err != nil {
 		return nil, err
@@ -130,20 +128,20 @@ func (ss *Service) getSessionsForGame(gameCode string) ([]*melody.Session, error
 	var matchedSessions []*melody.Session
 
 	for _, thisSession := range allSessions {
-		checkgameCode, _, _, err := ss.GetStandardKeys()
-		if err == nil && *checkgameCode == gameCode {
+		checkGameId, _, _, err := ss.GetStandardKeys()
+		if err == nil && *checkGameId == gameId {
 			matchedSessions = append(matchedSessions, thisSession)
 		}
 	}
 
 	if len(matchedSessions) == 0 {
-		return nil, fmt.Errorf("no sessions were found for game %v", gameCode)
+		return nil, fmt.Errorf("no sessions were found for game %v", gameId)
 	}
 
 	return matchedSessions, nil
 }
 
-func (ss *Service) getSessionsForTeam(gameCode string, teamId string) ([]*melody.Session, error) {
+func (ss *Service) getSessionsForTeam(gameId string, teamId string) ([]*melody.Session, error) {
 	allSessions, err := ss.m.Sessions()
 	if err != nil {
 		return nil, err
@@ -152,21 +150,21 @@ func (ss *Service) getSessionsForTeam(gameCode string, teamId string) ([]*melody
 	var matchedSessions []*melody.Session
 
 	for _, thisSession := range allSessions {
-		checkgameCode, checkTeamId, _, err := ss.GetStandardKeys()
-		if err == nil && *checkgameCode == gameCode && *checkTeamId == teamId {
+		checkGameId, checkTeamId, _, err := ss.GetStandardKeys()
+		if err == nil && *checkGameId == gameId && *checkTeamId == teamId {
 			matchedSessions = append(matchedSessions, thisSession)
 		}
 	}
 
 	if len(matchedSessions) == 0 {
-		return nil, fmt.Errorf("no sessions were found for game %v and team %v", gameCode, teamId)
+		return nil, fmt.Errorf("no sessions were found for game %v and team %v", gameId, teamId)
 	}
 
 	return matchedSessions, nil
 }
 
 func (ss *Service) getSessionForPlayer(
-	gameCode string,
+	gameId string,
 	teamId string,
 	userId string,
 ) (*melody.Session, error) {
@@ -176,11 +174,11 @@ func (ss *Service) getSessionForPlayer(
 	}
 
 	for _, thisSession := range allSessions {
-		checkGameCode, checkTeamId, checkUserId, err := ss.GetStandardKeys()
-		if err == nil && *checkGameCode == gameCode && *checkTeamId == teamId && *checkUserId == userId {
+		checkGameId, checkTeamId, checkUserId, err := ss.GetStandardKeys()
+		if err == nil && *checkGameId == gameId && *checkTeamId == teamId && *checkUserId == userId {
 			return thisSession, nil
 		}
 	}
 
-	return nil, fmt.Errorf("no sessions were found for userId %v in game %v and team %v", userId, gameCode, teamId)
+	return nil, fmt.Errorf("no sessions were found for userId %v in game %v and team %v", userId, gameId, teamId)
 }

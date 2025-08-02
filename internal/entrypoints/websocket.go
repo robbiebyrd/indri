@@ -7,24 +7,19 @@ import (
 	"log"
 )
 
-func HandleConnect(s *melody.Session) {
-	err := s.Write([]byte(`{ "ready": true }"`))
+func HandleConnect(s *melody.Session, m *melody.Melody, gameService *gameService.Service) {
+	err := s.Write([]byte(`{ "stage": { "currentScene": "login"} }`))
 	if err != nil {
 		log.Printf("Error sending ready message to session: %v\n", err)
-		HandleDisconnect(s)
+		HandleDisconnect(s, m, gameService)
 	}
 }
 
-func HandleDisconnect(s *melody.Session) {
-	DisconnectPlayer(s)
-}
+func HandleDisconnect(s *melody.Session, m *melody.Melody, gameService *gameService.Service) {
+	ss := session.NewService(s, m)
 
-func DisconnectPlayer(s *melody.Session) {
-	gs := gameService.NewService(nil, nil)
-	ss := session.NewService(s)
-
-	gameCode, teamId, playerId, err := ss.GetStandardKeys()
-	if err != nil || gameCode == nil || teamId == nil || playerId == nil {
+	gameId, teamId, playerId, err := ss.GetStandardKeys()
+	if err != nil || gameId == nil || teamId == nil || playerId == nil {
 		log.Printf("error getting standard session keys on disconnect: %v\n", err)
 		return
 	}
@@ -39,12 +34,12 @@ func DisconnectPlayer(s *melody.Session) {
 		log.Printf("error closing session: %v\n", err)
 	}
 
-	g, err := gs.GetByCode(*gameCode)
+	g, err := gameService.Fetch(*gameId)
 	if err != nil {
 		log.Printf("could not set get game: %v\n", err)
 	}
 
-	err = gs.DisconnectPlayer(g.ID.Hex(), *playerId)
+	err = gameService.DisconnectPlayer(g.ID.Hex(), *playerId)
 	if err != nil {
 		log.Printf("could not set player as disconnected: %v\n", err)
 	}

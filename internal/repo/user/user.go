@@ -11,6 +11,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+var collectionName = "user"
+
 type Repo struct {
 	ctx        *context.Context
 	collection *mongox.Collection[models.User]
@@ -18,14 +20,8 @@ type Repo struct {
 }
 
 // NewRepo creates a new repository for accessing user data.
-func NewRepo() *Repo {
-	client, err := mongodb.New()
-	if err != nil {
-		panic(err)
-	}
-
-	userColl := mongox.NewCollection[models.User](client.Database, "users")
-	ctx := context.Background()
+func NewRepo(ctx context.Context, client *mongodb.Client) *Repo {
+	userColl := mongox.NewCollection[models.User](client.Database, collectionName)
 
 	return &Repo{
 		ctx:        &ctx,

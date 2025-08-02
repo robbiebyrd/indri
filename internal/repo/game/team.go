@@ -3,7 +3,6 @@ package game
 import (
 	"fmt"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/user"
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
 	"slices"
 )
@@ -40,8 +39,6 @@ func (s *Repo) ChangePlayerTeam(id string, teamId string, userId string) error {
 
 // AddPlayerToTeam adds a player to a team.
 func (s *Repo) AddPlayerToTeam(id string, teamId string, userId string) error {
-	us := user.NewService()
-
 	if !s.HasPlayer(id, userId) {
 		return fmt.Errorf("player with id %s is not in this game", id)
 	}
@@ -54,11 +51,6 @@ func (s *Repo) AddPlayerToTeam(id string, teamId string, userId string) error {
 	g, err := s.Get(id)
 	if err != nil {
 		return fmt.Errorf("failed retrieving game with id %v", id)
-	}
-
-	_, err = us.Get(userId)
-	if err != nil {
-		return fmt.Errorf("failed retrieving user with userId %v", userId)
 	}
 
 	if g.Teams == nil {
@@ -75,7 +67,7 @@ func (s *Repo) AddPlayerToTeam(id string, teamId string, userId string) error {
 	team.PlayerIDs = append(team.PlayerIDs, userId)
 	g.Teams[teamId] = team
 
-	if err = s.Update(id, &models.UpdateGame{Teams: &g.Teams}); err != nil {
+	if err = s.Update(id, &models.UpdateGame{Teams: &g.Teams, Players: &g.Players, Stage: &g.Stage}); err != nil {
 		return err
 	}
 
@@ -119,7 +111,7 @@ func (s *Repo) RemovePlayerFromTeam(id string, userId string) error {
 		return nil
 	}
 
-	if err = s.Update(id, &models.UpdateGame{Teams: &g.Teams}); err != nil { //nolint:wsl
+	if err = s.UpdateField(id, "teams", g.Teams); err != nil { //nolint:wsl
 		return err
 	}
 
