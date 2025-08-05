@@ -1,33 +1,39 @@
 package models
 
 import (
-	"github.com/chenmingyong0423/go-mongox/v2"
+	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type User struct {
-	mongox.Model `bson:",inline"`
+	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
 
-	Email       string  `bson:"email"       json:"email"`
-	Name        string  `bson:"name"        json:"name"`
-	DisplayName *string `bson:"displayName" json:"displayName"`
-	Password    *string `bson:"password"    json:"-"`
-	Score       *int    `bson:"score"       json:"score"`
-
-	PublicData  map[string]interface{} `bson:"data"        json:"data,omitempty"`
-	PrivateData map[string]interface{} `bson:"privateData" json:"privateData,omitempty"`
+	CreatedAt   time.Time              `bson:"created_at"           json:"createdAt"`
+	UpdatedAt   time.Time              `bson:"updated_at"           json:"updatedAt"`
+	DeletedAt   time.Time              `bson:"deleted_at,omitempty" json:"-"`
+	Email       string                 `bson:"email"                json:"email"`
+	Name        string                 `bson:"name"                 json:"name"`
+	DisplayName *string                `bson:"displayName"          json:"displayName"`
+	Password    *string                `bson:"password"             json:"-"`
+	Score       *int                   `bson:"score"                json:"score"`
+	PublicData  map[string]interface{} `bson:"data"                 json:"data,omitempty"`
+	PrivateData map[string]interface{} `bson:"privateData"          json:"privateData,omitempty"`
 }
 
 type CreateUser struct {
-	Email       string  `json:"email"`
-	Name        string  `json:"name"`
-	DisplayName *string `json:"displayName,omitempty"`
-	Password    string  `json:"password"`
+	CreatedAt   time.Time `bson:"created_at"  json:"createdAt"`
+	Email       string    `bson:"email"       json:"email"`
+	Name        string    `bson:"name"        json:"name"`
+	DisplayName *string   `bson:"displayName" json:"displayName"`
+	Password    *string   `bson:"password"    json:"-"`
 }
 
 type UpdateUser struct {
-	ID          string  `json:"id"`
-	Email       *string `json:"email,omitempty"`
-	Name        *string `json:"name,omitempty"`
-	DisplayName *string `json:"displayName,omitempty"`
-	Password    *string `json:"password,omitempty"`
+	ID          string    `bson:"_id,omitempty" json:"id"`
+	UpdatedAt   time.Time `bson:"updated_at"    json:"updatedAt"`
+	Email       string    `bson:"email"         json:"email"`
+	Name        string    `bson:"name"          json:"name"`
+	DisplayName *string   `bson:"displayName"   json:"displayName"`
+	Password    *string   `bson:"password"      json:"-"`
 }

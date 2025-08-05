@@ -2,7 +2,7 @@ package melody
 
 import (
 	"github.com/olahol/melody"
-	"github.com/robbiebyrd/indri/internal/repo/env"
+	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	"time"
 )
 
@@ -17,15 +17,15 @@ Returns:
 func New() *melody.Melody {
 	m := melody.New()
 
-	envVars := env.GetEnv()
+	vars := envVars.GetEnv()
 
 	m.Config = &melody.Config{
-		WriteWait:                 time.Duration(envVars.WSWriteTimeout) * time.Second,
-		PongWait:                  time.Duration(envVars.WSPongTimeoutSeconds) * time.Second,
-		PingPeriod:                time.Duration(envVars.WSPingPeriodSeconds) * time.Second,
+		WriteWait:                 time.Duration(vars.WSWriteTimeout) * time.Second,
+		PongWait:                  time.Duration(vars.WSPongTimeoutSeconds) * time.Second,
+		PingPeriod:                time.Duration(vars.WSPingPeriodSeconds) * time.Second,
 		ConcurrentMessageHandling: true,
-		MaxMessageSize:            int64(envVars.WSMessageBufferSize),
-		MessageBufferSize:         envVars.WSMessageBufferSize,
+		MaxMessageSize:            int64(vars.WSMessageBufferSize),
+		MessageBufferSize:         vars.WSMessageBufferSize,
 	}
 
 	return m

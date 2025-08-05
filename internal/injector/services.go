@@ -6,7 +6,7 @@ import (
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/connection"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
-	"github.com/robbiebyrd/indri/internal/services/user"
+	userService "github.com/robbiebyrd/indri/internal/services/user"
 )
 
 func GetServices(ctx context.Context, gameScript *models.Script, clients *ClientsInjector, repos *ReposInjector) (*ServicesInjector, error) {
@@ -35,6 +35,6 @@ func GetServices(ctx context.Context, gameScript *models.Script, clients *Client
 	return &ServicesInjector{
 		GameService:       gs,
 		ConnectionService: cs,
-		UserService:       user.NewService(repos.UserRepo),
+		UserService:       userService.NewService(repos.UserRepo),
 	}, nil
 }

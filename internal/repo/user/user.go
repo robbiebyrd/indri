@@ -3,12 +3,15 @@ package user
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/chenmingyong0423/go-mongox/v2"
 	"github.com/chenmingyong0423/go-mongox/v2/builder/query"
+	"go.mongodb.org/mongo-driver/v2/bson"
+
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/repo/utils"
-	"go.mongodb.org/mongo-driver/v2/bson"
+	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
 )
 
 var collectionName = "user"
@@ -38,7 +41,8 @@ func (s *Repo) New(user models.CreateUser) (*models.User, error) {
 		return nil, fmt.Errorf("a user with email address %v already exists", user.Email)
 	}
 
-	doc, err := utils.CreateBSONDoc(user)
+	user.CreatedAt = time.Now()
+	doc, err := repoUtils.CreateBSONDoc(user)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +105,9 @@ func (s *Repo) Update(user *models.UpdateUser) error {
 		return err
 	}
 
-	doc, err := utils.CreateBSONDoc(user)
+	user.UpdatedAt = time.Now()
+
+	doc, err := repoUtils.CreateBSONDoc(user)
 	if err != nil {
 		return err
 	}

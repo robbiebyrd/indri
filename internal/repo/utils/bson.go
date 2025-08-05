@@ -2,7 +2,7 @@ package utils
 
 import "go.mongodb.org/mongo-driver/v2/bson"
 
-func CreateBSONDoc(doc any) (bson.D, error) {
+func CreateBSONDoc(doc interface{}) (bson.D, error) {
 	// Convert the incoming UpdateUser model to BSON bytes
 	bsonBytes, err := bson.Marshal(doc)
 	if err != nil {

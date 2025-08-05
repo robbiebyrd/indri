@@ -4,19 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/repo/game"
+	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"slices"
 )
 
 type Service struct {
-	gameRepo    *game.Repo
+	gameRepo    *gameRepo.Repo
 	gameService *gameService.Service
 }
 
 // NewService creates a new repository for accessing game data.
-func NewService(gameRepo *game.Repo, gameService *gameService.Service) *Service {
+func NewService(gameRepo *gameRepo.Repo, gameService *gameService.Service) *Service {
 	return &Service{
 		gameRepo,
 		gameService,

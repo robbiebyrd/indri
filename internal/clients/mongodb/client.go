@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/chenmingyong0423/go-mongox/v2"
-	"github.com/robbiebyrd/indri/internal/repo/env"
+	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
@@ -31,11 +31,11 @@ Returns:
 	Error: An error if the connection or configuration fails, otherwise nil.
 */
 func New(ctx context.Context) (*Client, error) {
-	envVars := env.GetEnv()
+	vars := envVars.GetEnv()
 
-	log.Printf("Connecting to MongoDB at %s\n", envVars.MongoURI)
+	log.Printf("Connecting to MongoDB at %s\n", vars.MongoURI)
 
-	mongoClient, err := mongo.Connect(options.Client().ApplyURI(envVars.MongoURI))
+	mongoClient, err := mongo.Connect(options.Client().ApplyURI(vars.MongoURI))
 	if err != nil {
 		log.Fatal(fmt.Errorf("could not configure connection to MongoDB, exiting: %v", err))
 	}
@@ -46,7 +46,7 @@ func New(ctx context.Context) (*Client, error) {
 	}
 
 	client := mongox.NewClient(mongoClient, &mongox.Config{})
-	database := client.NewDatabase(envVars.MongoDatabase)
+	database := client.NewDatabase(vars.MongoDatabase)
 
 	log.Println("successfully connected to MongoDB")
 

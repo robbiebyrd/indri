@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/olahol/melody"
 	"github.com/robbiebyrd/indri/internal/entrypoints"
-	"github.com/robbiebyrd/indri/internal/handlers/utils"
+	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/services/session"
 	"log"
@@ -25,7 +25,7 @@ func (h *Handler) Handle(
 ) error {
 	ss := session.NewService(s, h.i.MelodyClient)
 
-	gameCode, teamId, err := utils.RequireGameCodeAndTeamID(decodedMsg)
+	gameCode, teamId, err := handlerUtils.RequireGameCodeAndTeamID(decodedMsg)
 	if err != nil {
 		return err
 	}

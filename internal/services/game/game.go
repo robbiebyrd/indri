@@ -3,11 +3,13 @@ package game
 import (
 	"errors"
 	"fmt"
-	"github.com/kpechenenko/rword"
-	"github.com/robbiebyrd/indri/internal/models"
-	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	"log"
 	"strings"
+
+	"github.com/kpechenenko/rword"
+
+	"github.com/robbiebyrd/indri/internal/models"
+	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 )
 
 type Service struct {
@@ -57,7 +59,7 @@ func (gs *Service) New(gameCode string) (*models.Game, error) {
 func (gs *Service) Get(id string) (*models.Game, error) {
 	g, err := gs.gameRepo.Get(id)
 	if err != nil {
-		return gs.New(id)
+		return gs.New("")
 	}
 
 	return g, nil

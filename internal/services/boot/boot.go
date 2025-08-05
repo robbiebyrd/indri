@@ -2,7 +2,12 @@ package boot
 
 import (
 	"context"
+	"log"
+	"os"
+
 	"github.com/olahol/melody"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/robbiebyrd/indri/internal/entrypoints"
 	cs "github.com/robbiebyrd/indri/internal/entrypoints/changestream"
 	"github.com/robbiebyrd/indri/internal/entrypoints/http"
@@ -10,14 +15,12 @@ import (
 	"github.com/robbiebyrd/indri/internal/handlers/actions/kick"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/leave"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/login"
+	"github.com/robbiebyrd/indri/internal/handlers/actions/refresh"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/register"
 	"github.com/robbiebyrd/indri/internal/handlers/message"
 	"github.com/robbiebyrd/indri/internal/injector"
-	"github.com/robbiebyrd/indri/internal/repo/script"
+	scriptRepo "github.com/robbiebyrd/indri/internal/repo/script"
 	"github.com/robbiebyrd/indri/internal/services/connection"
-	"golang.org/x/sync/errgroup"
-	"log"
-	"os"
 )
 
 func Start(i *injector.Injector) {
@@ -48,7 +51,7 @@ func Boot(scriptFilePath *string) (*injector.Injector, error) {
 		scriptFilePath = &s
 	}
 
-	gameScript := script.Get(*scriptFilePath)
+	gameScript := scriptRepo.Get(*scriptFilePath)
 
 	clients, err := injector.GetClients(ctx, nil, nil, nil)
 	if err != nil {
@@ -90,6 +93,10 @@ func registerHandlers(i *injector.Injector) {
 	})
 
 	actionToHandlerMap := []message.RegisterHandlersInput{
+		{
+			Action:  "refresh",
+			Handler: refresh.New(i),
+		},
 		{
 			Action:  "register",
 			Handler: register.New(i),

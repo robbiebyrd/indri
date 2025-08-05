@@ -3,14 +3,17 @@ package game
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/chenmingyong0423/go-mongox/v2"
 	"github.com/chenmingyong0423/go-mongox/v2/builder/query"
-	"github.com/robbiebyrd/indri/internal/clients/mongodb"
-	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/repo/utils"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/robbiebyrd/indri/internal/clients/mongodb"
+	"github.com/robbiebyrd/indri/internal/models"
+	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
 )
 
 var collectionName = "game"
@@ -46,17 +49,18 @@ func NewRepo(ctx context.Context, client *mongodb.Client) (*Repo, error) {
 // New creates a new game, given an ID.
 func (s *Repo) New(code string, script *models.Script) (*models.Game, error) {
 	gameDataModel := models.CreateGame{
-		Code: code,
+		Code:      code,
+		CreatedAt: time.Now(),
 	}
 
 	if script != nil {
 		gameDataModel.Teams = &script.DefaultTeams
 		gameDataModel.Stage = &script.DefaultStage
-		gameDataModel.PublicData = &script.PublicData
-		gameDataModel.PrivateData = &script.PrivateData
+		gameDataModel.PublicData = script.PublicData
+		gameDataModel.PrivateData = script.PrivateData
 	}
 
-	doc, err := utils.CreateBSONDoc(gameDataModel)
+	doc, err := repoUtils.CreateBSONDoc(gameDataModel)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +121,9 @@ func (s *Repo) Update(id string, game *models.UpdateGame) error {
 		return err
 	}
 
-	doc, err := utils.CreateBSONDoc(game)
+	game.UpdatedAt = time.Now()
+
+	doc, err := repoUtils.CreateBSONDoc(game)
 	if err != nil {
 		return err
 	}
@@ -148,7 +154,12 @@ func (s *Repo) UpdateField(id string, key string, value interface{}) error {
 	result, err := s.collection.Collection().UpdateOne(
 		*s.ctx,
 		bson.D{{Key: "_id", Value: filterDoc}},
-		bson.D{{Key: "$set", Value: bson.D{{Key: key, Value: value}}}},
+		bson.D{
+			{Key: "$set", Value: bson.D{
+				{Key: key, Value: value},
+				{Key: "UpdatedAt", Value: time.Now()},
+			}},
+		},
 	)
 	if err != nil {
 		return err
@@ -171,7 +182,14 @@ func (s *Repo) DeleteField(id string, key string) error {
 	result, err := s.collection.Collection().UpdateOne(
 		*s.ctx,
 		filterDoc,
-		bson.D{{Key: "$unset", Value: bson.D{{Key: key, Value: ""}}}},
+		bson.D{
+			{Key: "$unset", Value: bson.D{
+				{Key: key, Value: ""},
+			}},
+			{Key: "$set", Value: bson.D{
+				{Key: "UpdatedAt", Value: time.Now()},
+			}},
+		},
 	)
 	if err != nil {
 		return err

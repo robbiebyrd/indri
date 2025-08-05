@@ -5,18 +5,18 @@ import (
 	"github.com/olahol/melody"
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/entrypoints/changestream"
-	"github.com/robbiebyrd/indri/internal/repo/env"
-	"github.com/robbiebyrd/indri/internal/repo/game"
-	"github.com/robbiebyrd/indri/internal/repo/user"
-	"github.com/robbiebyrd/indri/internal/services/connection"
+	envVars "github.com/robbiebyrd/indri/internal/repo/env"
+	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
+	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
+	connectionService "github.com/robbiebyrd/indri/internal/services/connection"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	userService "github.com/robbiebyrd/indri/internal/services/user"
 )
 
 type ReposInjector struct {
-	EnvVars  *env.Vars
-	GameRepo *game.Repo
-	UserRepo *user.Repo
+	EnvVars  *envVars.Vars
+	GameRepo *gameRepo.Repo
+	UserRepo *userRepo.Repo
 }
 
 type ClientsInjector struct {
@@ -28,7 +28,7 @@ type ClientsInjector struct {
 
 type ServicesInjector struct {
 	GameService       *gameService.Service
-	ConnectionService *connection.Service
+	ConnectionService *connectionService.Service
 	UserService       *userService.Service
 }
 

@@ -1,8 +1,9 @@
 package changestream
 
 import (
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type ChangeEventIn struct {
@@ -46,9 +47,10 @@ type ChangeEventOut struct {
 type OperationType string
 
 const (
-	StatusInsert  OperationType = "insert"
-	StatusUpdate  OperationType = "update"
-	StatusReplace OperationType = "replace"
-	StatusDelete  OperationType = "delete"
-	StatusFullDoc OperationType = "fullDoc"
+	OpInsert  OperationType = "insert"
+	OpUpdate  OperationType = "update"
+	OpReplace OperationType = "replace"
+	OpDelete  OperationType = "delete"
+	OpRefresh OperationType = "fullDoc"
+	OpError   OperationType = "error"
 )

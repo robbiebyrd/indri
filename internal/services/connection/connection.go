@@ -4,16 +4,16 @@ import (
 	"context"
 	"errors"
 	"github.com/olahol/melody"
-	"github.com/robbiebyrd/indri/internal/repo/user"
+	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
 )
 
 type Service struct {
-	m        *melody.Melody
-	userRepo *user.Repo
+	m  *melody.Melody
+	ur *userRepo.Repo
 }
 
 // NewService creates a new repository for accessing user data.
-func NewService(ctx context.Context, m *melody.Melody, userRepo *user.Repo) (*Service, error) {
+func NewService(ctx context.Context, m *melody.Melody, userRepo *userRepo.Repo) (*Service, error) {
 	if ctx == nil {
 		return nil, errors.New("context was not passed to the connection service")
 	}

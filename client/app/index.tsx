@@ -1,10 +1,55 @@
 import {Button, StyleSheet, Text, TextInput, View} from 'react-native';
-import {useMemo, useState} from "react";
-import {deleteJSONKeyByDotPath, updateJSONKeyByDotPath} from "@/app/handler";
+import {useEffect, useMemo, useState} from "react";
 import Select from 'react-select';
+import {GameStateParser} from "@/app/ordered_list";
 
 
-type User = {
+declare interface Game {
+    code?: string;
+    teams?: { [key: string]: Team };
+    players?: { [key: string]: Player };
+    stage?: Stage;
+    data?: { [key: string]: any };
+    privateData?: { [key: string]: any };
+    playerData?: { [key: string]: any };
+    updatedAt?: string;
+    createdAt?: string;
+}
+
+declare interface Stage {
+    currentScene: string;
+    sceneOrder: string[];
+    scenes?: { [key: string]: Scene };
+    data?: { [key: string]: any };
+    privateData?: { [key: string]: any };
+    playerData?: { [key: string]: { [key: string]: any } };
+}
+
+declare interface Scene {
+    data?: { [key: string]: any };
+    privateData?: { [key: string]: any };
+    playerData?: { [key: string]: { [key: string]: any } };
+}
+
+declare interface Player {
+    name: string;
+    score: number;
+    connected: boolean;
+    host: boolean;
+    controller: boolean;
+    data?: { [key: string]: any };
+    privateData?: { [key: string]: any };
+}
+
+declare interface Team {
+    name: string;
+    playerIds: string[];
+    data?: { [key: string]: any };
+    privateData?: { [key: string]: any };
+    playerData?: { [key: string]: { [key: string]: any } };
+}
+
+declare interface User {
     ID: string
     email: string
     name: string
@@ -12,45 +57,63 @@ type User = {
     score: number
 }
 
-export default function Index() {
+declare interface UpdateMessage {
+    id: string
+    ts: string
+    op: string
+    type: string
+    updated: object
+    removed: string[]
+}
 
-    const [gameState, setGameState] = useState<object>()
+export default function Index() {
+    const [gameState, setGameState] = useState<Game | undefined>(undefined)
     const [user, setUser] = useState<User>()
     const [userName, setUserName] = useState<string>()
     const [password, setPassword] = useState<string>()
     const [gameCode, setGameCode] = useState<string>()
     const [teamID, setTeamID] = useState<string>()
 
-    const ws: WebSocket = useMemo(() => {
-        return new WebSocket('ws://localhost:5002/ws');
+    const stateList: GameStateParser<Game> = useMemo(() => {
+        return new GameStateParser<Game>()
     }, [])
 
+    const ws: WebSocket = useMemo(() => {
+        return new WebSocket(process.env.EXPO_PUBLIC_API_URL || "");
+    }, [])
+
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            setGameState({...stateList.current()})
+        }, 500);
+
+        return () => clearInterval(intervalId);
+    }, [gameState]);
+
+    const keyframe = (parsed: Game) => {
+        if (parsed.updatedAt != undefined) {
+            stateList.set(parsed, new Date(parsed.updatedAt))
+        }
+        setGameState(parsed)
+    }
+
     ws.onmessage = (e: MessageEvent) => {
-        console.log(e.data)
         const parsed = JSON.parse(e.data)
+        console.log(parsed)
         if ("authenticated" in parsed && parsed["authenticated"] == true) {
             setUser(parsed["user"] as User)
             return
+        } else if ("op" in parsed && "id" in parsed && "ts" in parsed && "type" in parsed) {
+            const updateMsg = parsed as UpdateMessage;
+            console.log("updateMsg", updateMsg)
+            stateList.update(updateMsg, new Date(updateMsg.ts))
+            return
+        } else if ("code" in parsed && "id" in parsed) {
+            keyframe(parsed)
+            return
+        } else {
+            console.log(parsed)
         }
-        if (("op" in parsed)) {
-            let newState = gameState;
-
-            for (const [key, value] of Object.entries(parsed.updated)) {
-                newState = updateJSONKeyByDotPath(newState || {}, key, value)
-            }
-
-            for (const key of parsed.deleted) {
-                newState = deleteJSONKeyByDotPath(newState || {}, key)
-            }
-
-            console.log("Setting state")
-            setGameState({...newState})
-        }
-
-        if ("code" in parsed) {
-            setGameState(parsed)
-        }
-
     };
 
     ws.onerror = (e: Event) => {
@@ -63,7 +126,9 @@ export default function Index() {
 
 
     const stateDisplay = useMemo(() => {
-        return <p>{JSON.stringify(gameState)}</p>
+        return <>
+            <p>{JSON.stringify(gameState)}</p>
+        </>
     }, [gameState])
 
     const options = [
@@ -73,6 +138,10 @@ export default function Index() {
 
     return (
         <View style={styles.container}>
+            <Text style={styles.text}>
+                <>statelist:
+                    {JSON.stringify(stateList.getHeap())}</>
+            </Text>
             {user ? (
                 <Text style={styles.text}>
                     Welcome {user?.displayName || user?.name || "Not Authenticated"}
@@ -94,10 +163,10 @@ export default function Index() {
                         onPress={() => ws?.send(`{"action": "login", "email": "${userName}", "password": "${password}"}`)}/>
             )}
 
-            {user && !gameState && (
+            {user && "id" in user && gameState && !("id" in gameState) && (
                 <>
                     <TextInput onChangeText={setGameCode}/>
-                    <Select options={options} onInputChange={setTeamID}/>
+                    <Select options={options} onChange={(data) => setTeamID(data?.value)}/>
                     <Button title={"Join"}
                             onPress={() => ws?.send(`{"action": "join", "code": "${gameCode}", "teamId": "${teamID}"}`)}/>
                 </>

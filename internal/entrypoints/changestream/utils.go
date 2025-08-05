@@ -3,6 +3,7 @@ package changestream
 import (
 	"context"
 	"fmt"
+
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -45,14 +46,14 @@ func getFilterPipeline(filter *bson.D) mongo.Pipeline {
 
 func stringToOpCode(str string) (OperationType, error) {
 	switch str {
-	case string(StatusInsert):
-		return StatusInsert, nil
-	case string(StatusDelete):
-		return StatusDelete, nil
-	case string(StatusUpdate):
-		return StatusUpdate, nil
-	case string(StatusReplace):
-		return StatusReplace, nil
+	case string(OpInsert):
+		return OpInsert, nil
+	case string(OpDelete):
+		return OpDelete, nil
+	case string(OpUpdate):
+		return OpUpdate, nil
+	case string(OpReplace):
+		return OpReplace, nil
 	}
 	return "", fmt.Errorf("could not parse update type from changestream, got %v", str)
 }

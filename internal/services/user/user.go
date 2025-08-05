@@ -2,9 +2,11 @@ package user
 
 import (
 	"fmt"
+
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/robbiebyrd/indri/internal/models"
 	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type Service struct {
@@ -103,20 +105,16 @@ func (us *Service) New(user models.CreateUser) (*models.User, error) {
 		return nil, fmt.Errorf("email address is required")
 	}
 
-	if user.Password == "" {
+	if user.Password == nil || *user.Password == "" {
 		return nil, fmt.Errorf("password is required")
 	}
 
-	if user.Password == "" {
-		return nil, fmt.Errorf("password is required")
-	}
-
-	hash, err := us.hashPassword(user.Password)
+	hash, err := us.hashPassword(*user.Password)
 	if err != nil {
 		return nil, err
 	}
 
-	user.Password = hash
+	user.Password = &hash
 
 	newUser, err := us.userRepo.New(user)
 	if err != nil {

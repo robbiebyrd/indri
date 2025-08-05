@@ -109,7 +109,7 @@ func (cs *Service) sendToAll(jsonData []byte) error {
 func (cs *Service) sendToPlayer(gameId, playerId string, jsonData []byte) error {
 	log.Printf("Broadcasting to game %v and player %v\n", gameId, playerId)
 
-	if _, err := cs.userRepo.Get(playerId); err != nil {
+	if _, err := cs.ur.Get(playerId); err != nil {
 		return fmt.Errorf("could not get player %v: %v", playerId, err)
 	}
 
@@ -125,7 +125,7 @@ func (cs *Service) sendToPlayers(gameId string, playerIds []string, jsonData []b
 	log.Printf("Broadcasting to game %v and players %v\n", gameId, playerIds)
 
 	for _, playerId := range playerIds {
-		if _, err := cs.userRepo.Get(playerId); err != nil {
+		if _, err := cs.ur.Get(playerId); err != nil {
 			return fmt.Errorf("could not get player %v: %v", playerId, err)
 		}
 	}

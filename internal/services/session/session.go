@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
+
 	"github.com/olahol/melody"
 )
 
@@ -14,6 +15,11 @@ type Service struct {
 // NewService creates a new repository for accessing game data.
 func NewService(s *melody.Session, m *melody.Melody) *Service {
 	return &Service{s, m}
+}
+
+// Write accepts a string and writes bytes to the websocket session.
+func (ss *Service) Write(data []byte) error {
+	return ss.s.Write(data)
 }
 
 // GetStandardKeys returns a set of standard session attributes that identify a user in a game.

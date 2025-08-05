@@ -1,10 +1,9 @@
 package changestream
 
 import (
+	"context"
 	"fmt"
 	"log"
-
-	"context"
 )
 
 func (cm *MongoChangeMonitor) Monitor(ctx context.Context, channel chan<- ChangeEventOut) {
@@ -48,7 +47,9 @@ func (cm *MongoChangeMonitor) processEvent() (*ChangeEventOut, error) {
 		return nil, err
 	}
 
-	log.Printf("Processing event: id=%v, op=%v", id, opType)
+	if opType != OpUpdate {
+		return nil, fmt.Errorf("unexpected operation type: %v", opType)
+	}
 
 	return &ChangeEventOut{
 		ID:            id,
