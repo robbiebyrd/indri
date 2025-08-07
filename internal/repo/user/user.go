@@ -8,6 +8,8 @@ import (
 	"github.com/chenmingyong0423/go-mongox/v2"
 	"github.com/chenmingyong0423/go-mongox/v2/builder/query"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -23,14 +25,28 @@ type Repo struct {
 }
 
 // NewRepo creates a new repository for accessing user data.
-func NewRepo(ctx context.Context, client *mongodb.Client) *Repo {
+func NewRepo(ctx context.Context, client *mongodb.Client) (*Repo, error) {
 	userColl := mongox.NewCollection[models.User](client.Database, collectionName)
+
+	indexModel := mongo.IndexModel{
+		Keys: bson.D{
+			{"teamId", 1},
+			{"gameId", 1},
+			{"userId", 1},
+		},
+		Options: options.Index().SetUnique(true),
+	}
+
+	_, err := userColl.Collection().Indexes().CreateOne(ctx, indexModel)
+	if err != nil {
+		return nil, err
+	}
 
 	return &Repo{
 		ctx:        &ctx,
 		client:     client,
 		collection: userColl,
-	}
+	}, nil
 }
 
 // New creates a new user, given an ID.
@@ -42,6 +58,7 @@ func (s *Repo) New(user models.CreateUser) (*models.User, error) {
 	}
 
 	user.CreatedAt = time.Now()
+
 	doc, err := repoUtils.CreateBSONDoc(user)
 	if err != nil {
 		return nil, err

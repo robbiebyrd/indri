@@ -3,11 +3,13 @@ package stage
 import (
 	"errors"
 	"fmt"
+	"slices"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+
 	"github.com/robbiebyrd/indri/internal/models"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"slices"
 )
 
 type Service struct {
@@ -135,7 +137,7 @@ func (ss *Service) LoadFromScript(gameId string, scriptId string) error {
 		return fmt.Errorf("gameId cannot be nil")
 	}
 
-	err := ss.gameRepo.UpdateField(gameId, "stage", ss.gameService.Script.DefaultStage)
+	err := ss.gameRepo.UpdateField(gameId, "stage", ss.gameService.Script.Stage)
 	if err != nil {
 		return err
 	}
@@ -157,7 +159,7 @@ func (ss *Service) LoadSceneFromScript(
 
 	var sceneData interface{}
 
-	sceneData, ok := ss.gameService.Script.DefaultStage.Scenes[sceneId]
+	sceneData, ok := ss.gameService.Script.Stage.Scenes[sceneId]
 	if !ok {
 		return fmt.Errorf("scene %s does not exist in the default stage", sceneId)
 	}
@@ -167,9 +169,9 @@ func (ss *Service) LoadSceneFromScript(
 
 		switch *dataType {
 		case models.DataStorePrivate:
-			sceneData = ss.gameService.Script.DefaultStage.Scenes[sceneId].PrivateData
+			sceneData = ss.gameService.Script.Stage.Scenes[sceneId].PrivateData
 		case models.DataStorePublic:
-			sceneData = ss.gameService.Script.DefaultStage.Scenes[sceneId].PublicData
+			sceneData = ss.gameService.Script.Stage.Scenes[sceneId].PublicData
 		default:
 			return fmt.Errorf("invalid data store type %s", dataType.String())
 		}

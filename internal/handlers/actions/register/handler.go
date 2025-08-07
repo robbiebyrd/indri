@@ -3,10 +3,12 @@ package register
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/olahol/melody"
+
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/session"
+	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -21,12 +23,12 @@ func (h *Handler) Handle(
 	s *melody.Session,
 	decodedMsg map[string]interface{},
 ) error {
-	ss := session.NewService(s, h.i.MelodyClient)
+	ss := connection.NewService(s, h.i.MelodyClient)
 	authExistsErrorMessage := []byte(`{"registered": false, "error": "user already logged in"}`)
 
 	_, err := ss.GetKeyAsString("userId")
 	if err == nil {
-		_ = s.Write(authExistsErrorMessage)
+		_ = ss.Write(authExistsErrorMessage)
 		return nil
 	}
 
@@ -40,7 +42,7 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	err = s.Write([]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID.Hex())))
+	err = ss.Write([]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID.Hex())))
 	if err != nil {
 		return err
 	}

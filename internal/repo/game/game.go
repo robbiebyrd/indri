@@ -29,7 +29,9 @@ func NewRepo(ctx context.Context, client *mongodb.Client) (*Repo, error) {
 	gameColl := mongox.NewCollection[models.Game](client.Database, collectionName)
 
 	indexModel := mongo.IndexModel{
-		Keys:    bson.M{"code": 1}, // Ascending index on 'email'
+		Keys: bson.D{
+			{"code", 1},
+		},
 		Options: options.Index().SetUnique(true),
 	}
 
@@ -51,11 +53,12 @@ func (s *Repo) New(code string, script *models.Script) (*models.Game, error) {
 	gameDataModel := models.CreateGame{
 		Code:      code,
 		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 
 	if script != nil {
-		gameDataModel.Teams = &script.DefaultTeams
-		gameDataModel.Stage = &script.DefaultStage
+		gameDataModel.Teams = &script.Teams
+		gameDataModel.Stage = &script.Stage
 		gameDataModel.PublicData = script.PublicData
 		gameDataModel.PrivateData = script.PrivateData
 	}
@@ -90,6 +93,11 @@ func (s *Repo) Get(id string) (*models.Game, error) {
 // FindByCode retrieves game data by its game code.
 func (s *Repo) FindByCode(gameCode string) (*models.Game, error) {
 	return s.collection.Finder().Filter(query.Eq("code", gameCode)).FindOne(*s.ctx)
+}
+
+// FindOpen retrieves game data by its game code.
+func (s *Repo) FindOpen() ([]*models.Game, error) {
+	return s.collection.Finder().Find(*s.ctx)
 }
 
 // GetIDHex returns the game code for a given game id.

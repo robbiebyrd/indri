@@ -3,8 +3,9 @@ package injector
 import (
 	"context"
 	"errors"
+
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/connection"
+	"github.com/robbiebyrd/indri/internal/services/broadcast"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	userService "github.com/robbiebyrd/indri/internal/services/user"
 )
@@ -27,7 +28,7 @@ func GetServices(ctx context.Context, gameScript *models.Script, clients *Client
 		return nil, err
 	}
 
-	cs, err := connection.NewService(ctx, clients.MelodyClient, repos.UserRepo)
+	cs, err := broadcast.NewService(ctx, clients.MelodyClient, repos.UserRepo)
 	if err != nil {
 		return nil, err
 	}

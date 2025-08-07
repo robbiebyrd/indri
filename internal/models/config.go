@@ -1,11 +1,11 @@
 package models
 
 type Script struct {
-	Config       Config                 `bson:"config,omitempty" json:"config,omitempty"`
-	DefaultTeams map[string]Team        `bson:"defaultTeams"     json:"defaultTeams,omitempty"`
-	DefaultStage Stage                  `bson:"defaultStage"     json:"defaultStage,omitempty"`
-	PublicData   map[string]interface{} `bson:"data"             json:"data,omitempty"`
-	PrivateData  map[string]interface{} `bson:"privateData"      json:"privateData,omitempty"`
+	Config      Config                 `bson:"config,omitempty" json:"config,omitempty"`
+	Teams       map[string]Team        `bson:"teams"            json:"teams,omitempty"`
+	Stage       Stage                  `bson:"stage"            json:"stage,omitempty"`
+	PublicData  map[string]interface{} `bson:"data"             json:"data,omitempty"`
+	PrivateData map[string]interface{} `bson:"privateData"      json:"privateData,omitempty"`
 }
 
 // Config sets configuration for the way teams are handled.

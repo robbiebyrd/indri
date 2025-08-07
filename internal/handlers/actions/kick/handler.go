@@ -2,12 +2,14 @@ package kick
 
 import (
 	"fmt"
+	"log"
+
 	"github.com/olahol/melody"
+
 	"github.com/robbiebyrd/indri/internal/entrypoints"
 	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
-	"github.com/robbiebyrd/indri/internal/services/session"
-	"log"
+	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -23,7 +25,7 @@ func (h *Handler) Handle(
 	s *melody.Session,
 	decodedMsg map[string]interface{},
 ) error {
-	ss := session.NewService(s, h.i.MelodyClient)
+	ss := connection.NewService(s, h.i.MelodyClient)
 
 	gameCode, teamId, err := handlerUtils.RequireGameCodeAndTeamID(decodedMsg)
 	if err != nil {

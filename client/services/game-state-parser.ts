@@ -1,14 +1,15 @@
-export interface Updates {
+declare interface Updates {
+    ts: string
     updated: Indexable
     removed: string[]
 }
 
-export interface Item {
+declare interface Item {
     timestamp: Date
     data: Updates
 }
 
-export interface Indexable {
+declare interface Indexable {
     [key: string]: any
 }
 
@@ -18,11 +19,32 @@ export class GameStateParser<Indexable> {
     private baseState?: Indexable = undefined
     private currentState?: Indexable = undefined
 
-    getHeap(): Item[] {
-        return this.updatesList
+    set(data: Indexable, timestamp: Date): void {
+        this.setCutoff(timestamp)
+        this.baseState = data
+        this.currentState = data
+        this.deleteBefore(timestamp)
     }
 
-    reapply(): void {
+    sort(): void {
+        this.updatesList.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+    }
+
+    update(data: Updates): void {
+        const timestamp = new Date(data.ts)
+        if (timestamp.getTime() < this.cutoff) {
+            return
+        }
+        this.updatesList.push({data, timestamp})
+        this.sort()
+        this.reapply()
+    }
+
+    current(): Indexable | undefined {
+        return this.currentState
+    }
+
+    private reapply(): void {
         if (this.isEmpty()) {
             return
         }
@@ -43,36 +65,8 @@ export class GameStateParser<Indexable> {
         }
     }
 
-    set(data: Indexable, timestamp: Date): void {
-        this.setCutoff(timestamp)
-        this.baseState = data
-        this.currentState = data
-        this.clear(timestamp)
-    }
-
-    sort(): void {
-        this.updatesList.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-    }
-
-    update(data: Updates, timestamp: Date): void {
-        if (timestamp.getTime() < this.cutoff) {
-            return
-        }
-        this.updatesList.push({data, timestamp})
-        this.sort()
-        this.reapply()
-    }
-
-    current(): Indexable | undefined {
-        return this.currentState
-    }
-
     private setCutoff(date: Date): void {
         this.cutoff = date.getTime()
-    }
-
-    private clear(date: Date): void {
-        this.deleteBefore(date)
     }
 
     private isEmpty(): boolean {
@@ -111,11 +105,8 @@ export class GameStateParser<Indexable> {
         const parts = path.split('.');
         let current: any = obj;
 
-        console.log("deleting", path)
-
         for (let i = 0; i < parts.length - 1; i++) {
             const part = parts[i];
-            console.log("current", current, typeof current)
             if (typeof current !== 'object' || current === null || !(part in current)) {
                 return obj;
             }
@@ -126,8 +117,6 @@ export class GameStateParser<Indexable> {
         if (typeof current === 'object' && current !== null && lastPart in current) {
             delete current[lastPart];
         }
-
-        console.log("after deleting", obj)
 
         return obj;
     }

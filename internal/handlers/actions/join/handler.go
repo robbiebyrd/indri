@@ -3,11 +3,13 @@ package join
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+
 	"github.com/olahol/melody"
+
 	"github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
-	"github.com/robbiebyrd/indri/internal/services/session"
-	"log"
+	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -23,7 +25,7 @@ func (h *Handler) Handle(
 	s *melody.Session,
 	decodedMsg map[string]interface{},
 ) error {
-	ss := session.NewService(s, h.i.MelodyClient)
+	ss := connection.NewService(s, h.i.MelodyClient)
 
 	gameCode, teamId := utils.ParseGameCodeAndTeamID(decodedMsg)
 	if gameCode == nil {
@@ -32,7 +34,7 @@ func (h *Handler) Handle(
 
 	userId, err := ss.GetKeyAsString("userId")
 	if err != nil {
-		_ = s.Write([]byte(`{"authenticated": false, "stage": { "currentScene": "login"}`))
+		_ = ss.Write([]byte(`{"authenticated": false, "stage": { "currentScene": "login"}`))
 		return fmt.Errorf("unable to get userId: %w", err)
 	}
 
@@ -68,7 +70,7 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	err = s.Write(gameJSONBytes)
+	err = ss.Write(gameJSONBytes)
 	if err != nil {
 		return err
 	}

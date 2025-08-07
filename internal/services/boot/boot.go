@@ -11,16 +11,17 @@ import (
 	"github.com/robbiebyrd/indri/internal/entrypoints"
 	cs "github.com/robbiebyrd/indri/internal/entrypoints/changestream"
 	"github.com/robbiebyrd/indri/internal/entrypoints/http"
+	"github.com/robbiebyrd/indri/internal/handlers/actions/inquire"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/join"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/kick"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/leave"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/login"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/refresh"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/register"
-	"github.com/robbiebyrd/indri/internal/handlers/message"
+	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/injector"
 	scriptRepo "github.com/robbiebyrd/indri/internal/repo/script"
-	"github.com/robbiebyrd/indri/internal/services/connection"
+	"github.com/robbiebyrd/indri/internal/services/broadcast"
 )
 
 func Start(i *injector.Injector) {
@@ -73,6 +74,7 @@ func Boot(scriptFilePath *string) (*injector.Injector, error) {
 		ClientsInjector:  clients,
 		ServicesInjector: services,
 		GlobalContext:    ctx,
+		Script:           gameScript,
 	}
 
 	registerHandlers(i)
@@ -89,10 +91,10 @@ func registerHandlers(i *injector.Injector) {
 		entrypoints.HandleDisconnect(s, i.MelodyClient, i.GameService)
 	})
 	i.MelodyClient.HandleMessage(func(s *melody.Session, msg []byte) {
-		message.HandleMessage(s, msg)
+		router.HandleMessage(s, msg)
 	})
 
-	actionToHandlerMap := []message.RegisterHandlersInput{
+	actionToHandlerMap := []router.RegisterHandlersInput{
 		{
 			Action:  "refresh",
 			Handler: refresh.New(i),
@@ -117,9 +119,13 @@ func registerHandlers(i *injector.Injector) {
 			Action:  "login",
 			Handler: login.New(i),
 		},
+		{
+			Action:  "inquire",
+			Handler: inquire.New(i),
+		},
 	}
 
-	errs := message.RegisterHandlers(actionToHandlerMap)
+	errs := router.RegisterHandlers(actionToHandlerMap)
 	if len(errs) > 0 {
 		for _, err := range errs {
 			log.Println(err)
@@ -129,7 +135,7 @@ func registerHandlers(i *injector.Injector) {
 	}
 }
 
-func monitorGameChanges(ctx context.Context, connService *connection.Service, changeMonitor *cs.MongoChangeMonitor) error {
+func monitorGameChanges(ctx context.Context, connService *broadcast.Service, changeMonitor *cs.MongoChangeMonitor) error {
 	receiver := make(chan cs.ChangeEventOut)
 
 	_, cancel := context.WithCancel(ctx)

@@ -1,14 +1,17 @@
 package entrypoints
 
 import (
-	"github.com/olahol/melody"
-	gameService "github.com/robbiebyrd/indri/internal/services/game"
-	"github.com/robbiebyrd/indri/internal/services/session"
 	"log"
+
+	"github.com/olahol/melody"
+
+	"github.com/robbiebyrd/indri/internal/services/connection"
+	gameService "github.com/robbiebyrd/indri/internal/services/game"
 )
 
 func HandleConnect(s *melody.Session, m *melody.Melody, gameService *gameService.Service) {
-	err := s.Write([]byte(`{ "stage": { "currentScene": "login"} }`))
+	ss := connection.NewService(s, m)
+	err := ss.Write([]byte(`{ "stage": { "currentScene": "login"} }`))
 	if err != nil {
 		log.Printf("Error sending ready message to session: %v\n", err)
 		HandleDisconnect(s, m, gameService)
@@ -16,7 +19,7 @@ func HandleConnect(s *melody.Session, m *melody.Melody, gameService *gameService
 }
 
 func HandleDisconnect(s *melody.Session, m *melody.Melody, gameService *gameService.Service) {
-	ss := session.NewService(s, m)
+	ss := connection.NewService(s, m)
 
 	gameId, teamId, playerId, err := ss.GetStandardKeys()
 	if err != nil || gameId == nil || teamId == nil || playerId == nil {
@@ -24,7 +27,7 @@ func HandleDisconnect(s *melody.Session, m *melody.Melody, gameService *gameServ
 		return
 	}
 
-	err = s.Write([]byte(`{"disconnected": true}`))
+	err = ss.Write([]byte(`{"disconnected": true}`))
 	if err != nil {
 		log.Printf("error writing disconnected: %v\n", err)
 	}

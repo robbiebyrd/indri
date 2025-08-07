@@ -1,15 +1,41 @@
-package connection
+package broadcast
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/olahol/melody"
-	"github.com/robbiebyrd/indri/internal/services/session"
 	"log"
 	"slices"
 	"sort"
+
+	"github.com/olahol/melody"
+
+	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
+	"github.com/robbiebyrd/indri/internal/services/connection"
 )
+
+type Service struct {
+	m  *melody.Melody
+	ur *userRepo.Repo
+}
+
+// NewService creates a new repository for accessing user data.
+func NewService(ctx context.Context, m *melody.Melody, userRepo *userRepo.Repo) (*Service, error) {
+	if ctx == nil {
+		return nil, errors.New("context was not passed to the connection service")
+	}
+
+	if m == nil {
+		return nil, errors.New("melody client was not passed to the connection service")
+	}
+
+	if userRepo == nil {
+		return nil, errors.New("user repo was not passed to the connection service")
+	}
+
+	return &Service{m, userRepo}, nil
+}
 
 func (cs *Service) Broadcast(gameId *string, teamId *string, data interface{}) error {
 	if gameId == nil {
@@ -85,7 +111,7 @@ func (cs *Service) sendToTeam(gameId string, teamId string, jsonData []byte) err
 	log.Printf("Broadcasting to game %v and team %v\n", gameId, teamId)
 
 	if err := cs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		ss := session.NewService(s, cs.m)
+		ss := connection.NewService(s, cs.m)
 		thisGameId, thisTeamId, _, err := ss.GetStandardKeys()
 		return err != nil && *thisGameId == gameId && *thisTeamId == teamId
 	}); err != nil {

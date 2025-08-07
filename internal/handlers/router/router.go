@@ -1,4 +1,4 @@
-package message
+package router
 
 import (
 	"github.com/olahol/melody"

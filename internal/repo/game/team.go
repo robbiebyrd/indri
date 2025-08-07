@@ -2,9 +2,10 @@ package game
 
 import (
 	"fmt"
+	"slices"
+
 	"github.com/robbiebyrd/indri/internal/models"
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
-	"slices"
 )
 
 // HasPlayerOnTeam determines if a given userId is in a game and on a given team.
@@ -111,7 +112,7 @@ func (s *Repo) RemovePlayerFromTeam(id string, userId string) error {
 		return nil
 	}
 
-	if err = s.UpdateField(id, "teams", g.Teams); err != nil { //nolint:wsl
+	if err = s.UpdateField(id, "teams", g.Teams); err != nil {
 		return err
 	}
 

@@ -5,7 +5,7 @@
     "maxPlayersPerTeam": 2,
     "profanityFilter": true
   },
-  "defaultTeams": {
+  "teams": {
     "team1": {
       "name": "Team 1",
       "playerIds": [],
@@ -19,7 +19,7 @@
       "privateData": {}
     }
   },
-  "defaultStage": {
+  "stage": {
     "currentScene": "lobby",
     "sceneOrder": [
       "lobby"

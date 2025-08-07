@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
 	"github.com/olahol/melody"
+
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/session"
+	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -32,7 +34,7 @@ func (h *Handler) Handle(
 		return fmt.Errorf("password not a string or empty string")
 	}
 
-	ss := session.NewService(s, h.i.MelodyClient)
+	ss := connection.NewService(s, h.i.MelodyClient)
 
 	var user *models.User
 
@@ -62,7 +64,7 @@ func (h *Handler) Handle(
 		[]byte(`}`),
 	}, []byte(""))
 
-	err = s.Write(authSuccessMessage)
+	err = ss.Write(authSuccessMessage)
 	if err != nil {
 		return err
 	}
