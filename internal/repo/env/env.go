@@ -1,9 +1,10 @@
 package env
 
 import (
+	"log"
+
 	"github.com/joho/godotenv"
 	"github.com/kelseyhightower/envconfig"
-	"log"
 )
 
 type Vars struct {

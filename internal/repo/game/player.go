@@ -2,14 +2,17 @@ package game
 
 import (
 	"fmt"
+	"slices"
+	"time"
+
 	goaway "github.com/TwiN/go-away"
+
 	"github.com/robbiebyrd/indri/internal/models"
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
-	"slices"
 )
 
 // HasPlayer determines if a given userId is in a game.
-func (s *Repo) HasPlayer(id string, userId string) bool {
+func (s *Store) HasPlayer(id string, userId string) bool {
 	g, err := s.Get(id)
 	if err != nil {
 		return false
@@ -25,7 +28,7 @@ func (s *Repo) HasPlayer(id string, userId string) bool {
 }
 
 // PlayerOnATeam determines if a given userId is in a game.
-func (s *Repo) PlayerOnATeam(id string, userId string) bool {
+func (s *Store) PlayerOnATeam(id string, userId string) bool {
 	if hasPlayer := s.HasPlayer(id, userId); !hasPlayer {
 		return false
 	}
@@ -45,7 +48,7 @@ func (s *Repo) PlayerOnATeam(id string, userId string) bool {
 }
 
 // AddPlayer adds a player to the game.
-func (s *Repo) AddPlayer(id string, userId string, displayName string) error {
+func (s *Store) AddPlayer(id string, userId string, displayName string) error {
 	if s.HasPlayer(id, userId) {
 		return fmt.Errorf("player with id %v already exists in game %v", userId, id)
 	}
@@ -75,7 +78,18 @@ func (s *Repo) AddPlayer(id string, userId string, displayName string) error {
 		Connected: false,
 	}
 
-	if err = s.Update(id, &models.UpdateGame{Teams: &g.Teams, Players: &g.Players, Stage: &g.Stage}); err != nil {
+	updateGame := &models.UpdateGame{
+		Teams:       &g.Teams,
+		Players:     &g.Players,
+		Stage:       &g.Stage,
+		UpdatedAt:   time.Time{},
+		PublicData:  g.PublicData,
+		PrivateData: g.PrivateData,
+		PlayerData:  g.PlayerData,
+		Private:     g.Private,
+	}
+
+	if err = s.Update(id, updateGame); err != nil {
 		return err
 	}
 
@@ -83,7 +97,7 @@ func (s *Repo) AddPlayer(id string, userId string, displayName string) error {
 }
 
 // RemovePlayer removes a player from a game.
-func (s *Repo) RemovePlayer(id string, userId string) error {
+func (s *Store) RemovePlayer(id string, userId string) error {
 	err := sessionUtils.ValidateGameAndUser(id, userId)
 	if err != nil {
 		return err
@@ -101,7 +115,18 @@ func (s *Repo) RemovePlayer(id string, userId string) error {
 
 	delete(g.Players, userId)
 
-	if err = s.Update(id, &models.UpdateGame{Players: &g.Players, Teams: &g.Teams, Stage: &g.Stage}); err != nil {
+	updateGame := &models.UpdateGame{
+		Teams:       &g.Teams,
+		Players:     &g.Players,
+		Stage:       &g.Stage,
+		UpdatedAt:   time.Time{},
+		PublicData:  g.PublicData,
+		PrivateData: g.PrivateData,
+		PlayerData:  g.PlayerData,
+		Private:     g.Private,
+	}
+
+	if err = s.Update(id, updateGame); err != nil {
 		return err
 	}
 
@@ -109,17 +134,17 @@ func (s *Repo) RemovePlayer(id string, userId string) error {
 }
 
 // ConnectPlayer marks the player as offline.
-func (s *Repo) ConnectPlayer(id string, userId string) error {
+func (s *Store) ConnectPlayer(id string, userId string) error {
 	return s.markPlayerConnected(id, userId, true)
 }
 
 // DisconnectPlayer marks the player as offline.
-func (s *Repo) DisconnectPlayer(id string, userId string) error {
+func (s *Store) DisconnectPlayer(id string, userId string) error {
 	return s.markPlayerConnected(id, userId, false)
 }
 
 // markPlayerConnected marks the player's connected status.
-func (s *Repo) markPlayerConnected(
+func (s *Store) markPlayerConnected(
 	id string,
 	userId string,
 	connected bool,
@@ -141,7 +166,7 @@ func (s *Repo) markPlayerConnected(
 	return nil
 }
 
-func (s *Repo) validateKeysAndGetGame(id string, userId string) (*models.Game, error) {
+func (s *Store) validateKeysAndGetGame(id string, userId string) (*models.Game, error) {
 	err := sessionUtils.ValidateGameAndUser(id, userId)
 	if err != nil {
 		return nil, err

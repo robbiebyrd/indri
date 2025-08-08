@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+
 	"github.com/robbiebyrd/indri/internal/services/boot"
 )
 
@@ -15,5 +16,5 @@ func main() {
 		panic(fmt.Errorf("could not bootstrap: %v", err))
 	}
 
-	boot.Start(i)
+	boot.Serve(i)
 }

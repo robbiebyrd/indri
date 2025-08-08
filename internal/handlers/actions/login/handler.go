@@ -39,19 +39,25 @@ func (h *Handler) Handle(
 	var user *models.User
 
 	currentUserId, err := ss.GetKeyAsString("userId")
-	if err == nil {
-		user, err = h.i.UserService.Get(*currentUserId)
+	if err != nil {
+		session, err := h.i.AuthService.Authenticate(&emailAddress, &password)
 		if err != nil {
 			return err
 		}
-	} else {
-		user, err = h.i.UserService.Authenticate(&emailAddress, &password)
-		if err != nil {
-			return err
-		}
+
+		ss.SetKey("sessionId", session.ID.Hex())
+		currentUserId = session.UserID
 	}
 
-	ss.SetKey("userId", user.ID.Hex())
+	user, err = h.i.UserService.Get(*currentUserId)
+	if err != nil {
+		return err
+	}
+
+	sessionId, err := ss.GetKeyAsString("sessionId")
+	if err != nil {
+		return err
+	}
 
 	jsonUserBytes, err := json.Marshal(h.i.UserService.Sanitize(user))
 	if err != nil {
@@ -59,7 +65,7 @@ func (h *Handler) Handle(
 	}
 
 	authSuccessMessage := bytes.Join([][]byte{
-		[]byte(`{"authenticated": true, "user": `),
+		[]byte(`{"authenticated": true, "sessionId": "` + *sessionId + `", "user": `),
 		jsonUserBytes,
 		[]byte(`}`),
 	}, []byte(""))

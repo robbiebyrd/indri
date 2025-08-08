@@ -18,42 +18,44 @@ import (
 
 var collectionName = "game"
 
-type Repo struct {
+type Store struct {
 	ctx        *context.Context
 	collection *mongox.Collection[models.Game]
 	client     *mongodb.Client
 }
 
-// NewRepo creates a new repository for accessing game data.
-func NewRepo(ctx context.Context, client *mongodb.Client) (*Repo, error) {
+// NewStore creates a new repository for accessing game data.
+func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
 	gameColl := mongox.NewCollection[models.Game](client.Database, collectionName)
 
-	indexModel := mongo.IndexModel{
-		Keys: bson.D{
-			{"code", 1},
+	indexModels := []mongo.IndexModel{
+		{
+			Keys: bson.D{
+				{"code", 1},
+			},
+			Options: options.Index().SetUnique(true),
 		},
-		Options: options.Index().SetUnique(true),
 	}
 
-	_, err := gameColl.Collection().Indexes().CreateOne(ctx, indexModel)
+	_, err := gameColl.Collection().Indexes().CreateMany(ctx, indexModels)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Repo{
+	return &Store{
 		ctx:        &ctx,
 		client:     client,
 		collection: gameColl,
 	}, nil
-
 }
 
 // New creates a new game, given an ID.
-func (s *Repo) New(code string, script *models.Script) (*models.Game, error) {
+func (s *Store) New(code string, script *models.Script, privateGame bool) (*models.Game, error) {
 	gameDataModel := models.CreateGame{
 		Code:      code,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+		Private:   privateGame,
 	}
 
 	if script != nil {
@@ -81,7 +83,7 @@ func (s *Repo) New(code string, script *models.Script) (*models.Game, error) {
 }
 
 // Get retrieves game data for a specific game ID.
-func (s *Repo) Get(id string) (*models.Game, error) {
+func (s *Store) Get(id string) (*models.Game, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, err
@@ -91,17 +93,17 @@ func (s *Repo) Get(id string) (*models.Game, error) {
 }
 
 // FindByCode retrieves game data by its game code.
-func (s *Repo) FindByCode(gameCode string) (*models.Game, error) {
+func (s *Store) FindByCode(gameCode string) (*models.Game, error) {
 	return s.collection.Finder().Filter(query.Eq("code", gameCode)).FindOne(*s.ctx)
 }
 
 // FindOpen retrieves game data by its game code.
-func (s *Repo) FindOpen() ([]*models.Game, error) {
-	return s.collection.Finder().Find(*s.ctx)
+func (s *Store) FindOpen(limit int) ([]*models.Game, error) {
+	return s.collection.Finder().Filter(query.Ne("private", true)).Limit(int64(limit)).Find(*s.ctx)
 }
 
 // GetIDHex returns the game code for a given game id.
-func (s *Repo) GetIDHex(gameCode string) (*string, error) {
+func (s *Store) GetIDHex(gameCode string) (*string, error) {
 	retrievedGame, err := s.FindByCode(gameCode)
 	if err != nil {
 		return nil, err
@@ -113,7 +115,7 @@ func (s *Repo) GetIDHex(gameCode string) (*string, error) {
 }
 
 // Exists checks to see if a game with the given ID already exists.
-func (s *Repo) Exists(id string) (bool, error) {
+func (s *Store) Exists(id string) (bool, error) {
 	count, err := s.collection.Finder().Filter(query.Eq("code", id)).Count(*s.ctx)
 	if err != nil {
 		return false, err
@@ -123,7 +125,7 @@ func (s *Repo) Exists(id string) (bool, error) {
 }
 
 // Update saves game data to the repository.
-func (s *Repo) Update(id string, game *models.UpdateGame) error {
+func (s *Store) Update(id string, game *models.UpdateGame) error {
 	filterDoc, err := s.getBsonDocForID(id)
 	if err != nil {
 		return err
@@ -153,7 +155,7 @@ func (s *Repo) Update(id string, game *models.UpdateGame) error {
 }
 
 // UpdateField updates a field in the game.
-func (s *Repo) UpdateField(id string, key string, value interface{}) error {
+func (s *Store) UpdateField(id string, key string, value interface{}) error {
 	filterDoc, err := s.getBsonDocForID(id)
 	if err != nil {
 		return err
@@ -181,7 +183,7 @@ func (s *Repo) UpdateField(id string, key string, value interface{}) error {
 }
 
 // DeleteField removes a field from a game.
-func (s *Repo) DeleteField(id string, key string) error {
+func (s *Store) DeleteField(id string, key string) error {
 	filterDoc, err := s.getBsonDocForID(id)
 	if err != nil {
 		return err
@@ -210,7 +212,7 @@ func (s *Repo) DeleteField(id string, key string) error {
 	return nil
 }
 
-func (s *Repo) getBsonDocForID(id string) (bson.D, error) {
+func (s *Store) getBsonDocForID(id string) (bson.D, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, err

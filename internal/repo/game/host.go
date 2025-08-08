@@ -1,7 +1,7 @@
 package game
 
 // HasHost checks to see if the game has a host already.
-func (s *Repo) HasHost(id string) bool {
+func (s *Store) HasHost(id string) bool {
 	g, err := s.Get(id)
 	if err != nil {
 		return false
@@ -17,7 +17,7 @@ func (s *Repo) HasHost(id string) bool {
 }
 
 // PlayerIsHost checks to see if a player is currently the host of the game.
-func (s *Repo) PlayerIsHost(id string, playerId string) bool {
+func (s *Store) PlayerIsHost(id string, playerId string) bool {
 	g, err := s.Get(id)
 	if err != nil {
 		return false
@@ -26,7 +26,7 @@ func (s *Repo) PlayerIsHost(id string, playerId string) bool {
 	return g.Players[playerId].Host
 }
 
-func (s *Repo) UnsetHost(id string) error {
+func (s *Store) UnsetHost(id string) error {
 	g, err := s.Get(id)
 	if err != nil {
 		return err
@@ -43,7 +43,7 @@ func (s *Repo) UnsetHost(id string) error {
 }
 
 // SetPlayerAsHost checks to see if a player is currently the host of the game.
-func (s *Repo) SetPlayerAsHost(id string, playerId string) error {
+func (s *Store) SetPlayerAsHost(id string, playerId string) error {
 	if !s.HasHost(id) {
 		err := s.UnsetHost(id)
 		if err != nil {

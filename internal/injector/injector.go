@@ -5,36 +5,41 @@ import (
 
 	"github.com/olahol/melody"
 
-	"github.com/robbiebyrd/indri/internal/clients/mongodb"
+	mongodbClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/entrypoints/changestream"
 	"github.com/robbiebyrd/indri/internal/models"
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
+	scriptRepo "github.com/robbiebyrd/indri/internal/repo/script"
 	sessionRepo "github.com/robbiebyrd/indri/internal/repo/session"
 	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
-	connectionService "github.com/robbiebyrd/indri/internal/services/connection"
+	authSevice "github.com/robbiebyrd/indri/internal/services/authentication"
+	broadcastService "github.com/robbiebyrd/indri/internal/services/broadcast"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
+	sessionService "github.com/robbiebyrd/indri/internal/services/session"
 	userService "github.com/robbiebyrd/indri/internal/services/user"
 )
 
 type ReposInjector struct {
 	EnvVars     *envVars.Vars
-	GameRepo    *gameRepo.Repo
-	UserRepo    *userRepo.Repo
-	SessionRepo *sessionRepo.Repo
+	GameRepo    *gameRepo.Store
+	UserRepo    *userRepo.Store
+	SessionRepo *sessionRepo.Store
+	ScriptRepo *scriptRepo.Store
 }
 
 type ClientsInjector struct {
-	MongoDBClient *mongodb.Client
+	MongoDBClient *mongodbClient.Client
 	MelodyClient  *melody.Melody
 	GlobalMonitor *changestream.MongoChangeMonitor
-	Context       context.Context
 }
 
 type ServicesInjector struct {
-	GameService       *gameService.Service
-	ConnectionService *connectionService.Service
-	UserService       *userService.Service
+	GameService      *gameService.Service
+	BroadcastService *broadcastService.Service
+	UserService      *userService.Service
+	AuthService      *authSevice.Service
+	SessionService   *sessionService.Service
 }
 
 type Injector struct {

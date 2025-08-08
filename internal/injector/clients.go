@@ -2,7 +2,9 @@ package injector
 
 import (
 	"context"
+
 	"github.com/olahol/melody"
+
 	mClient "github.com/robbiebyrd/indri/internal/clients/melody"
 	mongoClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/entrypoints/changestream"
@@ -41,6 +43,5 @@ func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, melodyCl
 		MongoDBClient: mongodbClient,
 		MelodyClient:  melodyClient,
 		GlobalMonitor: globalMonitor,
-		Context:       ctx,
 	}, nil
 }

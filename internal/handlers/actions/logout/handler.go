@@ -2,6 +2,7 @@ package logout
 
 import (
 	"github.com/olahol/melody"
+
 	"github.com/robbiebyrd/indri/internal/entrypoints"
 	"github.com/robbiebyrd/indri/internal/injector"
 )
@@ -18,6 +19,6 @@ func (h *Handler) Handle(
 	s *melody.Session,
 	_ map[string]interface{},
 ) error {
-	entrypoints.HandleDisconnect(s, h.i.MelodyClient, h.i.GameService)
+	entrypoints.HandleDisconnect(s, h.i.MelodyClient, h.i.GameService, h.i.SessionService)
 	return nil
 }

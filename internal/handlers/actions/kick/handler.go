@@ -25,9 +25,9 @@ func (h *Handler) Handle(
 	s *melody.Session,
 	decodedMsg map[string]interface{},
 ) error {
-	ss := connection.NewService(s, h.i.MelodyClient)
+	cs := connection.NewService(s, h.i.MelodyClient)
 
-	gameCode, teamId, err := handlerUtils.RequireGameCodeAndTeamID(decodedMsg)
+	gameCode, err := handlerUtils.RequireGameCode(decodedMsg)
 	if err != nil {
 		return err
 	}
@@ -44,22 +44,24 @@ func (h *Handler) Handle(
 
 	gameId := g.ID.Hex()
 
-	actorGameId, _, actorPlayerId, err := ss.GetStandardKeys()
+	session, err := h.i.SessionService.GetByUserID(userId)
 	if err != nil {
 		return err
 	}
 
-	if *actorGameId != gameId {
+	sessionId := session.ID.Hex()
+
+	if *session.GameID != gameId {
 		return fmt.Errorf("attempt to kick %v from game %v because player %v "+
-			"isn't in the same game", userId, *gameCode, *actorPlayerId)
+			"isn't in the same game", userId, *gameCode, *session.UserID)
 	}
 
-	if !g.Players[*actorPlayerId].Host {
+	if !g.Players[*session.UserID].Host {
 		return fmt.Errorf("attempt to kick %v from game %v failed because %v "+
-			"isn't the game host", userId, *gameCode, *actorPlayerId)
+			"isn't the game host", userId, *gameCode, *session.UserID)
 	}
 
-	userSession, err := ss.Get(&gameId, teamId, &userId)
+	userConnection, err := cs.Get(&sessionId)
 	if err != nil {
 		return err
 	}
@@ -69,7 +71,7 @@ func (h *Handler) Handle(
 		log.Printf("could not disconnect player %v from game %v: %v\n", userId, gameCode, err)
 	}
 
-	entrypoints.HandleDisconnect(userSession, h.i.MelodyClient, h.i.GameService)
+	entrypoints.HandleDisconnect(userConnection, h.i.MelodyClient, h.i.GameService, h.i.SessionService)
 
 	return nil
 }

@@ -3,21 +3,23 @@ package user
 import (
 	"fmt"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/robbiebyrd/indri/internal/models"
 	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
+	"github.com/robbiebyrd/indri/internal/services/utils"
 )
 
 type Service struct {
-	userRepo *userRepo.Repo
+	userRepo *userRepo.Store
 }
 
 // NewService creates a new repository for accessing user data.
-func NewService(ur *userRepo.Repo) *Service {
+func NewService(ur *userRepo.Store) (*Service, error) {
+	if ur == nil {
+		return nil, fmt.Errorf("userRepo is required")
+	}
 	return &Service{
 		userRepo: ur,
-	}
+	}, nil
 }
 
 // Sanitize removes private items.
@@ -33,28 +35,6 @@ func (us *Service) Get(id string) (*models.User, error) {
 	}
 
 	return us.userRepo.Get(id)
-}
-
-func (us *Service) Authenticate(email *string, password *string) (*models.User, error) {
-	if password == nil || *password == "" {
-		return nil, fmt.Errorf("password cannot be nil or empty")
-	}
-	if email == nil || *email == "" {
-		return nil, fmt.Errorf("email cannot be nil or empty")
-	}
-
-	storedUser, err := us.Find(email)
-	if err != nil {
-		return nil, fmt.Errorf("user not found when authenticating: %v", err)
-	} else if storedUser.Password == nil {
-		return nil, fmt.Errorf("user has not password set")
-	}
-
-	if !us.checkPasswordHash(*password, *storedUser.Password) {
-		return nil, fmt.Errorf("password does not match")
-	}
-
-	return storedUser, nil
 }
 
 // Find retrieves user data for a specific user via email address and returns an error if not found.
@@ -83,7 +63,7 @@ func (us *Service) Exists(id *string) bool {
 // Update saves user data to the repository.
 func (us *Service) Update(user *models.UpdateUser) error {
 	if user.Password != nil {
-		hash, err := us.hashPassword(*user.Password)
+		hash, err := utils.HashPassword(*user.Password)
 		if err != nil {
 			return err
 		}
@@ -109,7 +89,7 @@ func (us *Service) New(user models.CreateUser) (*models.User, error) {
 		return nil, fmt.Errorf("password is required")
 	}
 
-	hash, err := us.hashPassword(*user.Password)
+	hash, err := utils.HashPassword(*user.Password)
 	if err != nil {
 		return nil, err
 	}
@@ -122,14 +102,4 @@ func (us *Service) New(user models.CreateUser) (*models.User, error) {
 	}
 
 	return newUser, nil
-}
-
-func (us *Service) checkPasswordHash(password, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	return err == nil
-}
-
-func (us *Service) hashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost) // or a higher cost like 14
-	return string(bytes), err
 }

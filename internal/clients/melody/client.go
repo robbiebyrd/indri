@@ -1,32 +1,32 @@
 package melody
 
 import (
-	"github.com/olahol/melody"
-	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	"time"
+
+	"github.com/olahol/melody"
+
+	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 )
 
-/*
-New returns a singleton instance of a configured Melody client.
-It ensures only one Melody client is created and reused throughout the application.
+var melodyClient *melody.Melody
 
-Returns:
-
-	*melody.Melody: A pointer to the singleton Melody client instance.
-*/
 func New() *melody.Melody {
-	m := melody.New()
+	if melodyClient != nil {
+		return melodyClient
+	}
 
 	vars := envVars.GetEnv()
 
-	m.Config = &melody.Config{
+	melodyClient := melody.New()
+
+	melodyClient.Config = &melody.Config{
 		WriteWait:                 time.Duration(vars.WSWriteTimeout) * time.Second,
 		PongWait:                  time.Duration(vars.WSPongTimeoutSeconds) * time.Second,
 		PingPeriod:                time.Duration(vars.WSPingPeriodSeconds) * time.Second,
-		ConcurrentMessageHandling: true,
+		ConcurrentMessageHandling: false,
 		MaxMessageSize:            int64(vars.WSMessageBufferSize),
 		MessageBufferSize:         vars.WSMessageBufferSize,
 	}
 
-	return m
+	return melodyClient
 }

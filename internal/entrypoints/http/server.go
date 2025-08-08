@@ -1,34 +1,31 @@
 package http
 
 import (
-	"github.com/olahol/melody"
-	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	"log"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/robbiebyrd/indri/internal/injector"
 )
 
 type GameDataKeys map[string]interface{}
 
-func Serve(m *melody.Melody) error {
-
-	vars := envVars.GetEnv()
-
+func Serve(i *injector.Injector) error {
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		err := m.HandleRequestWithKeys(w, r, GameDataKeys{})
+		err := i.MelodyClient.HandleRequestWithKeys(w, r, GameDataKeys{})
 		if err != nil {
 			log.Println(err)
 		}
 	})
 
 	server := &http.Server{
-		Addr:              vars.ListenAddress + ":" + strconv.Itoa(vars.ListenPort),
+		Addr:              i.EnvVars.ListenAddress + ":" + strconv.Itoa(i.EnvVars.ListenPort),
 		ReadHeaderTimeout: 3 * time.Second,
 	}
 
-	log.Println("Starting web server at address " + vars.ListenAddress +
-		":" + strconv.Itoa(vars.ListenPort))
+	log.Println("Starting web server at address " + i.EnvVars.ListenAddress +
+		":" + strconv.Itoa(i.EnvVars.ListenPort))
 
 	err := server.ListenAndServe()
 	if err != nil {

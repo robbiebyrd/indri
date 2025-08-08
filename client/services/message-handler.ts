@@ -16,6 +16,7 @@ export class MessageHandler {
 
         const ws = new WebSocket(url)
         ws.onmessage = (e: MessageEvent) => {
+            console.log(e.data)
             const parsed = JSON.parse(e.data)
 
             switch (this.messageType(parsed)) {

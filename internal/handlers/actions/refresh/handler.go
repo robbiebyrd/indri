@@ -2,6 +2,7 @@ package refresh
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/olahol/melody"
 
@@ -22,25 +23,38 @@ func (h *Handler) Handle(
 	s *melody.Session,
 	_ map[string]interface{},
 ) error {
-	ss := connection.NewService(s, h.i.MelodyClient)
+	cs := connection.NewService(s, h.i.MelodyClient)
 
-	gameId, err := ss.GetKeyAsString("gameId")
+	sessionId, err := cs.GetKeyAsString("sessionId")
 	if err != nil {
-		_ = ss.Write(models.ErrServerError.BytesError())
+		_ = cs.Write(models.ErrServerError.BytesError())
 		return nil
 	}
 
-	g, err := h.i.GameService.Get(*gameId)
+	session, err := h.i.SessionService.Get(*sessionId)
 	if err != nil {
-		_ = ss.Write(models.ErrGameNotFound.BytesError())
+		_ = cs.WriteError(models.ErrSessionNotFound)
+		return nil
 	}
 
-	jsonData, err := json.Marshal(g)
-	if err != nil {
-		_ = ss.Write(models.ErrServerError.BytesError())
+	if session.GameID == nil || *session.GameID == "" {
+		_ = cs.Write(models.ErrNoGame.BytesError())
+		return errors.New(models.ErrNoGame.Description())
 	}
 
-	_ = ss.Write(jsonData)
+	g, err := h.i.GameService.Get(*session.GameID)
+	if err != nil {
+		_ = cs.WriteError(models.ErrGameNotFound)
+		return err
+	}
+
+	jsonData, err := json.Marshal(h.i.GameService.Sanitize(g))
+	if err != nil {
+		_ = cs.WriteError(models.ErrServerError)
+		return err
+	}
+
+	_ = cs.Write(jsonData)
 
 	return nil
 }

@@ -22,25 +22,29 @@ func (h *Handler) Handle(
 	s *melody.Session,
 	_ map[string]interface{},
 ) error {
-	ss := connection.NewService(s, h.i.MelodyClient)
+	cs := connection.NewService(s, h.i.MelodyClient)
 
-	gameId, _, playerId, err := ss.GetStandardKeys()
+	sessionId, err := cs.GetKeyAsString("sessionId")
 	if err != nil {
 		return err
 	}
 
-	g, err := h.i.GameService.Get(*gameId)
+	session, err := h.i.SessionService.Get(*sessionId)
+	if err != nil {
+		return err
+	}
+	if session.GameID == nil || *session.GameID == "" {
+		return fmt.Errorf("player is not in a game")
+	}
+
+	g, err := h.i.GameService.Get(*session.GameID)
 	if err != nil {
 		return err
 	}
 
-	if *gameId != g.ID.Hex() {
-		return fmt.Errorf("player is in game %v but asking to leave game %v", *gameId, g.Code)
-	}
-
-	err = h.i.GameService.RemovePlayer(g.ID.Hex(), *playerId)
+	err = h.i.GameService.RemovePlayer(g.ID.Hex(), *session.UserID)
 	if err != nil {
-		log.Printf("could not disconnect player %v from game %v: %v\n", playerId, gameId, err)
+		log.Printf("could not disconnect player %v from game %v: %v\n", *session.UserID, *session.GameID, err)
 	}
 
 	return nil

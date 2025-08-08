@@ -1,12 +1,13 @@
 package changestream
 
 import (
-	mongoClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
+	"context"
 	"log"
 
-	"context"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	mongoClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
 )
 
 type MongoChangeMonitor struct {

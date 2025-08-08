@@ -8,6 +8,8 @@ import (
 	"github.com/chenmingyong0423/go-mongox/v2"
 	"github.com/chenmingyong0423/go-mongox/v2/builder/query"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -16,88 +18,80 @@ import (
 
 var collectionName = "session"
 
-type Repo struct {
+type Store struct {
 	ctx        *context.Context
 	collection *mongox.Collection[models.Session]
 	client     *mongodb.Client
 }
 
-// NewRepo creates a new repository for accessing user data.
-func NewRepo(ctx context.Context, client *mongodb.Client) *Repo {
+// NewStore creates a new repository for accessing user data.
+func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
 	sessionColl := mongox.NewCollection[models.Session](client.Database, collectionName)
 
-	return &Repo{
+	indexModels := []mongo.IndexModel{
+		{
+			Keys: bson.D{
+				{"userId", 1},
+			},
+			Options: options.Index().SetUnique(true),
+		},
+		{
+			Keys: bson.D{
+				{"userId", 1},
+				{"gameId", 1},
+			},
+		},
+		{
+			Keys: bson.D{
+				{"gameId", 1},
+				{"userId", 1},
+				{"teamId", 1},
+			},
+		},
+	}
+
+	_, err := sessionColl.Collection().Indexes().CreateMany(ctx, indexModels)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Store{
 		ctx:        &ctx,
 		client:     client,
 		collection: sessionColl,
-	}
+	}, nil
 }
 
 // New creates a new user, given an ID.
-func (s *Repo) New(session models.CreateSession) (*models.Session, error) {
-
-	if session.UserID == "" || session.GameID == "" || session.TeamID == "" {
-		return nil, fmt.Errorf("session must have a user id, game id, team id, and token")
+func (s *Store) New(createSession models.CreateSession) (*models.Session, error) {
+	if createSession.UserID == "" {
+		return nil, fmt.Errorf("session must have a user id")
 	}
 
 	matchingSession, _ := s.collection.Finder().Filter(
-		query.All(
-			query.Eq("userId", session.UserID),
-		),
+		query.Eq("userId", createSession.UserID),
 	).FindOne(*s.ctx)
 
-	if matchingSession == nil {
-		// There is no matching session; create it.
-		session.CreatedAt = time.Now()
-
-		doc, err := repoUtils.CreateBSONDoc(session)
-		if err != nil {
-			return nil, err
-		}
-
-		result, err := s.collection.Collection().InsertOne(*s.ctx, &doc)
-		if err != nil {
-			return nil, err
-		}
-
-		// Get the newly inserted ID
-		insertedId := result.InsertedID.(bson.ObjectID).Hex()
-
-		// Get the User and return it
-		return s.Get(insertedId)
+	switch matchingSession {
+	case nil:
+		return s.createNewSession(createSession)
+	default:
+		return matchingSession, nil
 	}
-
-	if isSessionInGameAndTeam(*matchingSession.GameID, *matchingSession.TeamID, session.GameID, session.TeamID) {
-		return nil, fmt.Errorf("session already exists for user %v and game id %v, but user is on another team", session.UserID, session.GameID)
-	}
-
-	if isSessionInGame(*matchingSession.GameID, session.GameID) {
-		return nil, fmt.Errorf("session already exists for user %v but not in game id %v", session.UserID, session.GameID)
-	}
-
-	return matchingSession, nil
-}
-
-func isSessionInGameAndTeam(gameId, teamId, sessionGameId, sessionTeamId string) bool {
-	return gameId == sessionGameId || teamId == sessionTeamId
-}
-
-func isSessionInGame(gameId, sessionGameId string) bool {
-	return gameId == sessionGameId
 }
 
 // Find retrieves user data records for a specific key/value.
-func (s *Repo) Find(key string, value string) ([]*models.Session, error) {
+func (s *Store) Find(key string, value string) ([]*models.Session, error) {
 	return s.collection.Finder().Filter(query.Eq(key, value)).Find(*s.ctx)
 }
 
 // FindFirst retrieves the first user data record, given a key/value.
-func (s *Repo) FindFirst(key string, value string) (*models.Session, error) {
+func (s *Store) FindFirst(key string, value string) (*models.Session, error) {
 	return s.collection.Finder().Filter(query.Eq(key, value)).FindOne(*s.ctx)
 }
 
 // Get retrieves user data for a specific user ID.
-func (s *Repo) Get(id string) (*models.Session, error) {
+func (s *Store) Get(id string) (*models.Session, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, err
@@ -107,7 +101,7 @@ func (s *Repo) Get(id string) (*models.Session, error) {
 }
 
 // Exists checks to see if a user with the given ID already exists.
-func (s *Repo) Exists(id string) (bool, error) {
+func (s *Store) Exists(id string) (bool, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return false, err
@@ -122,8 +116,12 @@ func (s *Repo) Exists(id string) (bool, error) {
 }
 
 // Update saves user data to the repository.
-func (s *Repo) Update(session *models.UpdateSession) error {
+func (s *Store) Update(sessionId string, session *models.UpdateSession) error {
 	session.UpdatedAt = time.Now()
+	objectId, err := bson.ObjectIDFromHex(sessionId)
+	if err != nil {
+		return err
+	}
 
 	doc, err := repoUtils.CreateBSONDoc(session)
 	if err != nil {
@@ -135,7 +133,7 @@ func (s *Repo) Update(session *models.UpdateSession) error {
 	// one document should ever be updated.
 	result, err := s.collection.Collection().UpdateOne(
 		*s.ctx,
-		bson.D{{Key: "_id", Value: session.ID}},
+		bson.D{{Key: "_id", Value: objectId}},
 		bson.D{{Key: "$set", Value: doc}},
 	)
 	if err != nil {
@@ -143,8 +141,34 @@ func (s *Repo) Update(session *models.UpdateSession) error {
 	}
 
 	if result.MatchedCount == 0 {
-		return fmt.Errorf("session with id %v does not exists", session.ID)
+		return fmt.Errorf("session with id %v does not exists", sessionId)
 	}
 
 	return nil
+}
+
+func (s *Store) createNewSession(session models.CreateSession) (*models.Session, error) {
+	session.CreatedAt = time.Now()
+
+	doc, err := repoUtils.CreateBSONDoc(session)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := s.collection.Collection().InsertOne(*s.ctx, &doc)
+	if err != nil {
+		return nil, err
+	}
+
+	insertedId := result.InsertedID.(bson.ObjectID).Hex()
+
+	return s.Get(insertedId)
+}
+
+func (s *Store) isSessionInGameAndTeam(gameId, teamId, sessionGameId, sessionTeamId string) bool {
+	return gameId == sessionGameId || teamId == sessionTeamId
+}
+
+func (s *Store) isSessionInGame(gameId, sessionGameId string) bool {
+	return gameId == sessionGameId
 }

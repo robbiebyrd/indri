@@ -26,7 +26,7 @@ type CreateUser struct {
 	Email       string    `bson:"email"       json:"email"`
 	Name        string    `bson:"name"        json:"name"`
 	DisplayName *string   `bson:"displayName" json:"displayName"`
-	Password    *string   `bson:"password"    json:"-"`
+	Password    *string   `bson:"password"    json:"password,omitempty"`
 }
 
 type UpdateUser struct {

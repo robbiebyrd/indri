@@ -2,23 +2,34 @@ package script
 
 import (
 	"encoding/json"
-	"github.com/robbiebyrd/indri/internal/models"
 	"log"
 	"os"
+	"path/filepath"
+
+	"github.com/robbiebyrd/indri/internal/models"
 )
 
-func Get(configFilePath string) *models.Script {
-	jsonData, err := os.ReadFile(configFilePath)
+type Store struct {
+	script *models.Script
+}
+
+// NewStore creates a new repository for accessing user data.
+func NewStore(configFilePath string) (*Store, error) {
+	jsonData, err := os.ReadFile(filepath.Clean(configFilePath))
 	if err != nil {
-		log.Fatalf("Error reading file: %v", err)
+		log.Fatalf("Error reading script file: %v", err)
 	}
 
 	c := models.Script{}
 
 	err = json.Unmarshal(jsonData, &c)
 	if err != nil {
-		log.Fatalf("Error parsing JSON: %v", err)
+		log.Fatalf("Error parsing script JSON: %v", err)
 	}
 
-	return &c
+	return &Store{script: &c}, err
+}
+
+func (s *Store) Get() *models.Script {
+	return s.script
 }

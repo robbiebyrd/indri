@@ -3,13 +3,14 @@ package game
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/robbiebyrd/indri/internal/models"
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
 )
 
 // HasPlayerOnTeam determines if a given userId is in a game and on a given team.
-func (s *Repo) HasPlayerOnTeam(id string, teamId string, userId string) bool {
+func (s *Store) HasPlayerOnTeam(id string, teamId string, userId string) bool {
 	g, err := s.Get(id)
 	if err != nil {
 		return false
@@ -24,7 +25,7 @@ func (s *Repo) HasPlayerOnTeam(id string, teamId string, userId string) bool {
 }
 
 // ChangePlayerTeam determines if a given userId is in a game and on a given team.
-func (s *Repo) ChangePlayerTeam(id string, teamId string, userId string) error {
+func (s *Store) ChangePlayerTeam(id string, teamId string, userId string) error {
 	err := s.RemovePlayerFromTeam(id, userId)
 	if err != nil {
 		return err
@@ -39,7 +40,7 @@ func (s *Repo) ChangePlayerTeam(id string, teamId string, userId string) error {
 }
 
 // AddPlayerToTeam adds a player to a team.
-func (s *Repo) AddPlayerToTeam(id string, teamId string, userId string) error {
+func (s *Store) AddPlayerToTeam(id string, teamId string, userId string) error {
 	if !s.HasPlayer(id, userId) {
 		return fmt.Errorf("player with id %s is not in this game", id)
 	}
@@ -68,7 +69,18 @@ func (s *Repo) AddPlayerToTeam(id string, teamId string, userId string) error {
 	team.PlayerIDs = append(team.PlayerIDs, userId)
 	g.Teams[teamId] = team
 
-	if err = s.Update(id, &models.UpdateGame{Teams: &g.Teams, Players: &g.Players, Stage: &g.Stage}); err != nil {
+	updateGame := &models.UpdateGame{
+		Teams:       &g.Teams,
+		Players:     &g.Players,
+		Stage:       &g.Stage,
+		UpdatedAt:   time.Time{},
+		PublicData:  g.PublicData,
+		PrivateData: g.PrivateData,
+		PlayerData:  g.PlayerData,
+		Private:     g.Private,
+	}
+
+	if err = s.Update(id, updateGame); err != nil {
 		return err
 	}
 
@@ -76,7 +88,7 @@ func (s *Repo) AddPlayerToTeam(id string, teamId string, userId string) error {
 }
 
 // RemovePlayerFromTeam removes a player from any assigned teams in a given game.
-func (s *Repo) RemovePlayerFromTeam(id string, userId string) error {
+func (s *Store) RemovePlayerFromTeam(id string, userId string) error {
 	err := sessionUtils.ValidateGameAndUser(id, userId)
 	if err != nil {
 		return err
@@ -120,7 +132,7 @@ func (s *Repo) RemovePlayerFromTeam(id string, userId string) error {
 }
 
 // PlayerOnWhichTeam gets the current team a player is on.
-func (s *Repo) PlayerOnWhichTeam(id string, userId string) (*string, error) {
+func (s *Store) PlayerOnWhichTeam(id string, userId string) (*string, error) {
 	g, err := s.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("failed retrieving game with id %v", id)

@@ -3,34 +3,29 @@ package mongodb
 import (
 	"context"
 	"fmt"
+	"log"
+
 	"github.com/chenmingyong0423/go-mongox/v2"
-	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
-	"log"
+
+	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 )
 
-/*
-Client encapsulates the MongoDB client, ORM, and database connection.
-It provides a structured way to interact with MongoDB resources within the application.
-*/
+var mongodbClient *Client
+
 type Client struct {
 	Database    *mongox.Database
 	ORM         *mongox.Client
 	MongoClient *mongo.Client
 }
 
-/*
-New returns an instance of the MongoDB client, establishing a connection if one does not already exist.
-It configures the client using environment variables and ensures the connection is valid before returning.
-
-Returns:
-
-	*Client: A pointer to the singleton Client instance.
-	Error: An error if the connection or configuration fails, otherwise nil.
-*/
 func New(ctx context.Context) (*Client, error) {
+	if mongodbClient != nil {
+		return mongodbClient, nil
+	}
+
 	vars := envVars.GetEnv()
 
 	log.Printf("Connecting to MongoDB at %s\n", vars.MongoURI)
@@ -50,9 +45,11 @@ func New(ctx context.Context) (*Client, error) {
 
 	log.Println("successfully connected to MongoDB")
 
-	return &Client{
+	mongodbClient := &Client{
 		Database:    database,
 		ORM:         client,
 		MongoClient: mongoClient,
-	}, nil
+	}
+
+	return mongodbClient, nil
 }

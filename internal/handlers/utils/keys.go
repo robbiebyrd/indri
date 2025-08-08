@@ -14,11 +14,11 @@ func ParseGameCodeAndTeamID(decodedMsg map[string]interface{}) (*string, *string
 func RequireGameCodeAndTeamID(decodedMsg map[string]interface{}) (*string, *string, error) {
 	gameCode, teamId := ParseGameCodeAndTeamID(decodedMsg)
 
-	if gameCode != nil && len(*gameCode) > 0 {
+	if gameCode != nil && len(*gameCode) == 0 {
 		return nil, nil, errors.New("could not parse gameCode from request")
 	}
 
-	if teamId != nil && len(*teamId) > 0 {
+	if teamId != nil && len(*teamId) == 0 {
 		return nil, nil, errors.New("could not parse gameCode from request")
 	}
 

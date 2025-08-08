@@ -13,12 +13,12 @@ import (
 )
 
 type Service struct {
-	gameRepo    *gameRepo.Repo
+	gameRepo    *gameRepo.Store
 	gameService *gameService.Service
 }
 
 // NewService creates a new repository for accessing game data.
-func NewService(gameRepo *gameRepo.Repo, gameService *gameService.Service) *Service {
+func NewService(gameRepo *gameRepo.Store, gameService *gameService.Service) *Service {
 	return &Service{
 		gameRepo,
 		gameService,

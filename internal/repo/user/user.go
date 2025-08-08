@@ -18,31 +18,41 @@ import (
 
 var collectionName = "user"
 
-type Repo struct {
+type Store struct {
 	ctx        *context.Context
 	collection *mongox.Collection[models.User]
 	client     *mongodb.Client
 }
 
-// NewRepo creates a new repository for accessing user data.
-func NewRepo(ctx context.Context, client *mongodb.Client) (*Repo, error) {
+// NewStore creates a new repository for accessing user data.
+func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
 	userColl := mongox.NewCollection[models.User](client.Database, collectionName)
 
-	indexModel := mongo.IndexModel{
-		Keys: bson.D{
-			{"teamId", 1},
-			{"gameId", 1},
-			{"userId", 1},
+	indexModels := []mongo.IndexModel{
+		{
+			Keys: bson.D{
+				{"email", 1},
+			},
+			Options: options.Index().SetUnique(true),
 		},
-		Options: options.Index().SetUnique(true),
+		{
+			Keys: bson.D{
+				{"name", 1},
+			},
+		},
+		{
+			Keys: bson.D{
+				{"score", 1},
+			},
+		},
 	}
 
-	_, err := userColl.Collection().Indexes().CreateOne(ctx, indexModel)
+	_, err := userColl.Collection().Indexes().CreateMany(ctx, indexModels)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Repo{
+	return &Store{
 		ctx:        &ctx,
 		client:     client,
 		collection: userColl,
@@ -50,7 +60,7 @@ func NewRepo(ctx context.Context, client *mongodb.Client) (*Repo, error) {
 }
 
 // New creates a new user, given an ID.
-func (s *Repo) New(user models.CreateUser) (*models.User, error) {
+func (s *Store) New(user models.CreateUser) (*models.User, error) {
 	matchingUser, _ := s.collection.Finder().Filter(query.Eq("email", user.Email)).FindOne(*s.ctx)
 
 	if matchingUser != nil {
@@ -80,17 +90,17 @@ func (s *Repo) New(user models.CreateUser) (*models.User, error) {
 }
 
 // Find retrieves user data records for a specific key/value.
-func (s *Repo) Find(key string, value string) ([]*models.User, error) {
+func (s *Store) Find(key string, value string) ([]*models.User, error) {
 	return s.collection.Finder().Filter(query.Eq(key, value)).Find(*s.ctx)
 }
 
 // FindFirst retrieves the first user data record, given a key/value.
-func (s *Repo) FindFirst(key string, value string) (*models.User, error) {
+func (s *Store) FindFirst(key string, value string) (*models.User, error) {
 	return s.collection.Finder().Filter(query.Eq(key, value)).FindOne(*s.ctx)
 }
 
 // Get retrieves user data for a specific user ID.
-func (s *Repo) Get(id string) (*models.User, error) {
+func (s *Store) Get(id string) (*models.User, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, err
@@ -100,7 +110,7 @@ func (s *Repo) Get(id string) (*models.User, error) {
 }
 
 // Exists checks to see if a user with the given ID already exists.
-func (s *Repo) Exists(id string) (bool, error) {
+func (s *Store) Exists(id string) (bool, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return false, err
@@ -115,7 +125,7 @@ func (s *Repo) Exists(id string) (bool, error) {
 }
 
 // Update saves user data to the repository.
-func (s *Repo) Update(user *models.UpdateUser) error {
+func (s *Store) Update(user *models.UpdateUser) error {
 	// Convert the hex-based, string id we get to an actual ObjectID
 	objectId, err := bson.ObjectIDFromHex(user.ID)
 	if err != nil {

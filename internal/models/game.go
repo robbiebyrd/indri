@@ -19,6 +19,7 @@ type Game struct {
 	PublicData  map[string]interface{} `bson:"data"                 json:"data,omitempty"`
 	PrivateData map[string]interface{} `bson:"privateData"          json:"privateData,omitempty"`
 	PlayerData  map[string]interface{} `bson:"playerData"           json:"playerData,omitempty"`
+	Private     bool                   `bson:"private"              json:"private,omitempty"`
 }
 
 type CreateGame struct {
@@ -32,6 +33,7 @@ type CreateGame struct {
 	PublicData  map[string]interface{} `bson:"data"                 json:"data,omitempty"`
 	PrivateData map[string]interface{} `bson:"privateData"          json:"privateData,omitempty"`
 	PlayerData  map[string]interface{} `bson:"playerData"           json:"playerData,omitempty"`
+	Private     bool                   `bson:"private"              json:"private,omitempty"`
 }
 
 type UpdateGame struct {
@@ -42,4 +44,5 @@ type UpdateGame struct {
 	PublicData  map[string]interface{} `bson:"data"            json:"data,omitempty"`
 	PrivateData map[string]interface{} `bson:"privateData"     json:"privateData,omitempty"`
 	PlayerData  map[string]interface{} `bson:"playerData"      json:"playerData,omitempty"`
+	Private     bool                   `bson:"private"         json:"private,omitempty"`
 }

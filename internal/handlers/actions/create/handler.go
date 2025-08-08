@@ -1,4 +1,4 @@
-package join
+package create
 
 import (
 	"fmt"
@@ -28,9 +28,18 @@ func (h *Handler) Handle(
 ) error {
 	cs := connection.NewService(s, h.i.MelodyClient)
 
-	gameCode, teamId := utils.ParseGameCodeAndTeamID(decodedMsg)
-	if gameCode == nil {
+	fmt.Println(decodedMsg)
+
+	gameCode, teamId, err := utils.RequireGameCodeAndTeamID(decodedMsg)
+	if err != nil {
+		fmt.Println(err)
 		return fmt.Errorf("game code not provided")
+	}
+
+	gamePrivate := true
+
+	if _, ok := decodedMsg["private"]; !ok {
+		gamePrivate = false
 	}
 
 	sessionId, err := cs.GetKeyAsString("sessionId")
@@ -44,7 +53,7 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	g, err := h.i.GameService.GetByCode(*gameCode)
+	g, err := h.i.GameService.New(*gameCode, gamePrivate)
 	if err != nil {
 		return err
 	}
