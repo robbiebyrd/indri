@@ -149,7 +149,7 @@ func (s *Store) PlayerOnWhichTeam(id string, userId string) (*string, error) {
 	}
 
 	if teamId == "" {
-		return nil, fmt.Errorf("user with id %v does not exists", id)
+		return nil, fmt.Errorf("team with id %v does not exists", id)
 	}
 
 	return &teamId, nil

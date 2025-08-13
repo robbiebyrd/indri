@@ -13,16 +13,16 @@ type Session struct {
 	UserID *string `bson:"userId,omitempty" json:"userId,omitempty"`
 	TeamID *string `bson:"teamId,omitempty" json:"teamId,omitempty"`
 
-	CreatedAt time.Time `bson:"created_at"           json:"createdAt"`
-	UpdatedAt time.Time `bson:"updated_at"           json:"updatedAt"`
-	DeletedAt time.Time `bson:"deleted_at,omitempty" json:"-"`
+	CreatedAt time.Time `bson:"createdAt"           json:"createdAt"`
+	UpdatedAt time.Time `bson:"updatedAt"           json:"updatedAt"`
+	DeletedAt time.Time `bson:"deletedAt,omitempty" json:"-"`
 }
 
 type CreateSession struct {
 	GameID    string    `bson:"gameId"     json:"gameId"`
 	UserID    string    `bson:"userId"     json:"userId"`
 	TeamID    string    `bson:"teamId"     json:"teamId"`
-	CreatedAt time.Time `bson:"created_at" json:"createdAt"`
+	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
 }
 
 type UpdateSession struct {

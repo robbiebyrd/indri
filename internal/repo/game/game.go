@@ -148,7 +148,7 @@ func (s *Store) Update(id string, game *models.UpdateGame) error {
 	}
 
 	if result.MatchedCount == 0 {
-		return fmt.Errorf("game with id %v does not exists", id)
+		return fmt.Errorf("error updating game: game with id %v does not exists", id)
 	}
 
 	return nil
@@ -163,7 +163,7 @@ func (s *Store) UpdateField(id string, key string, value interface{}) error {
 
 	result, err := s.collection.Collection().UpdateOne(
 		*s.ctx,
-		bson.D{{Key: "_id", Value: filterDoc}},
+		filterDoc,
 		bson.D{
 			{Key: "$set", Value: bson.D{
 				{Key: key, Value: value},
@@ -176,7 +176,7 @@ func (s *Store) UpdateField(id string, key string, value interface{}) error {
 	}
 
 	if result.MatchedCount == 0 {
-		return fmt.Errorf("user with id %v does not exists", id)
+		return fmt.Errorf("error updating game field: game with id %v does not exists", id)
 	}
 
 	return nil

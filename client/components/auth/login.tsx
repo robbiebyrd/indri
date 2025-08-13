@@ -26,7 +26,11 @@ export default function Login({onChangeUsername, onChangePassword, ws}: LoginPro
             }} secureTextEntry={true}/>
 
             <Button title={"Login"}
-                    onPress={() => ws?.send(`{"action": "login", "email": "${userName}", "password": "${password}"}`)}
+                    onPress={() => ws?.send({
+                        "action": "login",
+                        "email": userName,
+                        "password": password
+                    })}
             />
         </>
     )

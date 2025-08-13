@@ -36,6 +36,15 @@ func (us *Service) Get(id string) (*models.Session, error) {
 	return thisSession, nil
 }
 
+func (us *Service) GetGameIDAndTeamID(id string) (*string, *string, error) {
+	thisSession, err := us.Get(id)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return thisSession.GameID, thisSession.TeamID, nil
+}
+
 func (us *Service) GetByUserID(userId string) (*models.Session, error) {
 	if userId == "" {
 		return nil, fmt.Errorf("userId is empty")

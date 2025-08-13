@@ -1,27 +1,56 @@
-import {Button, Text, TextInput} from 'react-native'
-import {useState} from "react"
+import {Button} from 'react-native'
+import {useEffect, useState} from "react"
 import Select from 'react-select'
 import {MessageHandler} from "@/services/message-handler";
+import {useGameList} from "@/providers/game-list/use-game-list";
+import GameListRefreshButton from "@/components/join/listRefresh";
 
 export type GameRefreshProps = {
     ws: MessageHandler
 }
 
-
 export default function Join({ws}: GameRefreshProps) {
     const [gameCode, setGameCode] = useState<string>()
     const [teamID, setTeamID] = useState<string>()
 
+    const {gameList} = useGameList()
+
+    const gameListOptions = gameList?.filter(Boolean).map((game) => (
+        {value: game.code, label: game.code}
+    ))
+
+    const teamOptions = gameList?.flatMap((game) => {
+        return game?.teams.map((team) => {
+            if (game.code === gameCode && !team.full) {
+                return {value: team.name, label: team.name}
+            }
+        })
+    }).filter(Boolean)
+
+    useEffect(() => {
+        ws.send({"action": "inquire", "inquiryType": "game", "inquiry": "availableGames"})
+    }, [])
+
     return (
         <>
-            <Text>Game Code</Text>
-            <TextInput onChangeText={setGameCode}/>
-            <Select options={[
-                {value: 'team1', label: 'Team 1'},
-                {value: 'team2', label: 'Team 2'},
-            ]} onChange={(data) => setTeamID(data?.value)}/>
-            <Button title={"Join"}
-                    onPress={() => ws?.send(`{"action": "join", "code": "${gameCode}", "teamId": "${teamID}"}`)}/>
+            <Select
+                options={gameListOptions}
+                onChange={(data) => {
+                    setGameCode(data?.value)
+                    setTeamID(undefined)
+                }}/>
+            <Select
+                options={teamOptions}
+                key={gameCode}
+                onChange={(data) => setTeamID(data?.value)}
+            />
+            <GameListRefreshButton ws={ws}/>
+            <Button
+                title={"Join"}
+                onPress={() => ws?.send(
+                    {"action": "join", "code": gameCode, "teamId": teamID}
+                )}
+            />
         </>
     )
 }

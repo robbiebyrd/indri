@@ -79,8 +79,6 @@ func (h *Handler) getGamesList() ([]*models.Game, error) {
 }
 
 func (h *Handler) handleGameInquiry(decodedMsg map[string]interface{}) (*[]byte, error) {
-	var jsonBytes *[]byte
-
 	games, err := h.getGamesList()
 	if err != nil {
 		return nil, err
@@ -90,16 +88,11 @@ func (h *Handler) handleGameInquiry(decodedMsg map[string]interface{}) (*[]byte,
 		return nil, errors.New("inquiry not provided")
 	}
 
+	var gameInfoList []GameInfo
+
 	switch decodedMsg["inquiry"].(string) {
 	case "availableGames":
-		var gameInfoList = h.createGameInfoList(games)
-
-		jbs, err := json.Marshal(gameInfoList)
-		if err != nil {
-			return nil, err
-		}
-
-		jsonBytes = &jbs
+		gameInfoList = h.createGameInfoList(games)
 	case "gameInfo":
 		if _, ok := decodedMsg["code"]; !ok {
 			return nil, errors.New("game code not provided")
@@ -112,17 +105,25 @@ func (h *Handler) handleGameInquiry(decodedMsg map[string]interface{}) (*[]byte,
 			return nil, err
 		}
 
-		jbs, err := json.Marshal(h.createGameInfo(game))
-		if err != nil {
-			return nil, err
-		}
+		gameInfoList = append(gameInfoList, h.createGameInfo(game))
 
-		jsonBytes = &jbs
 	default:
 		return nil, nil
 	}
 
-	return jsonBytes, nil
+	type infoStruct struct {
+		Games     []GameInfo `json:"games"`
+		Operation string     `json:"op"`
+	}
+
+	jsonBytes, err := json.Marshal(&infoStruct{gameInfoList, "inquiryResponse"})
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println(string(jsonBytes))
+
+	return &jsonBytes, nil
 }
 
 func (h *Handler) createGameInfoList(games []*models.Game) []GameInfo {
@@ -139,6 +140,10 @@ func (h *Handler) createGameInfo(game *models.Game) GameInfo {
 	var teamsList []TeamInfo
 
 	availableTeamsCount := h.i.Script.Config.MaxTeams
+
+	if !h.i.Script.Config.CreateTeams {
+		availableTeamsCount = len(game.Teams)
+	}
 
 	for _, team := range game.Teams {
 		isFull := len(team.PlayerIDs) >= h.i.Script.Config.MaxPlayersPerTeam

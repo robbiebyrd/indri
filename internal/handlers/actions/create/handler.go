@@ -36,10 +36,10 @@ func (h *Handler) Handle(
 		return fmt.Errorf("game code not provided")
 	}
 
-	gamePrivate := true
+	gamePrivate := false
 
-	if _, ok := decodedMsg["private"]; !ok {
-		gamePrivate = false
+	if gamePrivateRequest, ok := decodedMsg["private"]; !ok {
+		gamePrivate = gamePrivateRequest.(bool)
 	}
 
 	sessionId, err := cs.GetKeyAsString("sessionId")

@@ -1,46 +1,39 @@
-declare interface Updates {
-    ts: string
-    updated: Indexable
-    removed: string[]
-}
+import {UpdateMessage} from "@/models/models";
 
-declare interface Item {
+declare interface Delta {
     timestamp: Date
-    data: Updates
+    data: UpdateMessage
 }
 
-declare interface Indexable {
-    [key: string]: any
-}
-
-export class GameStateParser<Indexable> {
-    private updatesList: Item[] = []
+export class GameStateParser<T> {
+    private deltas: Delta[] = []
     private cutoff: number = new Date(0).getTime()
-    private baseState?: Indexable = undefined
-    private currentState?: Indexable = undefined
+    private baseState?: T = undefined
+    private currentState?: T = undefined
 
-    set(data: Indexable, timestamp: Date): void {
+    set(data: T, timestamp: Date): void {
         this.setCutoff(timestamp)
         this.baseState = data
         this.currentState = data
         this.deleteBefore(timestamp)
+        this.reapply()
     }
 
     sort(): void {
-        this.updatesList.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+        this.deltas.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
     }
 
-    update(data: Updates): void {
+    update(data: UpdateMessage): void {
         const timestamp = new Date(data.ts)
         if (timestamp.getTime() < this.cutoff) {
             return
         }
-        this.updatesList.push({data, timestamp})
+        this.deltas.push({data, timestamp})
         this.sort()
         this.reapply()
     }
 
-    current(): Indexable | undefined {
+    current(): T | undefined {
         return this.currentState
     }
 
@@ -51,7 +44,7 @@ export class GameStateParser<Indexable> {
 
         this.currentState = this.baseState
 
-        for (const updateMsg of this.updatesList) {
+        for (const updateMsg of this.deltas) {
             if (updateMsg.data.removed && updateMsg.data.removed.length > 0) {
                 for (const key of updateMsg.data.removed) {
                     this.currentState = this.deleteJSONKeyByDotPath(this.currentState, key)
@@ -70,13 +63,13 @@ export class GameStateParser<Indexable> {
     }
 
     private isEmpty(): boolean {
-        return this.updatesList.length === 0
+        return this.deltas.length === 0
     }
 
     private deleteBefore(timestamp: Date): void {
-        for (let i = 0; i < this.updatesList.length; i++) {
-            if (this.updatesList[i].timestamp.getTime() > timestamp.getTime()) {
-                this.updatesList.splice(i, 1)
+        for (let i = 0; i < this.deltas.length; i++) {
+            if (this.deltas[i].timestamp.getTime() > timestamp.getTime()) {
+                this.deltas.splice(i, 1)
                 i--
             } else {
                 break

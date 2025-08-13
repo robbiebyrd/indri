@@ -9,9 +9,9 @@ import (
 type Game struct {
 	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
 
-	CreatedAt   time.Time              `bson:"created_at"           json:"createdAt"`
-	UpdatedAt   time.Time              `bson:"updated_at"           json:"updatedAt"`
-	DeletedAt   time.Time              `bson:"deleted_at,omitempty" json:"-"`
+	CreatedAt   time.Time              `bson:"createdAt"           json:"createdAt"`
+	UpdatedAt   time.Time              `bson:"updatedAt"           json:"updatedAt"`
+	DeletedAt   time.Time              `bson:"deletedAt,omitempty" json:"-"`
 	Code        string                 `bson:"code"                 json:"code"`
 	Teams       map[string]Team        `bson:"teams,omitempty"      json:"teams,omitempty"`
 	Players     map[string]Player      `bson:"players"              json:"players"`
@@ -23,9 +23,9 @@ type Game struct {
 }
 
 type CreateGame struct {
-	CreatedAt   time.Time              `bson:"created_at"           json:"createdAt"`
-	UpdatedAt   time.Time              `bson:"updated_at"           json:"updatedAt"`
-	DeletedAt   time.Time              `bson:"deleted_at,omitempty" json:"-"`
+	CreatedAt   time.Time              `bson:"createdAt"            json:"createdAt"`
+	UpdatedAt   time.Time              `bson:"updatedAt"            json:"updatedAt"`
+	DeletedAt   time.Time              `bson:"deletedAt,omitempty"  json:"-"`
 	Code        string                 `bson:"code"                 json:"code"`
 	Teams       *map[string]Team       `bson:"teams,omitempty"      json:"teams,omitempty"`
 	Players     *map[string]Player     `bson:"players"              json:"players"`

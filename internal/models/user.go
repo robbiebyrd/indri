@@ -9,9 +9,9 @@ import (
 type User struct {
 	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
 
-	CreatedAt   time.Time              `bson:"created_at"           json:"createdAt"`
-	UpdatedAt   time.Time              `bson:"updated_at"           json:"updatedAt"`
-	DeletedAt   time.Time              `bson:"deleted_at,omitempty" json:"-"`
+	CreatedAt   time.Time              `bson:"createdAt"            json:"createdAt"`
+	UpdatedAt   time.Time              `bson:"updatedAt"            json:"updatedAt"`
+	DeletedAt   time.Time              `bson:"deletedAt,omitempty"  json:"-"`
 	Email       string                 `bson:"email"                json:"email"`
 	Name        string                 `bson:"name"                 json:"name"`
 	DisplayName *string                `bson:"displayName"          json:"displayName"`

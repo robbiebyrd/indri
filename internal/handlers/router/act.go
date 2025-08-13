@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+
 	"github.com/olahol/melody"
 )
 
@@ -10,19 +11,34 @@ func Act(
 	decodedMsg *map[string]interface{},
 	action *string,
 ) error {
-	var err error
-
 	if decodedMsg == nil {
 		return fmt.Errorf("decoded message is nil")
 	}
 
-	if _, ok := registeredHandlerMap[*action]; !ok {
-		return fmt.Errorf("unknown action %v", *action)
+	if action == nil || *action == "" {
+		return fmt.Errorf("action is nil or empty string")
 	}
 
-	err = registeredHandlerMap[*action](s, *decodedMsg)
-	if err != nil {
-		return err
+	actions := []string{"received", *action, "processed"}
+
+	for _, a := range actions {
+		err := runHandler(s, decodedMsg, a)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func runHandler(s *melody.Session, decodedMsg *map[string]interface{}, action string) error {
+	for _, i := range registeredHandlerMap {
+		if i.Action == action {
+			err := i.Handler.Handle(s, *decodedMsg)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

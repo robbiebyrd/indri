@@ -6,19 +6,21 @@
     "profanityFilter": true
   },
   "teams": {
-    "team1": {
+    "Player 1": {
       "name": "Player 1",
       "playerIds": [],
       "data": {
-        "marker": "X"
+        "marker": "X",
+        "turn": true
       },
       "privateData": {}
     },
-    "team2": {
+    "Player 2": {
       "name": "Player 2",
       "playerIds": [],
       "data": {
-        "marker": "O"
+        "marker": "O",
+        "turn": false
       },
       "privateData": {}
     }

@@ -18,4 +18,5 @@ type Config struct {
 	MaxTeams          int  `bson:"maxTeams"          json:"maxTeams"`
 	MaxPlayersPerTeam int  `bson:"maxPlayersPerTeam" json:"maxPlayersPerTeam"`
 	ProfanityFilter   bool `bson:"profanityFilter"   json:"profanityFilter"`
+	CreateTeams       bool `bson:"createTeams"       json:"createTeams"`
 }

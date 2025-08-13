@@ -6,5 +6,12 @@ export type GameRefreshProps = {
 }
 
 export default function GameRefreshButton({ws}: GameRefreshProps) {
-    return <Button title={"Refresh"} onPress={() => ws?.send(`{"action": "refresh"}`)}/>
+    return (
+        <Button
+            title={"Refresh"}
+            onPress={() => ws?.send(
+                {"action": "refresh"}
+            )}
+        />
+    )
 }
