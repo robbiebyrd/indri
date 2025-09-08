@@ -2,6 +2,7 @@ package move
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -9,42 +10,56 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/injector"
+	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
-type Handler struct {
+type TicTacToeMoveHandler struct {
 	i *injector.Injector
 }
 
-func New(i *injector.Injector) *Handler {
-	return &Handler{i}
+func New(i *injector.Injector) *TicTacToeMoveHandler {
+	return &TicTacToeMoveHandler{i}
 }
 
-// Handle processes a join game request, and adds a player to a game.
-func (h *Handler) Handle(
-	s *melody.Session,
-	decodedMsg map[string]interface{},
-) error {
+func (h *TicTacToeMoveHandler) getGameDataFromSession(s *melody.Session) (*models.Game, *string, error) {
 	cs := connection.NewService(s, h.i.MelodyClient)
-
-	move, err := h.decodeMove(decodedMsg)
-	if err != nil {
-		return err
-	}
 
 	sessionId, err := cs.GetKeyAsString("sessionId")
 	if err != nil {
-		return err
+		return nil, nil, err
 	} else if sessionId == nil {
-		return fmt.Errorf("sessionId is nil")
+		return nil, nil, fmt.Errorf("sessionId is nil")
 	}
 
 	gameId, teamId, err := h.i.SessionService.GetGameIDAndTeamID(*sessionId)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	g, err := h.i.GameService.Get(*gameId)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return g, teamId, nil
+}
+
+func (h *TicTacToeMoveHandler) findTeamByMarker(marker string, g *models.Game) (*string, error) {
+	for tId, t := range g.Teams {
+		if t.PublicData["marker"] == marker {
+			return &tId, nil
+		}
+	}
+	return nil, fmt.Errorf("no team found with marker %s", marker)
+}
+
+// Handle processes a join game request, and adds a player to a game.
+func (h *TicTacToeMoveHandler) Handle(
+	s *melody.Session,
+	decodedMsg map[string]interface{},
+) error {
+	g, teamId, err := h.getGameDataFromSession(s)
 	if err != nil {
 		return err
 	}
@@ -66,7 +81,6 @@ func (h *Handler) Handle(
 	sceneData := g.Stage.Scenes[g.Stage.CurrentScene]
 
 	updateSceneData := *sceneData.PublicData
-	moveCopy := *move
 
 	var boardData [][]string
 
@@ -74,25 +88,42 @@ func (h *Handler) Handle(
 		var innerRow []string
 
 		for _, item2 := range item.(bson.A) {
-			fmt.Println(item2)
-			fmt.Printf("%T\n", item2)
 			innerRow = append(innerRow, item2.(string))
 		}
 
 		boardData = append(boardData, innerRow)
 	}
 
-	a := boardData[moveCopy[0]][moveCopy[1]]
-	if a != "" {
+	columns, rows := getBoardSize(boardData)
+
+	move, err := h.decodeMove(decodedMsg, columns, rows)
+	if err != nil {
+		return err
+	}
+
+	moveCopy := *move
+
+	spot := boardData[moveCopy[0]][moveCopy[1]]
+	if spot != "" {
 		return fmt.Errorf("spot is taken")
 	}
 
 	boardData[moveCopy[0]][moveCopy[1]] = marker.(string)
+
+	winner, won := h.findWinner(boardData)
+	if won {
+		winningTeam, err := h.findTeamByMarker(winner, g)
+		if err != nil {
+			return err
+		}
+		updateSceneData["winningTeam"] = winningTeam
+	}
+
 	updateSceneData["board"] = boardData
 	sceneData.PublicData = &updateSceneData
 	g.Stage.Scenes[g.Stage.CurrentScene] = sceneData
 
-	err = h.i.GameRepo.UpdateField(*gameId, "stage", g.Stage)
+	err = h.i.GameRepo.UpdateField(g.ID.Hex(), "stage", g.Stage)
 	if err != nil {
 		return err
 	}
@@ -108,7 +139,7 @@ func (h *Handler) Handle(
 
 	g.Teams = teams
 
-	err = h.i.GameRepo.UpdateField(*gameId, "teams", g.Teams)
+	err = h.i.GameRepo.UpdateField(g.ID.Hex(), "teams", g.Teams)
 	if err != nil {
 		return err
 	}
@@ -116,7 +147,7 @@ func (h *Handler) Handle(
 	return nil
 }
 
-func (h *Handler) decodeMove(decodedMsg map[string]interface{}) (*[]int, error) {
+func (h *TicTacToeMoveHandler) decodeMove(decodedMsg map[string]interface{}, columns, rows int) (*[]int, error) {
 	moveString, ok := decodedMsg["move"]
 	if !ok {
 		return nil, fmt.Errorf("move is nil")
@@ -140,5 +171,129 @@ func (h *Handler) decodeMove(decodedMsg map[string]interface{}) (*[]int, error) 
 		return nil, fmt.Errorf("invalid move: %v", moveString)
 	}
 
+	if move[0] < 0 || move[0] >= rows || move[1] < 0 || move[1] >= columns {
+		return nil, fmt.Errorf("move out of bounds: %v", moveString)
+	}
+
 	return &move, nil
+}
+
+func getBoardSize(boardData [][]string) (int, int) {
+	return len(boardData), len(boardData[0])
+}
+
+func checkStraightAcrossWin(boardData [][]string, marker string) bool {
+	columns, rows := getBoardSize(boardData)
+
+	// Check each row
+	for i := range columns {
+		win := true
+		for j := range rows {
+			if boardData[i][j] != marker {
+				win = false
+				break
+			}
+		}
+		if win {
+			return true
+		}
+	}
+
+	// Check each column
+	for j := range rows {
+		win := true
+		for i := range columns {
+			if boardData[i][j] != marker {
+				win = false
+				break
+			}
+		}
+		if win {
+			return true
+		}
+	}
+
+	return false
+}
+
+func checkDiagonalWin(boardData [][]string, marker string) bool {
+	// Check for diagonal wins
+	columns, rows := getBoardSize(boardData)
+	for sum := 0; sum < rows+columns-1; sum++ {
+		count := 0
+		for rowCount := range rows {
+			columnCount := sum - rowCount
+			if columnCount >= 0 && columnCount < columns {
+				if boardData[rowCount][columnCount] == marker {
+					count++
+				}
+			}
+		}
+		if count == rows {
+			return true
+		}
+	}
+
+	// Check for anti-diagonal wins
+	for diff := -(rows - 1); diff < columns; diff++ {
+		count := 0
+		for rowCount := range rows {
+			columnCount := rowCount - diff
+			if columnCount >= 0 && columnCount < columns {
+				if boardData[rowCount][columnCount] == marker {
+					count++
+				}
+			}
+		}
+		if count == rows {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (h *TicTacToeMoveHandler) findWinner(boardData [][]string) (string, bool) {
+	// Fetch all the markers that have been placed on the board.
+	markers := h.getUniqueStrings(boardData, false)
+
+	if len(markers) < 2 {
+		// Both players must place at least one marker before a win can occur
+		return "", false
+	}
+
+	for _, marker := range markers {
+		// Check for column wins
+		winner := checkStraightAcrossWin(boardData, marker)
+		if winner {
+			return marker, true
+		}
+		winner = checkDiagonalWin(boardData, marker)
+		if winner {
+			return marker, true
+		}
+	}
+
+	if slices.Contains(h.getUniqueStrings(boardData, true), "") {
+		return "", false
+	}
+
+	return "draw", true
+}
+
+func (h *TicTacToeMoveHandler) getUniqueStrings(data [][]string, includeEmpty bool) []string {
+	unique := make(map[string]bool)
+	for _, row := range data {
+		for _, s := range row {
+			if !includeEmpty && s == "" {
+				continue
+			}
+			unique[s] = true
+		}
+	}
+	result := make([]string, 0, len(unique))
+	for s := range unique {
+		result = append(result, s)
+	}
+	return result
 }

@@ -36,3 +36,7 @@ codealike.json
 /tmp
 /.air.toml
 /mongodb.key
+.roo
+.roomodes
+.vscode
+.DS_Store
