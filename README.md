@@ -47,7 +47,27 @@
 4. Once a user has logged in and a Session has been created, the user can either `inquire` about games that are
    currently open, `create` a new game, or `join` a game already in progress. To join a game, you need a Game Code,
    or a string that represents a game.
-5. To create a game, the user sends a creat
+
+   - To inquire about open games (a list of currently joinable games), send an `inquire` action. The server may accept
+     an optional limit parameter to bound the returned list.
+
+   - To create a game, send a `create` action. The creation payload supports a `code`, an optional `script` object, and
+     a `private` boolean indicating whether the game should be private (not listed in open game queries).
+
+     Example create payload:
+     ```json
+     {
+       "action": "create",
+       "code": "ROOM123",
+       "script": { /* optional script object */ },
+       "private": false
+     }
+     ```
+
+   The server will return the created Game object (including its internal ID and code) on success.
+
+5. To join a game, the user sends a `join` action with the `code` of the desired game. The join flow will add the player
+   to the game's player list and return the updated game/session state.
 
 ## Data Models
 
@@ -79,6 +99,4 @@ Player-specific data store.
 | PlayerData  | Data stored here is only available to a given player in a game. This data is not broadcast to the game, but is sent to the Player's session.  |
 
 ### Scenes
-
-
 
