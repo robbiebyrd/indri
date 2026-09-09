@@ -21,7 +21,8 @@ Replace the hardcoded tic-tac-toe grid in the Expo client with a data-driven lay
 `layout` object — grid dimensions, styling, and a per-scene widget map — arrives through the existing
 keyframe+delta pipeline and renders with RN primitives on web and native. Embedded Lua (fengari) supplies
 widget behaviour and acts as the binding layer between authoritative game state and widget presentation.
-Read-only in this plan: nothing writes layouts back.
+Scripts send actions to the server but observe state rather than messages. Read-only in this plan:
+nothing writes layouts back.
 
 ## Architecture Context
 
@@ -35,6 +36,8 @@ Read-only in this plan: nothing writes layouts back.
   what makes the feature testable at all given the client has no React test renderer.
 - Lua never mutates game state. It writes to a local **override layer** composited over the server layout
   at render time, and reaches the server only through `indri.send(...)` → existing `MessageHandler.send`.
+- Lua is **asymmetric**: it sends actions outbound, but receives nothing inbound. Scripts learn about the
+  world by observing the reduced game state (`stateChanged`), never by handling websocket messages.
 - Key existing files: `client/services/game-state-parser.ts` (delta replay, deep-clone-per-message),
   `client/services/message-handler.ts` (WS + the `parsers` extension array),
   `internal/services/events/delta.go:19-45` (`diffInto`), `client/app/index.tsx` (the grid being replaced).
@@ -125,10 +128,26 @@ client/app/board/index.tsx            # live renderer route
 - `zod` is absent from the repo (new dep). `type-fest` is properly declared. `tsconfig` is `strict: true`,
   `@/* → ./*`. `app.json` has `newArchEnabled: true`, `typedRoutes: true`, `web.output: "static"`. No shared
   theme module exists in `client/`; only `components/display/select.tsx` uses `StyleSheet.create`.
-- **fengari under Metro/Hermes is unverified** — no case study, issue, or article found. Core `fengari`
-  declares Node-only deps (`readline-sync`, `tmp`) backing its CLI, and its `io`/`os` libs are documented
-  Node-only, so `luaL_openlibs` is the likely break point. Its `lua_sethook` JS callback signature is also
-  unverified. Both resolved in Step 2.
+- **fengari, VERIFIED in Node during Step 2** (device result pending, see Open Questions):
+  - `lua_sethook(L, fn, lua.LUA_MASKCOUNT, n)` works. The callback is invoked as `(L, ar)`; raising from it
+    via `luaL_error` aborts the chunk with `LUA_ERRRUN`. An infinite loop aborts in ~1 ms. `LUA_MASKCOUNT`
+    is `8`. So the runaway-script guard is real, subject to the per-coroutine caveat below.
+  - **Avoiding fengari's barrel does NOT reduce the module graph.** `lstrlib.js:76` and `ltablib.js:50` both
+    require `lualib.js`, which unconditionally pulls in `loslib`, `loadlib` and `ldblib`. Importing
+    submodules directly loads the *identical* 38 modules as `require("fengari")` — verified by comparing
+    `require.cache`. Dropping `string` and `table` is the only way to shrink it, which is not an option.
+    The sandbox is therefore **"never opened", not "never shipped"**.
+  - Importing submodules directly is also actively harmful: fengari's modules are mutually circular, and
+    `lauxlib.js` captures `LUA_REGISTRYINDEX` from `lua.js` at evaluation time. Import `lauxlib` before
+    `lua` and every `luaL_requiref` fails with `upvalue index too large`. The barrel orders its own imports
+    correctly, so **use `import {...} from "fengari"`** and the hazard disappears.
+  - Metro must resolve these, which fengari references from guarded-but-statically-analysed code paths:
+    `fs`, `os`, `path`, `child_process`, `tmp`, `readline-sync`, plus `util` from fengari-interop. All are
+    shimmed to `shims/empty.js` in `metro.config.js`. `sprintf-js` is genuinely used and must NOT be shimmed.
+  - React Native defines a global `process`, so fengari's `typeof process !== "undefined"` guards are TRUE
+    on device and it takes its Node branch. That is why the shims are required rather than optional.
+  - `luaopen_base` installs `load`/`loadstring`/`dofile`/`loadfile`, so selective `luaL_requiref` is **not**
+    a sandbox on its own — those globals must be nil'd explicitly.
 - react-grid-layout's `collides()` is the plain 4-comparison AABB test; neither RGL nor gridstack ever
   materialises cells. `preventCollision: true` = reject-and-snap-back (RGL's default is push-cascade).
   **No maintained RN equivalent of RGL exists** — this is written from scratch.
@@ -199,21 +218,21 @@ client/app/board/index.tsx            # live renderer route
 | 7 | Scene switch — old scene tree unmounts | 7, 10 |
 | 8 | Reconnect/refresh → fresh keyframe, overrides cleared | 10 |
 | 9 | Interaction → Lua → `indri.send` → server → delta closes loop | 11, 12 |
-| 10 | Inbound game-specific `op` → Lua handler | 11 |
+| 10 | Server state change observed by a script as `stateChanged` | 10, 11 |
 | 11 | Malformed server data → clamp/skip, never crash | 5, 7 |
 | 12 | Media load states: error placeholder, unsupported format | 8 |
 
 ## Open Questions
 
 ### Critical (P1)
-1. **Does fengari bundle and execute under Metro + Hermes on a real device?** Step 2 is the gate for Steps
+1. **Does fengari bundle and execute under Metro + Hermes on a real device?** Node-side is proven and the
+   Metro shims are written; the on-device run is the remaining unknown. Step 2 is the gate for Steps
    9-12. If it fails: Lua becomes web-only, and Step 12 falls back to a minimal declarative `$bind` on the
    `text` config key. Do not start Step 9 before Step 2 is green on both targets.
 
 ### Important (P2)
-2. Does `lua_sethook` + `LUA_MASKCOUNT` work in fengari, and what is the callback signature? Resolved inside
-   Step 2. If unavailable, the runaway guard degrades to a wall-clock check inside host callbacks — weaker,
-   and must be documented as such rather than implied.
+2. ~~Does `lua_sethook` + `LUA_MASKCOUNT` work in fengari?~~ **RESOLVED in Step 2:** yes, callback signature
+   is `(L, ar)`, and it aborts an infinite loop. See Research Findings.
 3. Z-order tie-break among overlapping `absolute` widgets when `z` is absent. Default: map-insertion order,
    documented as a temporary rule, not a layering feature.
 
@@ -518,7 +537,7 @@ export interface HostApi {
     on(event: LuaEvent, fn: LuaFunction): void
     log(...args: unknown[]): void
 }
-type LuaEvent = "stateChanged" | "sceneChanged" | "widgetPress" | "message"
+type LuaEvent = "stateChanged" | "sceneChanged" | "widgetPress"   // no "message": Lua observes state, it does not receive messages
 
 const effective = mergeOverrides(serverLayout, overrides)   // server always wins for what it owns
 ```
@@ -533,24 +552,35 @@ const effective = mergeOverrides(serverLayout, overrides)   // server always win
   let a script mutate authoritative state through the back door.
 - **Validation:** `pnpm test`
 
-### Step 11: Lua ↔ WebSocket bridge
+### Step 11: Lua outbound send, and state-change observation
 - **Depends on:** Step 10
 - **Test:** `client/layout/lua/bridge.node-test.ts` — with a fake socket, `indri.send("move", {...})` emits
-  `{action: "move", ...}`; an inbound message dispatches to registered handlers; an unknown action is
-  ignored rather than thrown; a send before the socket opens is dropped with a warning, matching
-  `MessageHandler.send`'s existing behaviour.
-- **Implement:** `client/layout/lua/bridge.ts`; register one parser in the existing `parsers` array.
+  `{action: "move", ...}`; a send before the socket opens is dropped with a warning, matching
+  `MessageHandler.send`'s existing behaviour; a new game state fires `stateChanged` exactly once per
+  applied update; an update that changes nothing the script observes does not re-fire; a cyclic payload is
+  rejected rather than throwing inside the Lua callback.
+- **Implement:** `client/layout/lua/bridge.ts`
 - **Code:**
 ```ts
-// reuses MessageHandler's existing extension point — no change to its internals
-new MessageHandler(url, userDispatch, gameDispatch, listDispatch, [
-    {name: "lua_event", action: "luaEvent", parser: d => bridge.dispatchInbound(d)},
-])
+// Lua is asymmetric by design: it SENDS actions, but it does not receive
+// messages. Inbound information reaches scripts only as state changes, because
+// the server's game state — not the message that caused it — is the contract.
+export function attachBridge(rt: LuaRuntime, ws: MessageHandler) {
+    rt.host.send = (action, payload) => ws.send({action, ...toPlainJson(payload)})
+}
+// driven from the provider, once per applied game state:
+useEffect(() => { rt.emit("stateChanged", gameState) }, [gameState])
 ```
-- **Constraint:** the framework reserves no action names. Games name their own actions, exactly as
-  tic-tac-toe's `move` does. Do not add a Lua-specific namespace to the protocol.
+- **Constraint:** there is **no** inbound message dispatch to Lua and no new parser in
+  `MessageHandler.parsers`. A script that needs to react to something reads it from state. This keeps one
+  source of truth and means a script cannot desynchronise from the authoritative state by listening to a
+  message the reducer handled differently.
+- **Constraint:** the framework reserves no action names. Games name their own outbound actions, exactly as
+  tic-tac-toe's `move` does.
 - **Constraint:** `indri.send` payloads are JSON-serialised at the boundary; reject cyclic or
   deeper-than-8-level tables rather than letting `JSON.stringify` throw inside a Lua callback.
+- **Constraint:** `stateChanged` fires from the already-reduced `gameState`, not from the raw delta, so
+  scripts never see a partially applied update.
 - **Validation:** `pnpm test`
 
 ### Step 12: migrate tic-tac-toe to a layout

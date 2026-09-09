@@ -5,11 +5,11 @@ status: ready
 priority: P2
 type: feature
 created: "2026-09-09T19:04:59.225Z"
-updated: "2026-09-09T19:05:28.164Z"
-dependencies: ["018", "021"]
+updated: "2026-09-09T19:22:40.465Z"
+dependencies: ["018", "024"]
 plan: plans/layout-engine-renderer.md
 plan_step: Step 12
-depends_on: ["stories/018-d50f-pending-P2-text-image-and-sub-grid-widgets.md", "stories/021-9370-pending-P2-lua-to-websocket-bridge.md"]
+depends_on: ["stories/018-d50f-ready-P2-text-image-and-sub-grid-widgets.md", "stories/024-8ef7-ready-P2-lua-outbound-send-and-state-change-observation.md"]
 ---
 
 # Migrate tic-tac-toe to a data-driven layout
