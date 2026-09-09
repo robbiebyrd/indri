@@ -15,6 +15,7 @@ type Vars struct {
 	RedisPort             int    `default:"6379"      envconfig:"REDIS_PORT"`
 	RedisPassword         string `default:""          envconfig:"REDIS_PASSWORD"`
 	RedisDatabase         int    `default:"0"         envconfig:"REDIS_DATABASE"`
+	LockBackend           string `default:"inprocess" envconfig:"LOCK_BACKEND"`
 	MongoURI              string `default:"localhost" envconfig:"MONGO_URI"`
 	MongoDatabase         string `default:"indri"     envconfig:"MONGO_DATABASE"`
 	MongoAuthDatabase     string `default:"admin"     envconfig:"MONGO_AUTH_DATABASE"`

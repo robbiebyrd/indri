@@ -16,6 +16,7 @@ import (
 	authSevice "github.com/robbiebyrd/indri/internal/services/authentication"
 	broadcastService "github.com/robbiebyrd/indri/internal/services/broadcast"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
+	"github.com/robbiebyrd/indri/internal/services/lock"
 	sessionService "github.com/robbiebyrd/indri/internal/services/session"
 	userService "github.com/robbiebyrd/indri/internal/services/user"
 )
@@ -32,6 +33,7 @@ type ClientsInjector struct {
 	MongoDBClient *mongodbClient.Client
 	MelodyClient  *melody.Melody
 	GlobalMonitor *changestream.MongoChangeMonitor
+	LockManager   lock.Manager
 }
 
 type ServicesInjector struct {

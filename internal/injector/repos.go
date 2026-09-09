@@ -16,7 +16,7 @@ func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath stri
 		return nil, errors.New("clients were not passed to the repo injector")
 	}
 
-	gr, err := gameRepo.NewStore(ctx, clients.MongoDBClient)
+	gr, err := gameRepo.NewStore(ctx, clients.MongoDBClient, clients.LockManager)
 	if err != nil {
 		return nil, err
 	}

@@ -2,9 +2,7 @@ package game
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"math/rand"
 	"time"
 
 	"github.com/chenmingyong0423/go-mongox/v2"
@@ -16,6 +14,8 @@ import (
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
 	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
+	"github.com/robbiebyrd/indri/internal/services/lock"
+	"github.com/robbiebyrd/indri/internal/services/mutation"
 )
 
 var collectionName = "game"
@@ -24,10 +24,12 @@ type Store struct {
 	ctx        *context.Context
 	collection *mongox.Collection[models.Game]
 	client     *mongodb.Client
+	locks      lock.Manager
 }
 
-// NewStore creates a new repository for accessing game data.
-func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
+// NewStore creates a new repository for accessing game data. locks provides the
+// cross-instance serialization used by Mutate.
+func NewStore(ctx context.Context, client *mongodb.Client, locks lock.Manager) (*Store, error) {
 	gameColl := mongox.NewCollection[models.Game](client.Database, collectionName)
 
 	indexModels := []mongo.IndexModel{
@@ -46,6 +48,7 @@ func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
 		ctx:        &ctx,
 		client:     client,
 		collection: gameColl,
+		locks:      locks,
 	}, nil
 }
 
@@ -214,66 +217,60 @@ func (s *Store) DeleteField(id string, key string) error {
 	return nil
 }
 
-const maxMutateRetries = 50
-
-// errAbortMutation lets an apply function abort a mutate without writing and
-// without surfacing an error (for no-op cases).
-var errAbortMutation = errors.New("mutation aborted")
-
-// Mutate applies apply to a freshly-loaded game and persists it under an
-// optimistic-concurrency check on the version field, reloading and retrying
-// if another writer committed in between. This keeps a read-modify-write
-// sequence atomic against concurrent writers using only a version column, so
-// the guarantee is portable across database backends.
+// Mutate applies apply to the game as a conflict-free read-modify-write. The
+// coordination (distributed lock + version fence + retry) lives in the
+// mutation package, above this store; this method only supplies how to load
+// the game and how to save it conditionally on its version. A different
+// backend (SQLite, ...) reuses the same coordinator by implementing just those
+// two operations.
 func (s *Store) Mutate(id string, apply func(g *models.Game) error) error {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
-
-	for attempt := 0; attempt < maxMutateRetries; attempt++ {
-		g, err := s.Get(id)
-		if err != nil {
-			return err
-		}
-
-		expectedVersion := g.Version
-
-		if err := apply(g); err != nil {
-			if errors.Is(err, errAbortMutation) {
-				return nil
+	return mutation.Run(
+		*s.ctx,
+		s.locks,
+		"game:"+id,
+		func() (*models.Game, int64, error) {
+			g, err := s.Get(id)
+			if err != nil {
+				return nil, 0, err
 			}
 
-			return err
-		}
+			return g, g.Version, nil
+		},
+		apply,
+		func(g *models.Game, expectedVersion int64) (bool, error) {
+			return s.saveWithVersion(id, g, expectedVersion)
+		},
+	)
+}
 
-		g.UpdatedAt = time.Now()
-		g.Version = expectedVersion + 1
-
-		doc, err := repoUtils.CreateBSONDoc(g)
-		if err != nil {
-			return err
-		}
-
-		result, err := s.collection.Collection().UpdateOne(
-			*s.ctx,
-			bson.D{{Key: "_id", Value: objectId}, {Key: "version", Value: expectedVersion}},
-			bson.D{{Key: "$set", Value: withoutKey(doc, "_id")}},
-		)
-		if err != nil {
-			return err
-		}
-
-		if result.MatchedCount == 1 {
-			return nil
-		}
-
-		// The version moved under us; back off a jittered interval to let the
-		// contending writers spread out, then reload and retry.
-		time.Sleep(time.Duration(rand.Intn(5*(attempt+1))) * time.Millisecond)
+// saveWithVersion persists the whole game only if its stored version still
+// equals expectedVersion, bumping the version on success. It reports whether
+// the write committed. Using $set keeps the change stream emitting "update"
+// events so real-time deltas keep flowing.
+func (s *Store) saveWithVersion(id string, g *models.Game, expectedVersion int64) (bool, error) {
+	objectId, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return false, err
 	}
 
-	return fmt.Errorf("could not update game %v after %d attempts due to concurrent modification", id, maxMutateRetries)
+	g.UpdatedAt = time.Now()
+	g.Version = expectedVersion + 1
+
+	doc, err := repoUtils.CreateBSONDoc(g)
+	if err != nil {
+		return false, err
+	}
+
+	result, err := s.collection.Collection().UpdateOne(
+		*s.ctx,
+		bson.D{{Key: "_id", Value: objectId}, {Key: "version", Value: expectedVersion}},
+		bson.D{{Key: "$set", Value: withoutKey(doc, "_id")}},
+	)
+	if err != nil {
+		return false, err
+	}
+
+	return result.MatchedCount == 1, nil
 }
 
 // withoutKey returns a copy of doc with the given top-level key removed, used

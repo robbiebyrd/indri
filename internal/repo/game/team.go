@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/services/mutation"
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
 )
 
@@ -73,7 +74,7 @@ func (s *Store) RemovePlayerFromTeam(id string, userId string) error {
 
 	return s.Mutate(id, func(g *models.Game) error {
 		if !removePlayerFromTeams(g, userId) {
-			return errAbortMutation
+			return mutation.ErrAbort
 		}
 
 		return nil

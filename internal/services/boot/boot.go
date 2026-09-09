@@ -19,7 +19,7 @@ func Boot(ctx context.Context, scriptFilePath *string) (*injector.Injector, erro
 		scriptFilePath = &s
 	}
 
-	clients, err := injector.GetClients(ctx, nil, nil, nil)
+	clients, err := injector.GetClients(ctx, nil, nil, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("initializing clients: %w", err)
 	}
