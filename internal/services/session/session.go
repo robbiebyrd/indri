@@ -94,6 +94,16 @@ func (us *Service) Exists(id *string) bool {
 	return exists
 }
 
+// Delete invalidates a session (e.g. on logout) so its token can no longer be
+// used to reconnect.
+func (us *Service) Delete(id string) error {
+	if id == "" {
+		return fmt.Errorf("id is empty")
+	}
+
+	return us.sessionRepo.Delete(id)
+}
+
 // Update saves session data to the repository.
 func (us *Service) Update(sessionId string, user *models.UpdateSession) error {
 	err := us.sessionRepo.Update(sessionId, user)

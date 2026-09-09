@@ -18,6 +18,11 @@ import (
 
 var collectionName = "session"
 
+// sessionMaxAge is an absolute cap on how long a session (and its bearer token)
+// remains valid, enforced by a TTL index as defense in depth: even a session
+// that is never explicitly logged out expires and its token stops working.
+const sessionMaxAge = 7 * 24 * time.Hour
+
 type Store struct {
 	ctx        *context.Context
 	collection *mongox.Collection[models.Session]
@@ -36,6 +41,12 @@ func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
 		{
 			Keys:    bson.D{{Key: "token", Value: 1}},
 			Options: options.Index().SetUnique(true).SetSparse(true),
+		},
+		{
+			// TTL index: MongoDB removes a session sessionMaxAge after its
+			// createdAt, capping how long any token can be replayed.
+			Keys:    bson.D{{Key: "createdAt", Value: 1}},
+			Options: options.Index().SetExpireAfterSeconds(int32(sessionMaxAge.Seconds())),
 		},
 		{
 			Keys: bson.D{
@@ -109,6 +120,20 @@ func (s *Store) GetByToken(token string) (*models.Session, error) {
 	}
 
 	return s.collection.Finder().Filter(query.Eq("token", token)).FindOne(*s.ctx)
+}
+
+// Delete removes a session, invalidating its bearer token so it can no longer
+// be used to reconnect. It is idempotent: deleting an already-gone session is
+// not an error.
+func (s *Store) Delete(id string) error {
+	objectId, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.collection.Collection().DeleteOne(*s.ctx, bson.D{{Key: "_id", Value: objectId}})
+
+	return err
 }
 
 // Exists checks to see if a user with the given ID already exists.

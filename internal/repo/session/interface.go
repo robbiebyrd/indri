@@ -15,4 +15,5 @@ type Storer interface {
 	GetByToken(token string) (*models.Session, error)
 	Exists(id string) (bool, error)
 	Update(sessionId string, session *models.UpdateSession) error
+	Delete(id string) error
 }
