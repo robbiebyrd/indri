@@ -329,7 +329,10 @@ export function createSandboxedState(): lua_State {
 ```ts
 export const StyleSchema = z.object({
     backgroundColor: z.string().optional(),
-    backgroundImage: z.object({uri: z.string().url(), resizeMode: ResizeMode.optional()}).optional(),
+    // z.string(), NOT .url(): data: URIs and relative asset paths are legitimate
+    // and .url() would reject them. Media failure is a render concern, not a
+    // parse one — expo-image shows its error placeholder.
+    backgroundImage: z.object({uri: z.string(), resizeMode: ResizeMode.optional()}).optional(),
     backgroundGradient: z.object({
         colors: z.array(z.string()).min(2), locations: z.array(z.number()).optional(),
         start: Point.optional(), end: Point.optional()}).optional(),
