@@ -22,27 +22,26 @@ func New(i *injector.Injector) *TicTacToeMoveHandler {
 	return &TicTacToeMoveHandler{i}
 }
 
-func (h *TicTacToeMoveHandler) getGameDataFromSession(s *melody.Session) (*models.Game, *string, error) {
+func (h *TicTacToeMoveHandler) gameAndTeamFromSession(s *melody.Session) (gameId string, teamId string, err error) {
 	cs := connection.NewService(s, h.i.MelodyClient)
 
 	sessionId, err := cs.GetKeyAsString("sessionId")
 	if err != nil {
-		return nil, nil, err
+		return "", "", err
 	} else if sessionId == nil {
-		return nil, nil, fmt.Errorf("sessionId is nil")
+		return "", "", fmt.Errorf("sessionId is nil")
 	}
 
-	gameId, teamId, err := h.i.SessionService.GetGameIDAndTeamID(*sessionId)
+	gid, tid, err := h.i.SessionService.GetGameIDAndTeamID(*sessionId)
 	if err != nil {
-		return nil, nil, err
+		return "", "", err
 	}
 
-	g, err := h.i.GameService.Get(*gameId)
-	if err != nil {
-		return nil, nil, err
+	if gid == nil || tid == nil {
+		return "", "", fmt.Errorf("session is not in a game/team")
 	}
 
-	return g, teamId, nil
+	return *gid, *tid, nil
 }
 
 func (h *TicTacToeMoveHandler) findTeamByMarker(marker string, g *models.Game) (*string, error) {
@@ -59,96 +58,84 @@ func (h *TicTacToeMoveHandler) Handle(
 	s *melody.Session,
 	decodedMsg map[string]interface{},
 ) error {
-	g, teamId, err := h.getGameDataFromSession(s)
+	gameId, teamId, err := h.gameAndTeamFromSession(s)
 	if err != nil {
 		return err
 	}
 
-	thisTeam := g.Teams[*teamId]
+	// Apply the whole move — validation, board update, win check and turn flip
+	// — as one atomic read-modify-write, so two racing moves can't lose an
+	// update or leave the board advanced with the turn unflipped.
+	return h.i.GameRepo.Mutate(gameId, func(g *models.Game) error {
+		thisTeam := g.Teams[teamId]
 
-	marker, ok := thisTeam.PublicData["marker"]
-	if !ok {
-		return fmt.Errorf("marker is nil")
-	}
-
-	isPlayerTurn, ok := thisTeam.PublicData["turn"]
-	if !ok {
-		return fmt.Errorf("marker is nil")
-	} else if !isPlayerTurn.(bool) {
-		return fmt.Errorf("it is not your turn")
-	}
-
-	sceneData := g.Stage.Scenes[g.Stage.CurrentScene]
-
-	updateSceneData := *sceneData.PublicData
-
-	var boardData [][]string
-
-	for _, item := range updateSceneData["board"].(bson.A) {
-		var innerRow []string
-
-		for _, item2 := range item.(bson.A) {
-			innerRow = append(innerRow, item2.(string))
+		marker, ok := thisTeam.PublicData["marker"]
+		if !ok {
+			return fmt.Errorf("marker is nil")
 		}
 
-		boardData = append(boardData, innerRow)
-	}
+		isPlayerTurn, ok := thisTeam.PublicData["turn"]
+		if !ok {
+			return fmt.Errorf("turn is nil")
+		} else if !isPlayerTurn.(bool) {
+			return fmt.Errorf("it is not your turn")
+		}
 
-	rows, columns := getBoardSize(boardData)
+		sceneData := g.Stage.Scenes[g.Stage.CurrentScene]
 
-	move, err := h.decodeMove(decodedMsg, columns, rows)
-	if err != nil {
-		return err
-	}
+		updateSceneData := *sceneData.PublicData
 
-	moveCopy := *move
+		var boardData [][]string
 
-	spot := boardData[moveCopy[0]][moveCopy[1]]
-	if spot != "" {
-		return fmt.Errorf("spot is taken")
-	}
+		for _, item := range updateSceneData["board"].(bson.A) {
+			var innerRow []string
 
-	boardData[moveCopy[0]][moveCopy[1]] = marker.(string)
-
-	winner, won := h.findWinner(boardData)
-	if won {
-		if winner == "draw" {
-			updateSceneData["winningTeam"] = "draw"
-		} else {
-			winningTeam, err := h.findTeamByMarker(winner, g)
-			if err != nil {
-				return err
+			for _, item2 := range item.(bson.A) {
+				innerRow = append(innerRow, item2.(string))
 			}
-			updateSceneData["winningTeam"] = winningTeam
+
+			boardData = append(boardData, innerRow)
 		}
-	}
 
-	updateSceneData["board"] = boardData
-	sceneData.PublicData = &updateSceneData
-	g.Stage.Scenes[g.Stage.CurrentScene] = sceneData
+		rows, columns := getBoardSize(boardData)
 
-	err = h.i.GameRepo.UpdateField(g.ID.Hex(), "stage", g.Stage)
-	if err != nil {
-		return err
-	}
-
-	teams := g.Teams
-	for tId, t := range teams {
-		if tId == *teamId {
-			t.PublicData["turn"] = false
-		} else {
-			t.PublicData["turn"] = true
+		move, err := h.decodeMove(decodedMsg, columns, rows)
+		if err != nil {
+			return err
 		}
-	}
 
-	g.Teams = teams
+		moveCopy := *move
 
-	err = h.i.GameRepo.UpdateField(g.ID.Hex(), "teams", g.Teams)
-	if err != nil {
-		return err
-	}
+		if boardData[moveCopy[0]][moveCopy[1]] != "" {
+			return fmt.Errorf("spot is taken")
+		}
 
-	return nil
+		boardData[moveCopy[0]][moveCopy[1]] = marker.(string)
+
+		winner, won := h.findWinner(boardData)
+		if won {
+			if winner == "draw" {
+				updateSceneData["winningTeam"] = "draw"
+			} else {
+				winningTeam, err := h.findTeamByMarker(winner, g)
+				if err != nil {
+					return err
+				}
+
+				updateSceneData["winningTeam"] = winningTeam
+			}
+		}
+
+		updateSceneData["board"] = boardData
+		sceneData.PublicData = &updateSceneData
+		g.Stage.Scenes[g.Stage.CurrentScene] = sceneData
+
+		for tId, t := range g.Teams {
+			t.PublicData["turn"] = tId != teamId
+		}
+
+		return nil
+	})
 }
 
 func (h *TicTacToeMoveHandler) decodeMove(decodedMsg map[string]interface{}, columns, rows int) (*[]int, error) {

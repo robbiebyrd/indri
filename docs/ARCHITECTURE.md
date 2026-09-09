@@ -105,8 +105,10 @@ Mongo stores plus `env` (envconfig-backed, `INDRI_` prefix, cached singleton) an
 (reads and unmarshals the JSON script file once at boot).
 
 `repo/game` is split by concern: `game.go` (CRUD, `Mutate`, `saveWithVersion`), `player.go`, `team.go`,
-`host.go`. The `interface.go` `Storer` declarations in each repo package are unused and, for `game`,
-out of date.
+`host.go`. Each repo package's `interface.go` declares a `Storer` interface with a
+`var _ Storer = (*Store)(nil)` compile-time assertion; this exists only as a drift guard (change a
+`Store` method and the build breaks unless the interface is updated). Nothing consumes the
+interfaces as an abstraction yet — callers use the concrete `*Store` types.
 
 ## Concurrency
 

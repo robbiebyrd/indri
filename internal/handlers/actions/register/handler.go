@@ -30,7 +30,10 @@ func (h *Handler) Handle(
 	// it is what marks this connection as already authenticated.
 	_, err := ss.GetKeyAsString("sessionId")
 	if err == nil {
-		_ = ss.Write(authExistsErrorMessage)
+		if writeErr := ss.Write(authExistsErrorMessage); writeErr != nil {
+			return fmt.Errorf("notify already-registered session: %w", writeErr)
+		}
+
 		return nil
 	}
 
