@@ -47,11 +47,12 @@ func (h *Handler) Handle(
 		return fmt.Errorf("unable to get userId: %w", err)
 	}
 
-	if _, ok := decodedMsg["inquiryType"]; !ok {
-		return errors.New("inquiryType not provided")
+	inquiryType, ok := decodedMsg["inquiryType"].(string)
+	if !ok {
+		return errors.New("inquiryType not provided or not a string")
 	}
 
-	if decodedMsg["inquiryType"].(string) == "game" {
+	if inquiryType == "game" {
 		jbs, err := h.handleGameInquiry(decodedMsg)
 		if err != nil {
 			return err
@@ -84,21 +85,21 @@ func (h *Handler) handleGameInquiry(decodedMsg map[string]interface{}) (*[]byte,
 		return nil, err
 	}
 
-	if _, ok := decodedMsg["inquiry"]; !ok {
-		return nil, errors.New("inquiry not provided")
+	inquiry, ok := decodedMsg["inquiry"].(string)
+	if !ok {
+		return nil, errors.New("inquiry not provided or not a string")
 	}
 
 	var gameInfoList []GameInfo
 
-	switch decodedMsg["inquiry"].(string) {
+	switch inquiry {
 	case "availableGames":
 		gameInfoList = h.createGameInfoList(games)
 	case "gameInfo":
-		if _, ok := decodedMsg["code"]; !ok {
-			return nil, errors.New("game code not provided")
+		gameCode, ok := decodedMsg["code"].(string)
+		if !ok || gameCode == "" {
+			return nil, errors.New("game code not provided or not a string")
 		}
-
-		gameCode := decodedMsg["code"].(string)
 
 		game, err := h.i.GameService.GetByCode(gameCode)
 		if err != nil {

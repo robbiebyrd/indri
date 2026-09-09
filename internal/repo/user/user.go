@@ -30,20 +30,14 @@ func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
 
 	indexModels := []mongo.IndexModel{
 		{
-			Keys: bson.D{
-				{"email", 1},
-			},
+			Keys:    bson.D{{Key: "email", Value: 1}},
 			Options: options.Index().SetUnique(true),
 		},
 		{
-			Keys: bson.D{
-				{"name", 1},
-			},
+			Keys: bson.D{{Key: "name", Value: 1}},
 		},
 		{
-			Keys: bson.D{
-				{"score", 1},
-			},
+			Keys: bson.D{{Key: "score", Value: 1}},
 		},
 	}
 

@@ -9,6 +9,10 @@ import (
 type Session struct {
 	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
 
+	// Token is the unguessable bearer token used to resume this session.
+	// It is never serialized to clients as part of session state.
+	Token string `bson:"token,omitempty" json:"-"`
+
 	GameID *string `bson:"gameId,omitempty" json:"gameId,omitempty"`
 	UserID *string `bson:"userId,omitempty" json:"userId,omitempty"`
 	TeamID *string `bson:"teamId,omitempty" json:"teamId,omitempty"`
@@ -19,6 +23,7 @@ type Session struct {
 }
 
 type CreateSession struct {
+	Token     string    `bson:"token"     json:"-"`
 	GameID    string    `bson:"gameId"     json:"gameId"`
 	UserID    string    `bson:"userId"     json:"userId"`
 	TeamID    string    `bson:"teamId"     json:"teamId"`

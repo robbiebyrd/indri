@@ -10,6 +10,7 @@ import (
 type Vars struct {
 	ListenAddress         string `default:"localhost" envconfig:"LISTEN_ADDRESS"`
 	ListenPort            int    `default:"5002"      envconfig:"LISTEN_PORT"`
+	AllowedOrigins        string `default:""          envconfig:"ALLOWED_ORIGINS"`
 	RedisHost             string `default:"localhost" envconfig:"REDIS_HOST"`
 	RedisPort             int    `default:"6379"      envconfig:"REDIS_PORT"`
 	RedisPassword         string `default:""          envconfig:"REDIS_PASSWORD"`

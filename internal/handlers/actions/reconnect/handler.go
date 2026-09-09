@@ -23,21 +23,26 @@ func (h *Handler) Handle(
 	s *melody.Session,
 	decodedMsg map[string]interface{},
 ) error {
-	sessionId, ok := decodedMsg["sessionId"].(string)
-	if !ok || sessionId == "" {
+	token, ok := decodedMsg["sessionId"].(string)
+	if !ok || token == "" {
 		return fmt.Errorf("sessionId not a string or empty string")
 	}
 
 	ss := connection.NewService(s, h.i.MelodyClient)
 
-	session, err := h.i.SessionService.Get(sessionId)
+	session, err := h.i.SessionService.GetByToken(token)
 	if err != nil {
-		return err
+		return fmt.Errorf("could not resume session: %w", err)
 	}
 
 	if session.UserID == nil || *session.UserID == "" {
 		return fmt.Errorf("session user id not a string or empty string")
 	}
+
+	// Adopt the resumed session on this connection so subsequent authenticated
+	// actions and broadcasts target it. The broadcast key is the non-secret
+	// session ObjectID, never the token.
+	ss.SetKey("sessionId", session.ID.Hex())
 
 	user, err := h.i.UserService.Get(*session.UserID)
 	if err != nil {
@@ -50,7 +55,7 @@ func (h *Handler) Handle(
 	}
 
 	authSuccessMessage := bytes.Join([][]byte{
-		[]byte(`{"authenticated": true, "sessionId": "` + sessionId + `", "user": `),
+		[]byte(`{"authenticated": true, "sessionId": "` + token + `", "user": `),
 		jsonUserBytes,
 		[]byte(`}`),
 	}, []byte(""))
@@ -60,7 +65,7 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	if session.GameID == nil || *session.GameID == "" {
+	if session.GameID != nil && *session.GameID != "" {
 		g, err := h.i.GameService.Get(*session.GameID)
 		if err != nil {
 			return err

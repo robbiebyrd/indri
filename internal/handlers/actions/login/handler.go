@@ -8,7 +8,6 @@ import (
 	"github.com/olahol/melody"
 
 	"github.com/robbiebyrd/indri/internal/injector"
-	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
@@ -36,25 +35,21 @@ func (h *Handler) Handle(
 
 	ss := connection.NewService(s, h.i.MelodyClient)
 
-	var user *models.User
-
-	currentUserId, err := ss.GetKeyAsString("userId")
-	if err != nil {
-		session, err := h.i.AuthService.Authenticate(&emailAddress, &password)
-		if err != nil {
-			return err
-		}
-
-		ss.SetKey("sessionId", session.ID.Hex())
-		currentUserId = session.UserID
-	}
-
-	user, err = h.i.UserService.Get(*currentUserId)
+	session, err := h.i.AuthService.Authenticate(&emailAddress, &password)
 	if err != nil {
 		return err
 	}
 
-	sessionId, err := ss.GetKeyAsString("sessionId")
+	if session.UserID == nil || *session.UserID == "" {
+		return fmt.Errorf("authenticated session has no user id")
+	}
+
+	// The server-side targeting key uses the non-secret session ObjectID so
+	// broadcasts can find this connection. The client only ever receives the
+	// secret token, which it echoes back on reconnect.
+	ss.SetKey("sessionId", session.ID.Hex())
+
+	user, err := h.i.UserService.Get(*session.UserID)
 	if err != nil {
 		return err
 	}
@@ -65,7 +60,7 @@ func (h *Handler) Handle(
 	}
 
 	authSuccessMessage := bytes.Join([][]byte{
-		[]byte(`{"authenticated": true, "sessionId": "` + *sessionId + `", "user": `),
+		[]byte(`{"authenticated": true, "sessionId": "` + session.Token + `", "user": `),
 		jsonUserBytes,
 		[]byte(`}`),
 	}, []byte(""))

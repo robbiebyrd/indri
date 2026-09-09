@@ -79,7 +79,9 @@ func (ss *Service) getConnectionForPlayer(
 	}
 
 	for _, thisConnection := range allConnections {
-		checkSessionId, err := ss.GetKeyAsString("sessionId")
+		thisConn := NewService(thisConnection, ss.m)
+
+		checkSessionId, err := thisConn.GetKeyAsString("sessionId")
 		if err == nil && *checkSessionId == sessionId {
 			return thisConnection, nil
 		}

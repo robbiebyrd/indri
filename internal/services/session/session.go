@@ -36,6 +36,15 @@ func (us *Service) Get(id string) (*models.Session, error) {
 	return thisSession, nil
 }
 
+// GetByToken resolves a session from its unguessable bearer token.
+func (us *Service) GetByToken(token string) (*models.Session, error) {
+	if token == "" {
+		return nil, fmt.Errorf("token is empty")
+	}
+
+	return us.sessionRepo.GetByToken(token)
+}
+
 func (us *Service) GetGameIDAndTeamID(id string) (*string, *string, error) {
 	thisSession, err := us.Get(id)
 	if err != nil {

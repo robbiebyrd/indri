@@ -50,12 +50,18 @@ func (us *Service) Authenticate(email *string, password *string) (*models.Sessio
 		return nil, fmt.Errorf("password does not match")
 	}
 
+	token, err := utils.GenerateToken()
+	if err != nil {
+		return nil, fmt.Errorf("could not create session: %w", err)
+	}
+
 	session, err := us.sessionRepo.New(models.CreateSession{
+		Token:     token,
 		UserID:    storedUser.ID.Hex(),
 		CreatedAt: time.Time{},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("could not create session: %v", err)
+		return nil, fmt.Errorf("could not create session: %w", err)
 	}
 
 	return session, nil

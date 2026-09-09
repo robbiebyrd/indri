@@ -30,22 +30,24 @@ func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
 
 	indexModels := []mongo.IndexModel{
 		{
-			Keys: bson.D{
-				{"userId", 1},
-			},
+			Keys:    bson.D{{Key: "userId", Value: 1}},
 			Options: options.Index().SetUnique(true),
 		},
 		{
+			Keys:    bson.D{{Key: "token", Value: 1}},
+			Options: options.Index().SetUnique(true).SetSparse(true),
+		},
+		{
 			Keys: bson.D{
-				{"userId", 1},
-				{"gameId", 1},
+				{Key: "userId", Value: 1},
+				{Key: "gameId", Value: 1},
 			},
 		},
 		{
 			Keys: bson.D{
-				{"gameId", 1},
-				{"userId", 1},
-				{"teamId", 1},
+				{Key: "gameId", Value: 1},
+				{Key: "userId", Value: 1},
+				{Key: "teamId", Value: 1},
 			},
 		},
 	}
@@ -98,6 +100,15 @@ func (s *Store) Get(id string) (*models.Session, error) {
 	}
 
 	return s.collection.Finder().Filter(query.Id(objectId)).FindOne(*s.ctx)
+}
+
+// GetByToken retrieves a session by its unguessable bearer token.
+func (s *Store) GetByToken(token string) (*models.Session, error) {
+	if token == "" {
+		return nil, fmt.Errorf("token is empty")
+	}
+
+	return s.collection.Finder().Filter(query.Eq("token", token)).FindOne(*s.ctx)
 }
 
 // Exists checks to see if a user with the given ID already exists.
