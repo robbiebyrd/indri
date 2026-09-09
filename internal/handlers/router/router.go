@@ -1,12 +1,12 @@
 package router
 
 import (
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 	"github.com/robbiebyrd/indri/internal/handlers/utils"
 	"log"
 )
 
-func HandleMessage(s *melody.Session, msg []byte) {
+func HandleMessage(s transport.Conn, msg []byte) {
 	// The first step in handling a message is to successfully decode its payload into a map[string]interface{}.
 	// The map must have a string key named "action" that will be used to determine which handler should
 	// process the message. The "action" key is deleted from the decoded message before it is passed to the handler;

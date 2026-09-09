@@ -11,15 +11,9 @@ import (
 	"github.com/robbiebyrd/indri/internal/injector"
 )
 
-type GameDataKeys map[string]interface{}
-
 func Serve(ctx context.Context, i *injector.Injector) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		if err := i.MelodyClient.HandleRequestWithKeys(w, r, GameDataKeys{}); err != nil {
-			log.Println(err)
-		}
-	})
+	i.Transport.Register(mux)
 
 	server := &http.Server{
 		Addr:              i.EnvVars.ListenAddress + ":" + strconv.Itoa(i.EnvVars.ListenPort),
@@ -35,9 +29,9 @@ func Serve(ctx context.Context, i *injector.Injector) error {
 	go func() {
 		<-ctx.Done()
 
-		if !i.MelodyClient.IsClosed() {
-			if err := i.MelodyClient.Close(); err != nil {
-				log.Printf("error closing websocket hub during shutdown: %v", err)
+		if !i.Transport.IsClosed() {
+			if err := i.Transport.Close(); err != nil {
+				log.Printf("error closing transport during shutdown: %v", err)
 			}
 		}
 

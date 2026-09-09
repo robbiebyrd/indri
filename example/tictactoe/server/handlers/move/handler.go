@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/injector"
@@ -22,8 +22,8 @@ func New(i *injector.Injector) *TicTacToeMoveHandler {
 	return &TicTacToeMoveHandler{i}
 }
 
-func (h *TicTacToeMoveHandler) gameAndTeamFromSession(s *melody.Session) (gameId string, teamId string, err error) {
-	cs := connection.NewService(s, h.i.MelodyClient)
+func (h *TicTacToeMoveHandler) gameAndTeamFromSession(s transport.Conn) (gameId string, teamId string, err error) {
+	cs := connection.NewService(s, h.i.Transport)
 
 	sessionId, err := cs.GetKeyAsString("sessionId")
 	if err != nil {
@@ -55,7 +55,7 @@ func (h *TicTacToeMoveHandler) findTeamByMarker(marker string, g *models.Game) (
 
 // Handle a player's move request.
 func (h *TicTacToeMoveHandler) Handle(
-	s *melody.Session,
+	s transport.Conn,
 	decodedMsg map[string]interface{},
 ) error {
 	gameId, teamId, err := h.gameAndTeamFromSession(s)

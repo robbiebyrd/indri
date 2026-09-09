@@ -7,10 +7,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/olahol/melody"
-
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/injector"
+	"github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
 const actionsDir = "../../handlers/actions"
@@ -29,7 +28,7 @@ func registeredActions(t *testing.T) map[string]string {
 	t.Cleanup(router.Reset)
 
 	registerHandlers(&injector.Injector{
-		ClientsInjector: &injector.ClientsInjector{MelodyClient: melody.New()},
+		ClientsInjector: &injector.ClientsInjector{Transport: ws.New()},
 	})
 
 	actions := make(map[string]string)

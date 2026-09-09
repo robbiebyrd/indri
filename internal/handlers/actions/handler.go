@@ -1,11 +1,11 @@
 package actions
 
 import (
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 )
 
 type MessageHandler interface {
-	Handle(s *melody.Session,
+	Handle(s transport.Conn,
 		decodedMsg map[string]interface{},
 	) error
 }

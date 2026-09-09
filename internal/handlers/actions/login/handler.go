@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/services/connection"
@@ -20,7 +20,7 @@ func New(i *injector.Injector) *Handler {
 }
 
 func (h *Handler) Handle(
-	s *melody.Session,
+	s transport.Conn,
 	decodedMsg map[string]interface{},
 ) error {
 	emailAddress, ok := decodedMsg["email"].(string)
@@ -33,7 +33,7 @@ func (h *Handler) Handle(
 		return fmt.Errorf("password not a string or empty string")
 	}
 
-	ss := connection.NewService(s, h.i.MelodyClient)
+	ss := connection.NewService(s, h.i.Transport)
 
 	// Refuse to re-authenticate a connection that already holds a session;
 	// rebinding it to a different user would leave the first user's presence

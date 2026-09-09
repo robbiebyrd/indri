@@ -3,25 +3,24 @@ package entrypoints
 import (
 	"log"
 
-	"github.com/olahol/melody"
-
 	"github.com/robbiebyrd/indri/internal/services/connection"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	sessionService "github.com/robbiebyrd/indri/internal/services/session"
+	"github.com/robbiebyrd/indri/internal/transport"
 )
 
-func HandleConnect(s *melody.Session, m *melody.Melody, gs *gameService.Service, ss *sessionService.Service) {
-	cs := connection.NewService(s, m)
+func HandleConnect(s transport.Conn, t transport.Transport, gs *gameService.Service, ss *sessionService.Service) {
+	cs := connection.NewService(s, t)
 
 	err := cs.Write([]byte(`{ "stage": { "currentScene": "login"} }`))
 	if err != nil {
 		log.Printf("Error sending ready message to session: %v\n", err)
-		HandleDisconnect(s, m, gs, ss)
+		HandleDisconnect(s, t, gs, ss)
 	}
 }
 
-func HandleDisconnect(s *melody.Session, m *melody.Melody, gs *gameService.Service, ss *sessionService.Service) {
-	cs := connection.NewService(s, m)
+func HandleDisconnect(s transport.Conn, t transport.Transport, gs *gameService.Service, ss *sessionService.Service) {
+	cs := connection.NewService(s, t)
 
 	sessionId, err := cs.GetKeyAsString("sessionId")
 	if err != nil || sessionId == nil {
@@ -29,8 +28,8 @@ func HandleDisconnect(s *melody.Session, m *melody.Melody, gs *gameService.Servi
 		return
 	}
 
-	// When melody drives the disconnect it has already closed the session, so
-	// only notify/close when we still own an open connection (e.g. a kick).
+	// When the transport drives the disconnect it has already closed the
+	// connection, so only notify/close when we still own an open one (e.g. a kick).
 	if !s.IsClosed() {
 		if err = cs.Write([]byte(`{"disconnected": true}`)); err != nil {
 			log.Printf("error writing disconnected: %v\n", err)

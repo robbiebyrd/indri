@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -34,12 +34,12 @@ type GameInfo struct {
 
 // Handle processes a join game request, and adds a player to a game.
 func (h *Handler) Handle(
-	s *melody.Session,
+	s transport.Conn,
 	decodedMsg map[string]interface{},
 ) error {
 	var jsonBytes *[]byte
 
-	cs := connection.NewService(s, h.i.MelodyClient)
+	cs := connection.NewService(s, h.i.Transport)
 
 	_, err := cs.GetKeyAsString("sessionId")
 	if err != nil {

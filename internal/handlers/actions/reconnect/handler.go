@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/services/connection"
@@ -20,7 +20,7 @@ func New(i *injector.Injector) *Handler {
 }
 
 func (h *Handler) Handle(
-	s *melody.Session,
+	s transport.Conn,
 	decodedMsg map[string]interface{},
 ) error {
 	token, ok := decodedMsg["sessionId"].(string)
@@ -28,7 +28,7 @@ func (h *Handler) Handle(
 		return fmt.Errorf("sessionId not a string or empty string")
 	}
 
-	ss := connection.NewService(s, h.i.MelodyClient)
+	ss := connection.NewService(s, h.i.Transport)
 
 	// Refuse to resume onto a connection that is already authenticated; the
 	// client must log out first so the previous session's presence is cleaned up.

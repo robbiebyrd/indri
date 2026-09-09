@@ -32,9 +32,9 @@ func Serve(i *injector.Injector) error {
 // closeResources releases long-lived clients after the serving goroutines have
 // returned, so a shutdown doesn't leak the Mongo connection pool.
 func closeResources(i *injector.Injector) {
-	if i.MelodyClient != nil && !i.MelodyClient.IsClosed() {
-		if err := i.MelodyClient.Close(); err != nil {
-			log.Printf("error closing websocket hub: %v", err)
+	if i.Transport != nil && !i.Transport.IsClosed() {
+		if err := i.Transport.Close(); err != nil {
+			log.Printf("error closing transport: %v", err)
 		}
 	}
 

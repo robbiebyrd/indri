@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 
 	"github.com/robbiebyrd/indri/internal/entrypoints"
 	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
@@ -22,10 +22,10 @@ func New(i *injector.Injector) *Handler {
 
 // Handle processes a kick request and removes a player from a game if the requesting player is host.
 func (h *Handler) Handle(
-	s *melody.Session,
+	s transport.Conn,
 	decodedMsg map[string]interface{},
 ) error {
-	cs := connection.NewService(s, h.i.MelodyClient)
+	cs := connection.NewService(s, h.i.Transport)
 
 	gameCode, err := handlerUtils.RequireGameCode(decodedMsg)
 	if err != nil {
@@ -87,7 +87,7 @@ func (h *Handler) Handle(
 	// Force-disconnect the target if they are currently connected. A target
 	// who is offline has still been removed from the game above.
 	if userConnection, err := cs.Get(&targetSessionId); err == nil {
-		entrypoints.HandleDisconnect(userConnection, h.i.MelodyClient, h.i.GameService, h.i.SessionService)
+		entrypoints.HandleDisconnect(userConnection, h.i.Transport, h.i.GameService, h.i.SessionService)
 	}
 
 	return nil

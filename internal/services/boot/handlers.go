@@ -3,8 +3,6 @@ package boot
 import (
 	"log"
 
-	"github.com/olahol/melody"
-
 	"github.com/robbiebyrd/indri/internal/entrypoints"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/create"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/inquire"
@@ -18,20 +16,23 @@ import (
 	"github.com/robbiebyrd/indri/internal/handlers/actions/register"
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/injector"
+	"github.com/robbiebyrd/indri/internal/transport"
 )
 
 func registerHandlers(i *injector.Injector) {
-	i.MelodyClient.HandleConnect(func(s *melody.Session) {
-		entrypoints.HandleConnect(s, i.MelodyClient, i.GameService, i.SessionService)
-	})
-	i.MelodyClient.HandleDisconnect(func(s *melody.Session) {
-		entrypoints.HandleDisconnect(s, i.MelodyClient, i.GameService, i.SessionService)
-	})
-	i.MelodyClient.HandleMessage(func(s *melody.Session, msg []byte) {
-		router.HandleMessage(s, msg)
-	})
-	i.MelodyClient.HandleError(func(s *melody.Session, err error) {
-		log.Printf("websocket session error: %v", err)
+	i.Transport.Handle(transport.Handlers{
+		Connect: func(c transport.Conn) {
+			entrypoints.HandleConnect(c, i.Transport, i.GameService, i.SessionService)
+		},
+		Disconnect: func(c transport.Conn) {
+			entrypoints.HandleDisconnect(c, i.Transport, i.GameService, i.SessionService)
+		},
+		Message: func(c transport.Conn, msg []byte) {
+			router.HandleMessage(c, msg)
+		},
+		Error: func(c transport.Conn, err error) {
+			log.Printf("client transport error: %v", err)
+		},
 	})
 
 	actionToHandlerMap := []router.Handler{

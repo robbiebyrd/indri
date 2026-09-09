@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -20,10 +20,10 @@ func New(i *injector.Injector) *Handler {
 }
 
 func (h *Handler) Handle(
-	s *melody.Session,
+	s transport.Conn,
 	decodedMsg map[string]interface{},
 ) error {
-	ss := connection.NewService(s, h.i.MelodyClient)
+	ss := connection.NewService(s, h.i.Transport)
 	authExistsErrorMessage := []byte(`{"registered": false, "error": "user already logged in"}`)
 
 	// "sessionId" is the only key login/reconnect ever set on a connection, so

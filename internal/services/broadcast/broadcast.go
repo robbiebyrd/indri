@@ -8,27 +8,26 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/olahol/melody"
-
 	"github.com/robbiebyrd/indri/internal/models"
 	sessionRepo "github.com/robbiebyrd/indri/internal/repo/session"
 	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
+	"github.com/robbiebyrd/indri/internal/transport"
 )
 
 type Service struct {
-	m  *melody.Melody
+	t  transport.Transport
 	ur *userRepo.Store
 	sr *sessionRepo.Store
 }
 
-// NewService creates a new repository for accessing user data.
-func NewService(ctx context.Context, m *melody.Melody, userRepo *userRepo.Store, sessionRepo *sessionRepo.Store) (*Service, error) {
+// NewService creates a new service for broadcasting to connected clients.
+func NewService(ctx context.Context, t transport.Transport, userRepo *userRepo.Store, sessionRepo *sessionRepo.Store) (*Service, error) {
 	if ctx == nil {
 		return nil, errors.New("context was not passed to the connection service")
 	}
 
-	if m == nil {
-		return nil, errors.New("melody client was not passed to the connection service")
+	if t == nil {
+		return nil, errors.New("transport was not passed to the connection service")
 	}
 
 	if userRepo == nil {
@@ -39,7 +38,7 @@ func NewService(ctx context.Context, m *melody.Melody, userRepo *userRepo.Store,
 		return nil, errors.New("session repo was not passed to the connection service")
 	}
 
-	return &Service{m, userRepo, sessionRepo}, nil
+	return &Service{t, userRepo, sessionRepo}, nil
 }
 
 func (bs *Service) Broadcast(gameId *string, teamId *string, data interface{}) error {
@@ -129,7 +128,7 @@ func (bs *Service) sendToTeam(gameId, teamId string, jsonData []byte) error {
 func (bs *Service) sendToAll(jsonData []byte) error {
 	log.Printf("Broadcasting to all\n")
 
-	err := bs.m.Broadcast(jsonData)
+	err := bs.t.Broadcast(jsonData)
 	if err != nil {
 		return err
 	}
@@ -165,7 +164,7 @@ func (bs *Service) sendToPlayers(gameId string, playerIds []string, jsonData []b
 	return bs.broadcastToSessions(ids, jsonData)
 }
 
-// broadcastToSessions sends jsonData to the melody connections whose
+// broadcastToSessions sends jsonData to the connections whose
 // "sessionId" key is in sessionIds. "sessionId" (the session ObjectID) is the
 // only per-connection key the app sets, so all targeted sends resolve their
 // recipients through the session store and match on it.
@@ -174,8 +173,8 @@ func (bs *Service) broadcastToSessions(sessionIds []string, jsonData []byte) err
 		return nil
 	}
 
-	return bs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		value, ok := s.Get("sessionId")
+	return bs.t.BroadcastFilter(jsonData, func(c transport.Conn) bool {
+		value, ok := c.Get("sessionId")
 		if !ok {
 			return false
 		}

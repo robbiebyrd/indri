@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
 )
 
 func Act(
-	s *melody.Session,
+	s transport.Conn,
 	decodedMsg *map[string]interface{},
 	action *string,
 ) error {
@@ -34,7 +34,7 @@ func Act(
 	return nil
 }
 
-func runHandler(s *melody.Session, decodedMsg *map[string]interface{}, action string) error {
+func runHandler(s transport.Conn, decodedMsg *map[string]interface{}, action string) error {
 	for _, i := range registeredHandlerMap {
 		if i.Action == action {
 			if err := invokeHandler(i.Handler, s, decodedMsg); err != nil {
@@ -47,9 +47,9 @@ func runHandler(s *melody.Session, decodedMsg *map[string]interface{}, action st
 }
 
 // invokeHandler runs a single handler, converting any panic into an error so a
-// malformed client message cannot crash the process or leak the melody session
-// (net/http's per-connection recover would otherwise skip melody's cleanup).
-func invokeHandler(h actions.MessageHandler, s *melody.Session, decodedMsg *map[string]interface{}) (err error) {
+// malformed client message cannot crash the process or leak the connection
+// (net/http's per-connection recover would otherwise skip the transport's cleanup).
+func invokeHandler(h actions.MessageHandler, s transport.Conn, decodedMsg *map[string]interface{}) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("recovered from panic handling message: %v", r)

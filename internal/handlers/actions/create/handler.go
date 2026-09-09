@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 
 	"github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
@@ -23,10 +23,10 @@ func New(i *injector.Injector) *Handler {
 
 // Handle processes a join game request, and adds a player to a game.
 func (h *Handler) Handle(
-	s *melody.Session,
+	s transport.Conn,
 	decodedMsg map[string]interface{},
 ) error {
-	cs := connection.NewService(s, h.i.MelodyClient)
+	cs := connection.NewService(s, h.i.Transport)
 
 	gameCode, teamId, err := utils.RequireGameCodeAndTeamID(decodedMsg)
 	if err != nil {

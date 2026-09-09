@@ -4,20 +4,20 @@ import (
 	"context"
 	"time"
 
-	"github.com/olahol/melody"
 	"github.com/redis/go-redis/v9"
 
-	mClient "github.com/robbiebyrd/indri/internal/clients/melody"
 	mongoClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
 	redisClient "github.com/robbiebyrd/indri/internal/clients/redis"
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
+	"github.com/robbiebyrd/indri/internal/transport"
+	"github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
 var globalClientsInjector *ClientsInjector
 
-func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, melodyClient *melody.Melody, lockManager lock.Manager, publisher events.Publisher) (*ClientsInjector, error) {
+func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, clientTransport transport.Transport, lockManager lock.Manager, publisher events.Publisher) (*ClientsInjector, error) {
 	if globalClientsInjector != nil {
 		return globalClientsInjector, nil
 	}
@@ -31,8 +31,8 @@ func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, melodyCl
 		mongodbClient = newMongodbClient
 	}
 
-	if melodyClient == nil {
-		melodyClient = mClient.New()
+	if clientTransport == nil {
+		clientTransport = ws.New()
 	}
 
 	// In redis (multi-instance) mode both the lock manager and the change-event
@@ -68,7 +68,7 @@ func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, melodyCl
 
 	return &ClientsInjector{
 		MongoDBClient: mongodbClient,
-		MelodyClient:  melodyClient,
+		Transport:     clientTransport,
 		LockManager:   lockManager,
 		Publisher:     publisher,
 	}, nil

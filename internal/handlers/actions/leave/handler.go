@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/olahol/melody"
+	"github.com/robbiebyrd/indri/internal/transport"
 
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/services/connection"
@@ -19,10 +19,10 @@ func New(i *injector.Injector) *Handler {
 }
 
 func (h *Handler) Handle(
-	s *melody.Session,
+	s transport.Conn,
 	_ map[string]interface{},
 ) error {
-	cs := connection.NewService(s, h.i.MelodyClient)
+	cs := connection.NewService(s, h.i.Transport)
 
 	sessionId, err := cs.GetKeyAsString("sessionId")
 	if err != nil {

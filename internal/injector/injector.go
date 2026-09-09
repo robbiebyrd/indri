@@ -3,8 +3,6 @@ package injector
 import (
 	"context"
 
-	"github.com/olahol/melody"
-
 	mongodbClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
@@ -19,6 +17,7 @@ import (
 	"github.com/robbiebyrd/indri/internal/services/lock"
 	sessionService "github.com/robbiebyrd/indri/internal/services/session"
 	userService "github.com/robbiebyrd/indri/internal/services/user"
+	"github.com/robbiebyrd/indri/internal/transport"
 )
 
 type ReposInjector struct {
@@ -31,7 +30,7 @@ type ReposInjector struct {
 
 type ClientsInjector struct {
 	MongoDBClient *mongodbClient.Client
-	MelodyClient  *melody.Melody
+	Transport     transport.Transport
 	LockManager   lock.Manager
 	Publisher     events.Publisher
 }

@@ -25,7 +25,7 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 		return nil, err
 	}
 
-	bs, err := broadcastService.NewService(ctx, clients.MelodyClient, repos.UserRepo, repos.SessionRepo)
+	bs, err := broadcastService.NewService(ctx, clients.Transport, repos.UserRepo, repos.SessionRepo)
 	if err != nil {
 		return nil, err
 	}
