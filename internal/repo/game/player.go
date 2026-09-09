@@ -6,6 +6,7 @@ import (
 	"time"
 
 	goaway "github.com/TwiN/go-away"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/models"
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
@@ -49,88 +50,79 @@ func (s *Store) PlayerOnATeam(id string, userId string) bool {
 
 // AddPlayer adds a player to the game.
 func (s *Store) AddPlayer(id string, userId string, displayName string) error {
-	if s.HasPlayer(id, userId) {
-		return fmt.Errorf("player with id %v already exists in game %v", userId, id)
-	}
-
-	// Get our standard keys from the session; we need all three to add a player to a game.
-	err := sessionUtils.ValidateGameAndUser(id, userId)
-	if err != nil {
+	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
 		return err
 	}
 
-	g, err := s.Get(id)
-	if err != nil {
-		return fmt.Errorf("failed retrieving game with id %v", id)
-	}
+	return s.Mutate(id, func(g *models.Game) error {
+		if _, ok := g.Players[userId]; ok {
+			return fmt.Errorf("player with id %v already exists in game %v", userId, id)
+		}
 
-	if g.Teams == nil {
-		g.Teams = map[string]models.Team{}
-	}
+		if g.Players == nil {
+			g.Players = map[string]models.Player{}
+		}
 
-	if g.Players == nil {
-		g.Players = map[string]models.Player{}
-	}
+		g.Players[userId] = models.Player{
+			Name:      goaway.Censor(displayName),
+			Host:      !gameHasHost(g),
+			Connected: false,
+		}
 
-	g.Players[userId] = models.Player{
-		Name:      goaway.Censor(displayName),
-		Host:      !s.HasHost(id),
-		Connected: false,
-	}
-
-	updateGame := &models.UpdateGame{
-		Teams:       &g.Teams,
-		Players:     &g.Players,
-		Stage:       &g.Stage,
-		UpdatedAt:   time.Time{},
-		PublicData:  g.PublicData,
-		PrivateData: g.PrivateData,
-		PlayerData:  g.PlayerData,
-		Private:     g.Private,
-	}
-
-	if err = s.Update(id, updateGame); err != nil {
-		return err
-	}
-
-	return nil
+		return nil
+	})
 }
 
-// RemovePlayer removes a player from a game.
+// RemovePlayer removes a player from a game and any team it was on, atomically.
 func (s *Store) RemovePlayer(id string, userId string) error {
-	err := sessionUtils.ValidateGameAndUser(id, userId)
-	if err != nil {
+	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
 		return err
 	}
 
-	err = s.RemovePlayerFromTeam(id, userId)
-	if err != nil {
-		return err
+	return s.Mutate(id, func(g *models.Game) error {
+		removePlayerFromTeams(g, userId)
+		delete(g.Players, userId)
+
+		return nil
+	})
+}
+
+// gameHasHost reports whether any player in the in-memory game is the host.
+func gameHasHost(g *models.Game) bool {
+	for _, p := range g.Players {
+		if p.Host {
+			return true
+		}
 	}
 
-	g, err := s.Get(id)
-	if err != nil {
-		return fmt.Errorf("failed retrieving game with id %v", id)
+	return false
+}
+
+// removePlayerFromTeams removes userId from every team it belongs to on the
+// in-memory game, returning whether any team changed.
+func removePlayerFromTeams(g *models.Game, userId string) bool {
+	removed := false
+
+	for tId, team := range g.Teams {
+		newIDs := make([]string, 0, len(team.PlayerIDs))
+		teamChanged := false
+
+		for _, pId := range team.PlayerIDs {
+			if pId == userId {
+				teamChanged = true
+				removed = true
+			} else {
+				newIDs = append(newIDs, pId)
+			}
+		}
+
+		if teamChanged {
+			team.PlayerIDs = newIDs
+			g.Teams[tId] = team
+		}
 	}
 
-	delete(g.Players, userId)
-
-	updateGame := &models.UpdateGame{
-		Teams:       &g.Teams,
-		Players:     &g.Players,
-		Stage:       &g.Stage,
-		UpdatedAt:   time.Time{},
-		PublicData:  g.PublicData,
-		PrivateData: g.PrivateData,
-		PlayerData:  g.PlayerData,
-		Private:     g.Private,
-	}
-
-	if err = s.Update(id, updateGame); err != nil {
-		return err
-	}
-
-	return nil
+	return removed
 }
 
 // ConnectPlayer marks the player as offline.
@@ -143,39 +135,46 @@ func (s *Store) DisconnectPlayer(id string, userId string) error {
 	return s.markPlayerConnected(id, userId, false)
 }
 
-// markPlayerConnected marks the player's connected status.
+// markPlayerConnected sets the player's connected status atomically, only if
+// the player still exists, so a concurrent removal cannot recreate a partial
+// player document. The version bump keeps it coherent with Mutate's CAS.
 func (s *Store) markPlayerConnected(
 	id string,
 	userId string,
 	connected bool,
 ) error {
-	g, err := s.validateKeysAndGetGame(id, userId)
+	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
+		return err
+	}
+
+	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return err
 	}
 
-	_, ok := g.Players[userId]
-	if !ok {
-		return fmt.Errorf("no player found for game %v", id)
+	playerKey := "players." + userId
+
+	result, err := s.collection.Collection().UpdateOne(
+		*s.ctx,
+		bson.D{
+			{Key: "_id", Value: objectId},
+			{Key: playerKey, Value: bson.D{{Key: "$exists", Value: true}}},
+		},
+		bson.D{
+			{Key: "$set", Value: bson.D{
+				{Key: playerKey + ".connected", Value: connected},
+				{Key: "updatedAt", Value: time.Now()},
+			}},
+			{Key: "$inc", Value: bson.D{{Key: "version", Value: 1}}},
+		},
+	)
+	if err != nil {
+		return err
 	}
 
-	if err = s.UpdateField(id, "players."+userId+".connected", connected); err != nil {
-		return err
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("no player %v found in game %v", userId, id)
 	}
 
 	return nil
-}
-
-func (s *Store) validateKeysAndGetGame(id string, userId string) (*models.Game, error) {
-	err := sessionUtils.ValidateGameAndUser(id, userId)
-	if err != nil {
-		return nil, err
-	}
-
-	g, err := s.Get(id)
-	if err != nil {
-		return nil, fmt.Errorf("failed retrieving game with gameId %v", id)
-	}
-
-	return g, nil
 }

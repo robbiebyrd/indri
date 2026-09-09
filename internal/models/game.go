@@ -9,6 +9,10 @@ import (
 type Game struct {
 	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
 
+	// Version is bumped on every mutation and used for optimistic-concurrency
+	// checks so concurrent writers cannot silently lose each other's changes.
+	Version int64 `bson:"version" json:"-"`
+
 	CreatedAt   time.Time              `bson:"createdAt"           json:"createdAt"`
 	UpdatedAt   time.Time              `bson:"updatedAt"           json:"updatedAt"`
 	DeletedAt   time.Time              `bson:"deletedAt,omitempty" json:"-"`
@@ -23,6 +27,7 @@ type Game struct {
 }
 
 type CreateGame struct {
+	Version     int64                  `bson:"version"              json:"-"`
 	CreatedAt   time.Time              `bson:"createdAt"            json:"createdAt"`
 	UpdatedAt   time.Time              `bson:"updatedAt"            json:"updatedAt"`
 	DeletedAt   time.Time              `bson:"deletedAt,omitempty"  json:"-"`

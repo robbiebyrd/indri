@@ -2,7 +2,9 @@ package game
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/chenmingyong0423/go-mongox/v2"
@@ -167,6 +169,7 @@ func (s *Store) UpdateField(id string, key string, value interface{}) error {
 				{Key: key, Value: value},
 				{Key: "updatedAt", Value: time.Now()},
 			}},
+			{Key: "$inc", Value: bson.D{{Key: "version", Value: 1}}},
 		},
 	)
 	if err != nil {
@@ -197,6 +200,7 @@ func (s *Store) DeleteField(id string, key string) error {
 			{Key: "$set", Value: bson.D{
 				{Key: "updatedAt", Value: time.Now()},
 			}},
+			{Key: "$inc", Value: bson.D{{Key: "version", Value: 1}}},
 		},
 	)
 	if err != nil {
@@ -208,6 +212,82 @@ func (s *Store) DeleteField(id string, key string) error {
 	}
 
 	return nil
+}
+
+const maxMutateRetries = 50
+
+// errAbortMutation lets an apply function abort a mutate without writing and
+// without surfacing an error (for no-op cases).
+var errAbortMutation = errors.New("mutation aborted")
+
+// Mutate applies apply to a freshly-loaded game and persists it under an
+// optimistic-concurrency check on the version field, reloading and retrying
+// if another writer committed in between. This keeps a read-modify-write
+// sequence atomic against concurrent writers using only a version column, so
+// the guarantee is portable across database backends.
+func (s *Store) Mutate(id string, apply func(g *models.Game) error) error {
+	objectId, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+
+	for attempt := 0; attempt < maxMutateRetries; attempt++ {
+		g, err := s.Get(id)
+		if err != nil {
+			return err
+		}
+
+		expectedVersion := g.Version
+
+		if err := apply(g); err != nil {
+			if errors.Is(err, errAbortMutation) {
+				return nil
+			}
+
+			return err
+		}
+
+		g.UpdatedAt = time.Now()
+		g.Version = expectedVersion + 1
+
+		doc, err := repoUtils.CreateBSONDoc(g)
+		if err != nil {
+			return err
+		}
+
+		result, err := s.collection.Collection().UpdateOne(
+			*s.ctx,
+			bson.D{{Key: "_id", Value: objectId}, {Key: "version", Value: expectedVersion}},
+			bson.D{{Key: "$set", Value: withoutKey(doc, "_id")}},
+		)
+		if err != nil {
+			return err
+		}
+
+		if result.MatchedCount == 1 {
+			return nil
+		}
+
+		// The version moved under us; back off a jittered interval to let the
+		// contending writers spread out, then reload and retry.
+		time.Sleep(time.Duration(rand.Intn(5*(attempt+1))) * time.Millisecond)
+	}
+
+	return fmt.Errorf("could not update game %v after %d attempts due to concurrent modification", id, maxMutateRetries)
+}
+
+// withoutKey returns a copy of doc with the given top-level key removed, used
+// to keep the immutable _id out of a $set.
+func withoutKey(doc bson.D, key string) bson.D {
+	out := make(bson.D, 0, len(doc))
+
+	for _, e := range doc {
+		if e.Key != key {
+			out = append(out, e)
+		}
+	}
+
+	return out
 }
 
 func (s *Store) getBsonDocForID(id string) (bson.D, error) {

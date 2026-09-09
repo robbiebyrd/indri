@@ -40,3 +40,10 @@ codealike.json
 .roomodes
 .vscode
 .DS_Store
+.codecontext/cache/
+.codecontext/logs/
+.codex/**
+.mdkb/**
+.aid
+.claude
+.wiz
