@@ -35,6 +35,13 @@ func (h *Handler) Handle(
 
 	ss := connection.NewService(s, h.i.MelodyClient)
 
+	// Refuse to re-authenticate a connection that already holds a session;
+	// rebinding it to a different user would leave the first user's presence
+	// (connected: true) stranded. The client must log out first.
+	if _, err := ss.GetKeyAsString("sessionId"); err == nil {
+		return fmt.Errorf("connection is already authenticated; log out before logging in again")
+	}
+
 	session, err := h.i.AuthService.Authenticate(&emailAddress, &password)
 	if err != nil {
 		return err

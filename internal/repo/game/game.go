@@ -80,6 +80,12 @@ func (s *Store) New(code string, script *models.Script, privateGame bool) (*mode
 
 	result, err := s.collection.Collection().InsertOne(*s.ctx, &doc)
 	if err != nil {
+		// The unique code index rejected a concurrent create with the same
+		// code — surface the friendly error, not a raw duplicate-key.
+		if mongo.IsDuplicateKeyError(err) {
+			return nil, fmt.Errorf("game with code %s already exists", code)
+		}
+
 		return nil, err
 	}
 

@@ -30,6 +30,12 @@ func (h *Handler) Handle(
 
 	ss := connection.NewService(s, h.i.MelodyClient)
 
+	// Refuse to resume onto a connection that is already authenticated; the
+	// client must log out first so the previous session's presence is cleaned up.
+	if _, err := ss.GetKeyAsString("sessionId"); err == nil {
+		return fmt.Errorf("connection is already authenticated; log out before reconnecting")
+	}
+
 	session, err := h.i.SessionService.GetByToken(token)
 	if err != nil {
 		return fmt.Errorf("could not resume session: %w", err)

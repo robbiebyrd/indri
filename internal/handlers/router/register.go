@@ -30,3 +30,10 @@ func RegisteredHandlers() []Handler {
 
 	return out
 }
+
+// Reset clears the registry. The registry is process-global and append-only,
+// so tests that call registration must Reset (e.g. via t.Cleanup) to stay
+// isolated from one another.
+func Reset() {
+	registeredHandlerMap = nil
+}

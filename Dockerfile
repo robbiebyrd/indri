@@ -13,6 +13,10 @@ RUN go mod download
 # Builds your app with optional configuration
 RUN go build -o /app/main /app/cmd/server/main.go
 
+# Bind all interfaces inside the container (the default "localhost" binds
+# loopback only, making the published port unreachable).
+ENV INDRI_LISTEN_ADDRESS=0.0.0.0
+
 # Tells Docker which network port your container listens on (INDRI_LISTEN_PORT)
 EXPOSE 5002
 

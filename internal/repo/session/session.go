@@ -193,6 +193,13 @@ func (s *Store) createNewSession(session models.CreateSession) (*models.Session,
 
 	result, err := s.collection.Collection().InsertOne(*s.ctx, &doc)
 	if err != nil {
+		// Lost a race with a concurrent login for the same user (the unique
+		// userId index rejected the insert). Return the winner's session
+		// rather than a raw duplicate-key error — one session per user.
+		if mongo.IsDuplicateKeyError(err) {
+			return s.FindFirst("userId", session.UserID)
+		}
+
 		return nil, err
 	}
 
