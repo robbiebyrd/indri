@@ -293,6 +293,10 @@ func (s *Store) publish(id string, op events.OperationType, updated map[string]i
 		return
 	}
 
+	// Strip private data so a broadcast delta never exposes more than a
+	// sanitized keyframe would.
+	updated, removed = events.SanitizeDelta(updated, removed)
+
 	event := events.ChangeEvent{
 		ID:            id,
 		OperationType: op,

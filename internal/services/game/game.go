@@ -163,8 +163,10 @@ func (gs *Service) Reset() *models.Game {
 	return nil
 }
 
-// Sanitize removes private items.
+// Sanitize removes private items so a keyframe never exposes private data.
+// It matches events.SanitizeDelta, so keyframes and deltas agree on visibility.
 func (gs *Service) Sanitize(game *models.Game) *models.Game {
+	game.PrivateData = nil
 	game.Stage.PrivateData = nil
 
 	for i, g := range game.Stage.Scenes {

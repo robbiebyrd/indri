@@ -4,16 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"slices"
 	"sort"
 
 	"github.com/olahol/melody"
 
+	"github.com/robbiebyrd/indri/internal/models"
 	sessionRepo "github.com/robbiebyrd/indri/internal/repo/session"
 	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Service struct {
@@ -105,22 +104,7 @@ func (bs *Service) sendToGame(gameId string, jsonData []byte) error {
 		return err
 	}
 
-	sessionIds := make([]string, len(sessions))
-	for i, session := range sessions {
-		sessionIds[i] = session.ID.Hex()
-	}
-
-	if err := bs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		if thisGameId, ok := s.Get("sessionId"); ok {
-			return slices.Contains(sessionIds, thisGameId.(string))
-		}
-
-		return false
-	}); err != nil {
-		return err
-	}
-
-	return nil
+	return bs.broadcastToSessions(sessionIDs(sessions), jsonData)
 }
 
 func (bs *Service) sendToTeam(gameId, teamId string, jsonData []byte) error {
@@ -131,24 +115,15 @@ func (bs *Service) sendToTeam(gameId, teamId string, jsonData []byte) error {
 		return err
 	}
 
-	var sessionIds []string
+	var ids []string
 
 	for _, session := range sessions {
-		sessionIds = append(sessionIds, session.ID.Hex())
-	}
-
-	if err := bs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		cs := connection.NewService(s, bs.m)
-		thisSessionId, err := cs.GetKeyAsString("sessionId")
-		if err != nil {
-			return false
+		if session.TeamID != nil && *session.TeamID == teamId {
+			ids = append(ids, session.ID.Hex())
 		}
-		return err != nil && slices.Contains(sessionIds, *thisSessionId)
-	}); err != nil {
-		return err
 	}
 
-	return nil
+	return bs.broadcastToSessions(ids, jsonData)
 }
 
 func (bs *Service) sendToAll(jsonData []byte) error {
@@ -165,31 +140,71 @@ func (bs *Service) sendToAll(jsonData []byte) error {
 func (bs *Service) sendToPlayer(gameId, playerId string, jsonData []byte) error {
 	log.Printf("Broadcasting to game %v and player %v\n", gameId, playerId)
 
-	if _, err := bs.ur.Get(playerId); err != nil {
-		return fmt.Errorf("could not get player %v: %v", playerId, err)
+	sessions, err := bs.sr.Find("userId", playerId)
+	if err != nil {
+		return err
 	}
 
-	return bs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		thisGameId, ok1 := s.Get("gameId")
-		thisPlayerId, ok2 := s.Get("userId")
-
-		return ok1 && ok2 && thisGameId == gameId && thisPlayerId == playerId
-	})
+	return bs.broadcastToSessions(sessionsInGame(sessions, gameId), jsonData)
 }
 
 func (bs *Service) sendToPlayers(gameId string, playerIds []string, jsonData []byte) error {
 	log.Printf("Broadcasting to game %v and players %v\n", gameId, playerIds)
 
+	var ids []string
+
 	for _, playerId := range playerIds {
-		if _, err := bs.ur.Get(playerId); err != nil {
-			return fmt.Errorf("could not get player %v: %v", playerId, err)
+		sessions, err := bs.sr.Find("userId", playerId)
+		if err != nil {
+			return err
 		}
+
+		ids = append(ids, sessionsInGame(sessions, gameId)...)
+	}
+
+	return bs.broadcastToSessions(ids, jsonData)
+}
+
+// broadcastToSessions sends jsonData to the melody connections whose
+// "sessionId" key is in sessionIds. "sessionId" (the session ObjectID) is the
+// only per-connection key the app sets, so all targeted sends resolve their
+// recipients through the session store and match on it.
+func (bs *Service) broadcastToSessions(sessionIds []string, jsonData []byte) error {
+	if len(sessionIds) == 0 {
+		return nil
 	}
 
 	return bs.m.BroadcastFilter(jsonData, func(s *melody.Session) bool {
-		thisGameId, ok1 := s.Get("code")
-		thisPlayerId, ok2 := s.Get("userId")
+		value, ok := s.Get("sessionId")
+		if !ok {
+			return false
+		}
 
-		return ok1 && ok2 && thisGameId == gameId && slices.Contains(playerIds, thisPlayerId.(string))
+		id, ok := value.(string)
+
+		return ok && slices.Contains(sessionIds, id)
 	})
+}
+
+// sessionIDs returns the hex ids of the given sessions.
+func sessionIDs(sessions []*models.Session) []string {
+	ids := make([]string, len(sessions))
+	for i, session := range sessions {
+		ids[i] = session.ID.Hex()
+	}
+
+	return ids
+}
+
+// sessionsInGame returns the hex ids of the sessions currently in gameId.
+func sessionsInGame(sessions []*models.Session, gameId string) []string {
+	var ids []string
+
+	for _, session := range sessions {
+		if session.GameID != nil && *session.GameID == gameId {
+			ids = append(ids, session.ID.Hex())
+		}
+	}
+
+	return ids
 }

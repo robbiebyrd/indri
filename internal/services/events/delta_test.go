@@ -95,6 +95,54 @@ func TestDiff_NoChange(t *testing.T) {
 	}
 }
 
+func TestSanitizeDelta_DropsPrivatePaths(t *testing.T) {
+	updated := map[string]interface{}{
+		"players.p1.host":        true,
+		"stage.privateData.answer": "42",
+		"teams.t1.privateData":   map[string]interface{}{"role": "spy"},
+	}
+	removed := []string{"players.p2", "stage.scenes.s1.privateData.key"}
+
+	gotUpdated, gotRemoved := events.SanitizeDelta(updated, removed)
+
+	if _, ok := gotUpdated["stage.privateData.answer"]; ok {
+		t.Error("private path leaked in updated")
+	}
+	if _, ok := gotUpdated["teams.t1.privateData"]; ok {
+		t.Error("private path leaked in updated")
+	}
+	if gotUpdated["players.p1.host"] != true {
+		t.Error("public path was dropped")
+	}
+	if !reflect.DeepEqual(gotRemoved, []string{"players.p2"}) {
+		t.Errorf("expected only public removal, got %v", gotRemoved)
+	}
+}
+
+func TestSanitizeDelta_StripsNestedPrivateFromValue(t *testing.T) {
+	// A whole-object update (e.g. a newly added player) must not carry its
+	// nested privateData out on the wire.
+	updated := map[string]interface{}{
+		"players.p1": map[string]interface{}{
+			"host":        true,
+			"privateData": map[string]interface{}{"secret": "role"},
+		},
+	}
+
+	gotUpdated, _ := events.SanitizeDelta(updated, nil)
+
+	player, ok := gotUpdated["players.p1"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected player object, got %T", gotUpdated["players.p1"])
+	}
+	if _, ok := player["privateData"]; ok {
+		t.Error("nested privateData leaked in whole-object update")
+	}
+	if player["host"] != true {
+		t.Error("public field was stripped")
+	}
+}
+
 func TestDiff_MultiplePaths(t *testing.T) {
 	before := map[string]interface{}{"x": 1, "y": 2, "z": 3}
 	after := map[string]interface{}{"x": 1, "y": 20, "w": 4}
