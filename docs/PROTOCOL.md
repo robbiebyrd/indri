@@ -1,11 +1,20 @@
-# Indri WebSocket protocol
+# Indri client protocol
 
-All traffic flows over a single endpoint: `ws://<host>:<port>/ws` (default `localhost:5002`).
+The same actions are reachable over two transports, which run side by side (see
+[ARCHITECTURE.md](ARCHITECTURE.md#transports) — the `transport.Transport` abstraction):
 
-Every message is a JSON object. Client→server messages **must** carry a string `action` field; the
-router uses it to pick handlers and removes it from the payload before the handler sees it.
+- **WebSocket** — `ws://<host>:<port>/ws` (default `localhost:5002`). One JSON message per action.
+- **GraphQL** — `http(s)://<host>:<port>/graphql` for typed **mutations** (client→server) and
+  graphql-transport-ws **subscriptions** (server→client). See [GraphQL](#graphql) below.
 
-The upgrade is origin-checked (`internal/clients/melody/client.go`). Requests with no `Origin` header
+Both drive the same connection-independent action logic (`router.Dispatch`); only the wire framing and
+auth mechanism differ. The bulk of this document describes the WebSocket message shapes; every action
+also exists as a GraphQL mutation with the same semantics.
+
+Every WebSocket message is a JSON object. Client→server messages **must** carry a string `action` field;
+the router uses it to pick handlers and removes it from the payload before the handler sees it.
+
+The WebSocket upgrade is origin-checked (`internal/transport/ws`). Requests with no `Origin` header
 (native apps, CLI tools, server-to-server) are always allowed; browser requests are allowed only if
 their origin appears in `INDRI_ALLOWED_ORIGINS`. An empty allowlist rejects all cross-origin browsers.
 
@@ -138,14 +147,15 @@ target is removed from the game and force-disconnected if currently connected.
 { "action": "logout" }
 ```
 
-Runs the same path as a disconnect: marks the player disconnected in their game, sends
-`{"disconnected": true}`, and closes the connection. No-ops if the connection was never authenticated.
+Marks the player disconnected in their game, **invalidates the session** (deletes it so its bearer
+token can no longer be replayed via `reconnect`), and closes the connection. No-ops if the caller was
+never authenticated.
 
 ### Pseudo-actions: `received` and `processed`
 
-`router.Act` runs handlers registered under the literal action `received` before, and `processed` after,
-the message's real action. Registering a handler on either gives you a pre/post hook that fires on every
-inbound message. Nothing is registered on them by default.
+`router.Dispatch` runs handlers registered under the literal action `received` before, and `processed`
+after, the message's real action. Registering a handler on either gives you a pre/post hook that fires
+on every inbound message. Nothing is registered on them by default.
 
 ---
 
@@ -223,3 +233,52 @@ The reference client (`client/services/message-handler.ts`) routes by shape, in 
 3. `op === "inquiryResponse"` → game list
 4. has both `code` and `id` → keyframe
 5. any other `op` → dispatched by that name (this is how game-specific messages get through)
+
+---
+
+## GraphQL
+
+`internal/transport/graphql` (gqlgen) mounts the same actions at `/graphql`. It runs alongside the
+WebSocket transport and shares the broadcast pipeline, so WebSocket and GraphQL clients in the same game
+receive identical deltas.
+
+**Auth.** Mutations authenticate from the `Authorization: Bearer <token>` header; the subscription
+authenticates from the graphql-transport-ws `connection_init` payload (`{"Authorization": "<token>"}`).
+The token is the same secret returned by `login`/`reconnect`. `register`/`login`/`reconnect` need no
+auth; the rest do.
+
+**Dynamic data.** The `JSON` scalar (backed by `json.RawMessage`) carries the dynamic model blobs and
+the delta/keyframe payloads verbatim — no double-encoding, objects and arrays both pass through.
+
+### Mutations (client → server)
+
+Each returns a `JSON` result — the same response document the WebSocket action produces.
+
+| Mutation | Action | Notes |
+|---|---|---|
+| `register(email, password, name)` | register | |
+| `login(email, password)` | login | result carries the bearer token in `sessionId` |
+| `reconnect(token)` | reconnect | |
+| `createGame(code, teamId, private)` | create | |
+| `joinGame(code, teamId)` | join | |
+| `leaveGame` | leave | |
+| `kick(code, userId)` | kick | host-only |
+| `logout` | logout | |
+| `inquire(inquiryType, inquiry, code)` | inquire | |
+
+```graphql
+mutation { login(email: "u@e.io", password: "…") }        # returns JSON incl. sessionId token
+mutation { createGame(code: "my-room", teamId: "team1", private: false) }   # Authorization header required
+```
+
+Unauthenticated authed-only mutations return a GraphQL error (`"not authenticated"`).
+
+### Subscription (server → client)
+
+```graphql
+subscription { gameUpdates(gameId: "<game object id>") }
+```
+
+Each event is a game **delta** — the same document the WebSocket delta path emits (see
+[Delta](#delta--change-event)), sanitized identically. Reconnecting into an active game over GraphQL:
+call the `reconnect` mutation for the auth payload, then subscribe to `gameUpdates` for state.

@@ -5,9 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 Indri is a Go backend for real-time, multiplayer, browser/mobile party games. Clients talk to it over a
-single WebSocket endpoint (`/ws`) using JSON messages routed by an `action` field. Game state lives in
-MongoDB; each write computes its own delta in application code and publishes it on an event bus, which
-broadcasts it to everyone in that game. `client/` is a companion Expo/React Native reference client.
+swappable transport — WebSocket (`/ws`, JSON messages routed by an `action` field) or GraphQL
+(`/graphql`, typed mutations + a `gameUpdates` subscription) — behind the `internal/transport`
+interface. Game state lives in MongoDB; each write computes its own delta in application code and
+publishes it on an event bus, which broadcasts it to everyone in that game. `client/` is a companion
+Expo/React Native reference client.
 
 Indri is a *framework*: the generic actions (register/login/join/create/…) ship in `internal/`, and a
 concrete game adds its own action handlers plus a JSON "script". `example/tictactoe/` is the worked
@@ -43,8 +45,7 @@ Config is environment-driven with an `INDRI_` prefix (`internal/repo/env/env.go`
 documents every variable. Copy it to `.env` before running anything.
 
 MongoDB does **not** need to be a replica set — deltas are computed by the application, not read from a
-change stream. `docker-compose.yml` still starts one (`rs0`, initiated in its healthcheck), which is
-harmless.
+change stream. `docker-compose.yml` starts a standalone `mongod`.
 
 ## Architecture
 
@@ -54,33 +55,48 @@ harmless.
 
 `Boot` wires a three-layer injector (`internal/injector/`), in strict order:
 
-1. **clients** (`clients.go`) — MongoDB, the melody WebSocket hub, the lock manager, and the change-event
-   publisher. Clients are process-global singletons; `GetClients` returns a cached `*ClientsInjector` on
-   every call after the first, and accepts overrides for tests. `INDRI_LOCK_BACKEND=redis` is the
-   *multi-instance switch*: it flips **both** the lock manager and the event bus to Redis, sharing one
-   connection. Otherwise both are in-process.
+1. **clients** (`clients.go`) — MongoDB, the WebSocket transport (`internal/transport/ws`), the lock
+   manager, and the change-event publisher. Clients are process-global singletons; `GetClients` returns
+   a cached `*ClientsInjector` on every call after the first, and accepts overrides for tests.
+   `INDRI_LOCK_BACKEND=redis` is the *multi-instance switch*: it flips **both** the lock manager and the
+   event bus to Redis, sharing one connection. Otherwise both are in-process.
 2. **repos** (`repos.go`) — game/user/session Mongo stores plus the script store (loaded from the JSON
    file). Stores create their own indexes in `NewStore`.
-3. **services** (`services.go`) — business logic over the repos.
+3. **services** (`services.go`) — business logic over the repos. Also builds the GraphQL transport
+   (`internal/transport/graphql`) and wraps it with the WebSocket transport in a `transport.Multi`,
+   replacing `clients.Transport` with the aggregate.
 
 `*injector.Injector` embeds all three, so handlers reach anything via one struct (`h.i.GameService`,
-`h.i.GameRepo`, `h.i.MelodyClient`, …). Every handler takes it in `New(i *injector.Injector)`.
+`h.i.GameRepo`, `h.i.Transport`, …). Every handler takes it in `New(i *injector.Injector)`.
 
-`Serve` runs two goroutines under an `errgroup`: the HTTP/WebSocket server and the change-stream
-broadcaster. Both shut down on root-context cancellation (SIGINT/SIGTERM), then `closeResources` drains
-the hub and the Mongo pool.
+`Serve` runs two goroutines under an `errgroup`: the HTTP server (all transports mounted via
+`Transport.Register`) and the change-event broadcaster. Both shut down on root-context cancellation
+(SIGINT/SIGTERM), then `closeResources` closes the transport and drains the Mongo pool.
 
-### Inbound: message routing
+### Transports
 
-`melody.HandleMessage` → `router.HandleMessage` (`internal/handlers/router/`):
+`internal/transport` decouples the wire protocol from everything above it: `Conn` (one connection) and
+`Transport` (the hub — `Handle`, `Register(mux)`, `Broadcast`/`BroadcastFilter`, `Conns`, `Close`). `ws`
+(melody — the only melody importer) and `graphql` (gqlgen) are adapters; `transport.Multi` aggregates
+them so broadcast reaches both. Adding a protocol is a new adapter, nothing above the interface.
+
+### Inbound: connection-independent dispatch
+
+Handlers do **not** take a connection. They implement `Handle(actions.Request{Session, Payload})
+(actions.Result{Responses, Session, DisconnectIDs}, error)`. Each transport resolves the authenticated
+session (WS: from the socket's `sessionId` key; GraphQL: from the bearer token) and applies the result.
+
+For WebSocket, `boot.handleClientMessage` → `router.DispatchMessage`:
 
 1. `utils.DecodeMessageWithAction` unmarshals to `map[string]interface{}`, pulls out `action`, and
-   **deletes `action` from the payload** before handing it on.
-2. `router.Act` runs three pseudo-phases per message: **`received` → `<action>` → `processed`**. Any
-   handler registered under the literal actions `received` or `processed` therefore runs on *every*
-   message — that is the intended pre/post hook mechanism. Nothing registers them by default.
+   **deletes `action` from the payload**.
+2. `router.Dispatch` runs three pseudo-phases per message: **`received` → `<action>` → `processed`**.
+   Any handler registered under the literal actions `received`/`processed` runs on *every* message —
+   the intended pre/post hook mechanism. Nothing registers them by default.
 3. `invokeHandler` wraps each call in a `recover()`, converting a panic into an error so a malformed
-   client message can't kill the process or leak the melody session.
+   client message can't kill the process.
+
+GraphQL mutations call `router.Dispatch` directly with the mutation name as the action.
 
 Handlers are a flat, ordered `[]Handler` registry (`register.go`) — multiple handlers may share one
 action, and all matching handlers run. `boot.registerHandlers` installs the built-ins; a game adds its
@@ -135,8 +151,9 @@ the repo, because nothing in the database enforces it:
 
 `BroadcastService` offers game, team, player, and global fan-out. Because `sessionId` is the only
 per-connection key the app sets, every targeted send resolves its recipients through the session store
-first and then filters connections on that one key (`broadcastToSessions`). Do not invent new melody
-session keys to filter on — nothing sets them.
+first and then filters connections on that one key (`broadcastToSessions`) via
+`Transport.BroadcastFilter`, so WebSocket and GraphQL subscribers are reached identically. Do not invent
+new per-connection keys to filter on — nothing sets them.
 
 ### Concurrency model
 
@@ -170,7 +187,7 @@ There are **two different values both called `sessionId`**, and confusing them i
 
 | Where | Value | Notes |
 |---|---|---|
-| Melody connection key `sessionId` | `session.ID.Hex()` (Mongo ObjectID) | Server-side targeting key for broadcasts. Never sent to clients. |
+| Connection key `sessionId` (`transport.Conn`) | `session.ID.Hex()` (Mongo ObjectID) | Server-side targeting key for broadcasts. Never sent to clients. |
 | JSON field `sessionId` on the wire | `session.Token` (256-bit hex) | Unguessable bearer token. Client echoes it back in a `reconnect`. |
 
 `login` and `reconnect` are the only places that call `SetKey`, and the only key they set is `sessionId`.
@@ -200,12 +217,12 @@ teams, and the initial stage/scenes. It is loaded once at boot from `-script` an
 
 1. Create `example/<game>/server/handlers/<action>/handler.go` with a `Handler` struct holding
    `*injector.Injector`, a `New(i)` constructor, and
-   `Handle(s *melody.Session, decodedMsg map[string]interface{}) error`.
-2. Resolve the caller: `connection.NewService(s, h.i.MelodyClient).GetKeyAsString("sessionId")` →
-   `h.i.SessionService.Get(...)` → `GetGameIDAndTeamID(...)`.
+   `Handle(req actions.Request) (actions.Result, error)`.
+2. The caller's authenticated session is `req.Session` (nil if unauthenticated); its game/team are
+   `req.Session.GameID`/`TeamID`. Arguments are in `req.Payload`.
 3. Validate the move against the current game state, then write through `h.i.GameRepo.Mutate` (or
-   `UpdateField` for a single independent field). Do **not** write the response yourself for state
-   changes — the published delta broadcasts it.
+   `UpdateField` for a single independent field). Do **not** write a response for state changes — the
+   published delta broadcasts it; return `actions.Result{}` (add `Responses` only for direct replies).
 4. Register it in `main.go` after `boot.Boot`: `router.RegisterHandler("<game>_<action>", "<action>", <pkg>.New(i))`.
 
 Built-in actions register in `boot.registerHandlers` instead, and
@@ -217,8 +234,8 @@ is never wired up — an unregistered action is silently unreachable, so the tes
 - Errors: wrap with `%w` and lowercase context (`fmt.Errorf("fetching game %q: %w", id, err)`).
 - Logging is stdlib `log` throughout; there is no structured logger.
 - Handler/service/repo constructors validate their dependencies and return an error rather than panicking.
-- Client-facing protocol errors are `models.WSError` values (`internal/models/errors.go`) written with
-  `connection.Service.WriteError`.
+- Client-facing protocol errors are `models.WSError` values (`internal/models/errors.go`); handlers
+  return `err.BytesError()` in `actions.Result.Responses`.
 - Import grouping is stdlib / third-party / `github.com/robbiebyrd/indri/...`.
 - Each `repo/*` package declares a `Storer` interface with a `var _ Storer = (*Store)(nil)` assertion.
   Add or change an exported `Store` method and you must update `interface.go` too, or the build breaks.
@@ -240,6 +257,6 @@ Do not treat these as intentional; check before relying on them.
 ## Reference docs
 
 - `docs/ARCHITECTURE.md` — component map with file references.
-- `docs/PROTOCOL.md` — every WebSocket message, in and out.
+- `docs/PROTOCOL.md` — the client protocol: WebSocket messages and GraphQL mutations/subscription.
 
 @.claude/wiz-claude.md

@@ -9,12 +9,13 @@ add a game action, and a list of known defects you should not mistake for intent
 Supporting references:
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — component map with file paths.
-- **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — the complete WebSocket message contract.
+- **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — the client protocol (WebSocket messages + GraphQL).
 
 ## The short version
 
-Indri is a Go WebSocket backend for real-time multiplayer games, plus an Expo/React Native reference
-client in `client/`.
+Indri is a Go backend for real-time multiplayer games with a swappable client transport (WebSocket at
+`/ws`, GraphQL at `/graphql`, behind `internal/transport`), plus an Expo/React Native reference client
+in `client/`.
 
 ```bash
 go build ./... && go vet ./... && go test -race ./...   # server
@@ -23,9 +24,9 @@ cd client && pnpm install && pnpm run typecheck && pnpm test
 
 Four things trip up newcomers:
 
-1. **`sessionId` means two different things.** On the wire it is a secret bearer token; on the melody
-   connection it is the session's Mongo ObjectID. Never send the latter or trust the former from
-   anywhere but the caller's own connection.
+1. **`sessionId` means two different things.** On the wire it is a secret bearer token; on the
+   connection (`transport.Conn` key) it is the session's Mongo ObjectID. Never send the latter or trust
+   the former from anywhere but the caller's authenticated session.
 2. **A write that doesn't publish a change event is invisible to players.** Deltas are computed in
    application code (`internal/services/events`), not by a database change stream. `Store.Mutate`
    publishes automatically; every other write path must call `s.publish(...)` itself.

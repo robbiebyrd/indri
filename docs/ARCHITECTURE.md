@@ -7,19 +7,17 @@ day-to-day commands and conventions see [../CLAUDE.md](../CLAUDE.md).
 
 ```
 browser / native client
-        │  ws://host:5002/ws
+        │  WebSocket /ws   ·or·   GraphQL /graphql (mutations + subscription)
         ▼
 internal/entrypoints/http/server.go      net/http mux, timeouts, graceful shutdown
         ▼
-internal/clients/melody/client.go        WebSocket hub: ping/pong, size limits, origin check
+internal/transport/                      Transport interface: ws (melody) + graphql (gqlgen),
+                                         aggregated by transport.Multi. Resolves the session, then:
         ▼
-internal/services/boot/handlers.go       HandleConnect / HandleMessage / HandleDisconnect / HandleError
+internal/handlers/router/                DispatchMessage (WS) / Dispatch (GraphQL): decode, run
+                                         "received" → <action> → "processed"; recover() per handler
         ▼
-internal/handlers/router/router.go       decode JSON, extract + strip "action"
-        ▼
-internal/handlers/router/act.go          run "received" → <action> → "processed"; recover() per handler
-        ▼
-internal/handlers/actions/<action>/      one package per action
+internal/handlers/actions/<action>/      one package per action — Handle(Request) (Result, error)
         ▼
 internal/services/*                      business logic
         ▼
@@ -34,7 +32,7 @@ internal/repo/*                          MongoDB stores
         │                   ▼
         │       internal/services/boot/monitor.go    Subscribe, fan out per game
         │                   ▼
-        └────── internal/services/broadcast/         melody BroadcastFilter → clients
+        └────── internal/services/broadcast/         Transport.BroadcastFilter → WS + GraphQL clients
 ```
 
 Note the delta path is driven by the **application**, not by MongoDB. Because the server is the sole
@@ -55,9 +53,9 @@ Three-stage construction, each stage depending only on the previous one.
 
 | File | Builds |
 |---|---|
-| `clients.go` | Mongo client, melody hub, lock manager, change-event publisher. Cached process-globally; all four are injectable for tests. |
+| `clients.go` | Mongo client, the WebSocket transport, lock manager, change-event publisher. Cached process-globally; all injectable for tests. |
 | `repos.go` | `game`, `user`, `session` Mongo stores (each creates its indexes in `NewStore`) plus the script store. |
-| `services.go` | game, broadcast, auth, user, session services. |
+| `services.go` | game, broadcast, auth, user, session services. Also builds the GraphQL transport (which needs the session store) and wraps it with the WebSocket transport in a `transport.Multi`, which becomes the injector's `Transport`. |
 
 `injector.Injector` embeds all three structs plus `GlobalContext` and the parsed `Script`, and is the
 single value threaded into every handler.
@@ -66,18 +64,39 @@ single value threaded into every handler.
 connection and shares it between `lock.Redis` and `events.Redis`; otherwise both the lock manager and
 the event bus are in-process.
 
+### `internal/transport`
+
+The client wire protocol is behind two interfaces so it can be swapped without touching handlers,
+services, or routing:
+
+- `Conn` — one client connection: `Get/Set/UnSet(key)`, `Write`, `Close`, `IsClosed`.
+- `Transport` — the hub: `Handle(Handlers{Connect,Disconnect,Message,Error})`, `Register(mux)` (each
+  transport mounts its own routes), `Broadcast`, `BroadcastFilter`, `Conns`, `Close`, `IsClosed`.
+
+| Adapter | Route | Notes |
+|---|---|---|
+| `ws` | `/ws` | melody-backed WebSocket. The **only** package that imports melody. Origin check, ping/pong, size limits. |
+| `graphql` | `/graphql` | gqlgen. Typed mutations → `router.Dispatch` (auth from the `Authorization` header); a `gameUpdates` subscription (graphql-transport-ws, auth from `connection_init`) whose push conn is a channel-backed `Conn` fed by the existing broadcast. Dynamic data uses a `JSON` scalar (`json.RawMessage`). |
+| `Multi` | — | Aggregates the above so `broadcast` fans out to both; `Conns` are unioned. Adding a protocol (REST+SSE, WebRTC, WebTransport) means a new adapter, nothing above the interface. |
+
 ### `internal/entrypoints`
 
-- `http/server.go` — the `/ws` route and the HTTP server, with read/write/idle timeouts. On context
-  cancellation it closes the melody hub *first* (so hijacked connections return) and then drains the
-  HTTP server.
+- `http/server.go` — mounts every transport's routes (`Transport.Register(mux)`) and runs the HTTP
+  server with read/write/idle timeouts. On context cancellation it closes the transport *first* (so
+  hijacked connections return) and then drains the HTTP server.
 - `websocket.go` — `HandleConnect` (sends the login scene) and `HandleDisconnect` (marks the player
-  disconnected in the game, closes the socket if we still own it).
+  disconnected in the game, closes the connection if we still own it). Both are transport-agnostic
+  (`transport.Conn`).
 
 ### `internal/handlers`
 
-- `router/` — the registry and dispatcher. Handlers are a flat ordered slice; several may share an
-  action and all matching ones run. Each invocation is wrapped in `recover()`.
+Handlers are **connection-independent**: `Handle(actions.Request{Session, Payload}) (actions.Result,
+error)`. The transport resolves the authenticated session and applies the `Result` (write `Responses`,
+bind `Session` on auth, force-close `DisconnectIDs`). This is what lets WebSocket messages and GraphQL
+mutations share one code path.
+
+- `router/` — `Dispatch(session, action, payload)` runs the registry (`received` → action →
+  `processed`; `recover()` per handler); `DispatchMessage` decodes a raw frame for message transports.
 - `actions/<name>/` — one package per action, each exposing `New(*injector.Injector)` and satisfying
   `actions.MessageHandler`.
 - `utils/` — payload helpers (`DecodeMessageWithAction`, `RequireGameCode`, …).
@@ -93,8 +112,8 @@ the event bus are in-process.
 | `events` | `Publisher` interface (`InProcess` channel, `Redis` Pub/Sub on `indri:changes`), the `ChangeEvent` wire type, `Diff`/`ToMap` for computing dotted-path deltas from JSON representations, and `SanitizeDelta` for stripping private data out of them. |
 | `game` | Game lifecycle, random code generation, `Sanitize`, player connect/disconnect. |
 | `stage` | Scene CRUD, scene ordering, loading scenes from the script. |
-| `broadcast` | Fan-out to a game, a team, specific players, or everyone. Targeted sends resolve recipients via the session store, then filter connections on the `sessionId` key. |
-| `connection` | Thin wrapper over one melody session: read/write, typed key access. |
+| `broadcast` | Fan-out to a game, a team, specific players, or everyone via `Transport.BroadcastFilter`. Targeted sends resolve recipients via the session store, then filter connections on the `sessionId` key — so WS and GraphQL subscribers are reached identically. |
+| `connection` | Thin wrapper over one `transport.Conn`: read/write, typed key access, cross-connection lookup. |
 | `authentication` | Password check + session issuance (bcrypt via `services/utils/password.go`). |
 | `session`, `user` | Repo-backed lookups and updates. |
 | `utils` | `HashPassword`/`CheckPasswordHash`, `GenerateToken`. |

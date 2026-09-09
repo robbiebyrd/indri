@@ -4,7 +4,7 @@ A Go framework for real-time multiplayer party games.
 
 Indri gives you the parts every "everyone grab your phone" game needs — accounts, sessions, lobbies,
 rooms, teams, hosts, reconnection, and live state sync — so a game is reduced to a JSON template and a
-handful of action handlers. Players connect over a single WebSocket; state lives in MongoDB and every
+handful of action handlers. Players connect over WebSocket or GraphQL; state lives in MongoDB and every
 write is diffed and pushed back to the room as a delta.
 
 Released into the public domain ([Unlicense](LICENSE)).
@@ -45,11 +45,10 @@ go run ./cmd/server -script ./config.json
 ```
 
 The server listens on `INDRI_LISTEN_ADDRESS:INDRI_LISTEN_PORT` (default `localhost:5002`) and exposes
-one endpoint, `/ws`.
+`/ws` (WebSocket) and `/graphql` (GraphQL mutations + subscriptions) — the same actions over both.
 
-The bundled `docker-compose.yml` starts MongoDB as a single-node replica set (`rs0`) and Redis. The
-replica set is not required — it is a leftover from when deltas came from a change stream — but it is
-harmless.
+The bundled `docker-compose.yml` starts a standalone MongoDB and Redis. No replica set is needed —
+deltas are computed and published by the application, not tailed from a change stream.
 
 To run the example game instead:
 
@@ -134,9 +133,10 @@ Single-instance deployments use in-process locks and an in-process delta bus. Se
 ```
 cmd/server/          entry point
 internal/
-  clients/           MongoDB, Redis, melody WebSocket hub
-  entrypoints/       HTTP server, WebSocket lifecycle
-  handlers/          action router + one package per built-in action
+  clients/           MongoDB, Redis
+  transport/         Conn/Transport interfaces; ws (melody) + graphql (gqlgen) adapters + Multi
+  entrypoints/       HTTP server, connection lifecycle
+  handlers/          action router (connection-independent dispatch) + one package per built-in action
   services/          game, stage, broadcast, auth, session, mutation, lock, events
   repo/              MongoDB stores, environment config, script loader
   models/            Game, Stage, Scene, Team, Player, User, Session, Script
@@ -163,6 +163,6 @@ checkout. Set `INDRI_TEST_MONGO_URI` to point them at a database.
 ## Further reading
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — component map, request lifecycle, concurrency model
-- **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — every WebSocket message, in and out
+- **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — the client protocol (WebSocket messages + GraphQL)
 - **[CLAUDE.md](CLAUDE.md)** — orientation for AI coding agents
 - **[docs/tasks.md](docs/tasks.md)** — improvement backlog
