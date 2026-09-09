@@ -3,6 +3,7 @@ package game
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/chenmingyong0423/go-mongox/v2"
@@ -14,6 +15,7 @@ import (
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
 	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
+	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
 )
@@ -25,11 +27,13 @@ type Store struct {
 	collection *mongox.Collection[models.Game]
 	client     *mongodb.Client
 	locks      lock.Manager
+	publisher  events.Publisher
 }
 
 // NewStore creates a new repository for accessing game data. locks provides the
-// cross-instance serialization used by Mutate.
-func NewStore(ctx context.Context, client *mongodb.Client, locks lock.Manager) (*Store, error) {
+// cross-instance serialization used by Mutate; publisher receives the change
+// deltas computed at each write.
+func NewStore(ctx context.Context, client *mongodb.Client, locks lock.Manager, publisher events.Publisher) (*Store, error) {
 	gameColl := mongox.NewCollection[models.Game](client.Database, collectionName)
 
 	indexModels := []mongo.IndexModel{
@@ -49,6 +53,7 @@ func NewStore(ctx context.Context, client *mongodb.Client, locks lock.Manager) (
 		client:     client,
 		collection: gameColl,
 		locks:      locks,
+		publisher:  publisher,
 	}, nil
 }
 
@@ -183,6 +188,8 @@ func (s *Store) UpdateField(id string, key string, value interface{}) error {
 		return fmt.Errorf("error updating game field: game with id %v does not exists", id)
 	}
 
+	s.publish(id, events.OpUpdate, map[string]interface{}{key: value}, nil)
+
 	return nil
 }
 
@@ -214,6 +221,8 @@ func (s *Store) DeleteField(id string, key string) error {
 		return fmt.Errorf("field %v does not exists", key)
 	}
 
+	s.publish(id, events.OpUpdate, nil, []string{key})
+
 	return nil
 }
 
@@ -224,6 +233,8 @@ func (s *Store) DeleteField(id string, key string) error {
 // backend (SQLite, ...) reuses the same coordinator by implementing just those
 // two operations.
 func (s *Store) Mutate(id string, apply func(g *models.Game) error) error {
+	var before map[string]interface{}
+
 	return mutation.Run(
 		*s.ctx,
 		s.locks,
@@ -234,13 +245,70 @@ func (s *Store) Mutate(id string, apply func(g *models.Game) error) error {
 				return nil, 0, err
 			}
 
+			// Snapshot the JSON view before apply mutates the game in place,
+			// so the committed delta can be diffed against it.
+			before, err = events.ToMap(g)
+			if err != nil {
+				return nil, 0, err
+			}
+
 			return g, g.Version, nil
 		},
 		apply,
 		func(g *models.Game, expectedVersion int64) (bool, error) {
-			return s.saveWithVersion(id, g, expectedVersion)
+			committed, err := s.saveWithVersion(id, g, expectedVersion)
+			if err != nil || !committed {
+				return committed, err
+			}
+
+			s.publishDiff(id, before, g)
+
+			return true, nil
 		},
 	)
+}
+
+// publishDiff computes the dotted-path delta between the pre-mutation snapshot
+// and the saved game and publishes it. Errors are logged, not surfaced: the
+// write already committed, so a fan-out hiccup must not fail the mutation.
+func (s *Store) publishDiff(id string, before map[string]interface{}, after *models.Game) {
+	if s.publisher == nil {
+		return
+	}
+
+	afterMap, err := events.ToMap(after)
+	if err != nil {
+		log.Printf("could not snapshot game %v for change event: %v", id, err)
+		return
+	}
+
+	updated, removed := events.Diff(before, afterMap)
+
+	s.publish(id, events.OpUpdate, updated, removed)
+}
+
+// publish emits a change event for the game, if a publisher is configured.
+func (s *Store) publish(id string, op events.OperationType, updated map[string]interface{}, removed []string) {
+	if s.publisher == nil {
+		return
+	}
+
+	event := events.ChangeEvent{
+		ID:            id,
+		OperationType: op,
+		Timestamp:     time.Now(),
+		Collection:    collectionName,
+		UpdatedFields: updated,
+		RemovedFields: removed,
+	}
+
+	if !event.HasChanges() {
+		return
+	}
+
+	if err := s.publisher.Publish(*s.ctx, event); err != nil {
+		log.Printf("could not publish change event for game %v: %v", id, err)
+	}
 }
 
 // saveWithVersion persists the whole game only if its stored version still

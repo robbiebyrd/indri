@@ -5,18 +5,19 @@ import (
 	"time"
 
 	"github.com/olahol/melody"
+	"github.com/redis/go-redis/v9"
 
 	mClient "github.com/robbiebyrd/indri/internal/clients/melody"
 	mongoClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
 	redisClient "github.com/robbiebyrd/indri/internal/clients/redis"
-	"github.com/robbiebyrd/indri/internal/entrypoints/changestream"
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
+	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 )
 
 var globalClientsInjector *ClientsInjector
 
-func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, melodyClient *melody.Melody, globalMonitor *changestream.MongoChangeMonitor, lockManager lock.Manager) (*ClientsInjector, error) {
+func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, melodyClient *melody.Melody, lockManager lock.Manager, publisher events.Publisher) (*ClientsInjector, error) {
 	if globalClientsInjector != nil {
 		return globalClientsInjector, nil
 	}
@@ -34,45 +35,41 @@ func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, melodyCl
 		melodyClient = mClient.New()
 	}
 
-	if globalMonitor == nil {
-		newGlobalMonitor, err := changestream.New(ctx, mongodbClient, nil, nil)
+	// In redis (multi-instance) mode both the lock manager and the change-event
+	// bus share one Redis connection; otherwise both are in-process.
+	multiInstance := envVars.GetEnv().LockBackend == "redis"
+
+	var sharedRedis *redis.Client
+
+	if multiInstance && (lockManager == nil || publisher == nil) {
+		client, err := redisClient.New(ctx)
 		if err != nil {
 			return nil, err
 		}
 
-		globalMonitor = newGlobalMonitor
+		sharedRedis = client
 	}
 
 	if lockManager == nil {
-		lm, err := newLockManager(ctx)
-		if err != nil {
-			return nil, err
+		if multiInstance {
+			lockManager = lock.NewRedis(sharedRedis, 10*time.Second)
+		} else {
+			lockManager = lock.NewInProcess()
 		}
+	}
 
-		lockManager = lm
+	if publisher == nil {
+		if multiInstance {
+			publisher = events.NewRedis(sharedRedis)
+		} else {
+			publisher = events.NewInProcess()
+		}
 	}
 
 	return &ClientsInjector{
 		MongoDBClient: mongodbClient,
 		MelodyClient:  melodyClient,
-		GlobalMonitor: globalMonitor,
 		LockManager:   lockManager,
+		Publisher:     publisher,
 	}, nil
-}
-
-// newLockManager builds the mutation lock manager from configuration. The
-// default in-process manager is correct for a single instance; multi-instance
-// deployments set INDRI_LOCK_BACKEND=redis so edits are serialized across
-// processes.
-func newLockManager(ctx context.Context) (lock.Manager, error) {
-	if envVars.GetEnv().LockBackend != "redis" {
-		return lock.NewInProcess(), nil
-	}
-
-	client, err := redisClient.New(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return lock.NewRedis(client, 10*time.Second), nil
 }

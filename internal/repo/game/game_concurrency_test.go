@@ -10,6 +10,7 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 )
 
@@ -34,7 +35,7 @@ func newTestStore(t *testing.T) *Store {
 		t.Skipf("skipping: MongoDB not reachable: %v", err)
 	}
 
-	store, err := NewStore(context.Background(), client, lock.NewInProcess())
+	store, err := NewStore(context.Background(), client, lock.NewInProcess(), events.NewInProcess())
 	if err != nil {
 		t.Skipf("skipping: could not create game store: %v", err)
 	}

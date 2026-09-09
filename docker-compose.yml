@@ -4,12 +4,12 @@ services:
     env_file:
       - .env
     ports:
-      - "${INDRI_MONGO_PORT}:27017"
-    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "${INDRI_MONGO_PORT}",  "--dbpath", "/data/configdb"]
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "${INDRI_MONGO_PORT:-27017}:27017"
+    # Standalone MongoDB — no replica set. Real-time change deltas are computed
+    # and published by the application (see internal/services/events), so the
+    # oplog/change-stream (which requires a replica set) is no longer needed.
     healthcheck:
-      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'rs0',members:[{_id:0,host:'host.docker.internal:27017'}]}) }" | mongosh --port 27017 --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh --port 27017 --quiet
       interval: 5s
       timeout: 30s
       start_period: 0s
@@ -17,8 +17,6 @@ services:
       retries: 30
     volumes:
       - "mongodb_data:/data/db"
-      - "mongodb_config:/data/configdb"
-      - ./mongodb.key:/etc/mongo/mongodb-keyfile:ro
 
   redis:
     image: 'bitnami/redis:latest'
@@ -30,4 +28,3 @@ services:
 
 volumes:
   mongodb_data:
-  mongodb_config:

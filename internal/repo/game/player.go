@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/services/events"
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
 )
 
@@ -175,6 +176,8 @@ func (s *Store) markPlayerConnected(
 	if result.MatchedCount == 0 {
 		return fmt.Errorf("no player %v found in game %v", userId, id)
 	}
+
+	s.publish(id, events.OpUpdate, map[string]interface{}{playerKey + ".connected": connected}, nil)
 
 	return nil
 }

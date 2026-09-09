@@ -6,7 +6,6 @@ import (
 	"github.com/olahol/melody"
 
 	mongodbClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
-	"github.com/robbiebyrd/indri/internal/entrypoints/changestream"
 	"github.com/robbiebyrd/indri/internal/models"
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
@@ -15,6 +14,7 @@ import (
 	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
 	authSevice "github.com/robbiebyrd/indri/internal/services/authentication"
 	broadcastService "github.com/robbiebyrd/indri/internal/services/broadcast"
+	"github.com/robbiebyrd/indri/internal/services/events"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 	sessionService "github.com/robbiebyrd/indri/internal/services/session"
@@ -32,8 +32,8 @@ type ReposInjector struct {
 type ClientsInjector struct {
 	MongoDBClient *mongodbClient.Client
 	MelodyClient  *melody.Melody
-	GlobalMonitor *changestream.MongoChangeMonitor
 	LockManager   lock.Manager
+	Publisher     events.Publisher
 }
 
 type ServicesInjector struct {
