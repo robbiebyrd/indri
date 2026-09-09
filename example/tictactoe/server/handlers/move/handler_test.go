@@ -324,7 +324,7 @@ func TestHandler_findWinner_NoWin_PartialRow(t *testing.T) {
 func TestHandler_decodeMove_ValidMove(t *testing.T) {
 	h := &TicTacToeMoveHandler{}
 	input := map[string]interface{}{"move": "1,2"}
-	move, err := h.decodeMove(input)
+	move, err := h.decodeMove(input, 3, 3)
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}
@@ -333,10 +333,25 @@ func TestHandler_decodeMove_ValidMove(t *testing.T) {
 	}
 }
 
+func TestHandler_decodeMove_RectangularBoardBounds(t *testing.T) {
+	h := &TicTacToeMoveHandler{}
+
+	// On a 3-row, 2-column board, row 2 is valid but column 2 is out of bounds.
+	if move, err := h.decodeMove(map[string]interface{}{"move": "2,1"}, 2, 3); err != nil {
+		t.Errorf("Expected (2,1) valid on a 3x2 board, got err: %v", err)
+	} else if move == nil || (*move)[0] != 2 || (*move)[1] != 1 {
+		t.Errorf("Expected move [2,1], got %v", move)
+	}
+
+	if move, err := h.decodeMove(map[string]interface{}{"move": "1,2"}, 2, 3); err == nil || move != nil {
+		t.Errorf("Expected (1,2) out of bounds on a 3x2 board, got move: %v, err: %v", move, err)
+	}
+}
+
 func TestHandler_decodeMove_MissingMoveKey(t *testing.T) {
 	h := &TicTacToeMoveHandler{}
 	input := map[string]interface{}{}
-	move, err := h.decodeMove(input)
+	move, err := h.decodeMove(input, 3, 3)
 	if err == nil || move != nil {
 		t.Errorf("Expected error for missing move key, got move: %v, err: %v", move, err)
 	}
@@ -345,7 +360,7 @@ func TestHandler_decodeMove_MissingMoveKey(t *testing.T) {
 func TestHandler_decodeMove_InvalidFormat(t *testing.T) {
 	h := &TicTacToeMoveHandler{}
 	input := map[string]interface{}{"move": "1"}
-	move, err := h.decodeMove(input)
+	move, err := h.decodeMove(input, 3, 3)
 	if err == nil || move != nil {
 		t.Errorf("Expected error for invalid format, got move: %v, err: %v", move, err)
 	}
@@ -354,7 +369,7 @@ func TestHandler_decodeMove_InvalidFormat(t *testing.T) {
 func TestHandler_decodeMove_NonInteger(t *testing.T) {
 	h := &TicTacToeMoveHandler{}
 	input := map[string]interface{}{"move": "a,2"}
-	move, err := h.decodeMove(input)
+	move, err := h.decodeMove(input, 3, 3)
 	if err == nil || move != nil {
 		t.Errorf("Expected error for non-integer value, got move: %v, err: %v", move, err)
 	}
@@ -363,7 +378,7 @@ func TestHandler_decodeMove_NonInteger(t *testing.T) {
 func TestHandler_decodeMove_OutOfBounds_Negative(t *testing.T) {
 	h := &TicTacToeMoveHandler{}
 	input := map[string]interface{}{"move": "-1,2"}
-	move, err := h.decodeMove(input)
+	move, err := h.decodeMove(input, 3, 3)
 	if err == nil || move != nil {
 		t.Errorf("Expected error for out-of-bounds negative value, got move: %v, err: %v", move, err)
 	}
@@ -372,7 +387,7 @@ func TestHandler_decodeMove_OutOfBounds_Negative(t *testing.T) {
 func TestHandler_decodeMove_OutOfBounds_Positive(t *testing.T) {
 	h := &TicTacToeMoveHandler{}
 	input := map[string]interface{}{"move": "1,3"}
-	move, err := h.decodeMove(input)
+	move, err := h.decodeMove(input, 3, 3)
 	if err == nil || move != nil {
 		t.Errorf("Expected error for out-of-bounds positive value, got move: %v, err: %v", move, err)
 	}
@@ -381,7 +396,7 @@ func TestHandler_decodeMove_OutOfBounds_Positive(t *testing.T) {
 func TestHandler_decodeMove_ExtraValues(t *testing.T) {
 	h := &TicTacToeMoveHandler{}
 	input := map[string]interface{}{"move": "1,2,0"}
-	move, err := h.decodeMove(input)
+	move, err := h.decodeMove(input, 3, 3)
 	if err == nil || move != nil {
 		t.Errorf("Expected error for extra values, got move: %v, err: %v", move, err)
 	}
@@ -390,7 +405,7 @@ func TestHandler_decodeMove_ExtraValues(t *testing.T) {
 func TestHandler_decodeMove_EmptyString(t *testing.T) {
 	h := &TicTacToeMoveHandler{}
 	input := map[string]interface{}{"move": ""}
-	move, err := h.decodeMove(input)
+	move, err := h.decodeMove(input, 3, 3)
 	if err == nil || move != nil {
 		t.Errorf("Expected error for empty string, got move: %v, err: %v", move, err)
 	}

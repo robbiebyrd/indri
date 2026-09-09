@@ -54,7 +54,7 @@ func (h *TicTacToeMoveHandler) findTeamByMarker(marker string, g *models.Game) (
 	return nil, fmt.Errorf("no team found with marker %s", marker)
 }
 
-// Handle processes a join game request, and adds a player to a game.
+// Handle a player's move request.
 func (h *TicTacToeMoveHandler) Handle(
 	s *melody.Session,
 	decodedMsg map[string]interface{},
@@ -94,7 +94,7 @@ func (h *TicTacToeMoveHandler) Handle(
 		boardData = append(boardData, innerRow)
 	}
 
-	columns, rows := getBoardSize(boardData)
+	rows, columns := getBoardSize(boardData)
 
 	move, err := h.decodeMove(decodedMsg, columns, rows)
 	if err != nil {
@@ -112,11 +112,15 @@ func (h *TicTacToeMoveHandler) Handle(
 
 	winner, won := h.findWinner(boardData)
 	if won {
-		winningTeam, err := h.findTeamByMarker(winner, g)
-		if err != nil {
-			return err
+		if winner == "draw" {
+			updateSceneData["winningTeam"] = "draw"
+		} else {
+			winningTeam, err := h.findTeamByMarker(winner, g)
+			if err != nil {
+				return err
+			}
+			updateSceneData["winningTeam"] = winningTeam
 		}
-		updateSceneData["winningTeam"] = winningTeam
 	}
 
 	updateSceneData["board"] = boardData
@@ -159,9 +163,7 @@ func (h *TicTacToeMoveHandler) decodeMove(decodedMsg map[string]interface{}, col
 	for _, s := range moveStrings {
 		num, err := strconv.Atoi(s)
 		if err != nil {
-			return nil, fmt.Errorf("error converting string '%s' to int: %v", s, err)
-		} else if num < 0 || num > 2 {
-			return nil, fmt.Errorf("invalid move: %v", moveString)
+			return nil, fmt.Errorf("error converting string '%s' to int: %w", s, err)
 		}
 
 		move = append(move, num)
@@ -178,17 +180,22 @@ func (h *TicTacToeMoveHandler) decodeMove(decodedMsg map[string]interface{}, col
 	return &move, nil
 }
 
-func getBoardSize(boardData [][]string) (int, int) {
+// getBoardSize returns the number of rows and columns on the board.
+func getBoardSize(boardData [][]string) (rows, columns int) {
+	if len(boardData) == 0 {
+		return 0, 0
+	}
+
 	return len(boardData), len(boardData[0])
 }
 
 func checkStraightAcrossWin(boardData [][]string, marker string) bool {
-	columns, rows := getBoardSize(boardData)
+	rows, columns := getBoardSize(boardData)
 
 	// Check each row
-	for i := range columns {
+	for i := range rows {
 		win := true
-		for j := range rows {
+		for j := range columns {
 			if boardData[i][j] != marker {
 				win = false
 				break
@@ -200,9 +207,9 @@ func checkStraightAcrossWin(boardData [][]string, marker string) bool {
 	}
 
 	// Check each column
-	for j := range rows {
+	for j := range columns {
 		win := true
-		for i := range columns {
+		for i := range rows {
 			if boardData[i][j] != marker {
 				win = false
 				break
@@ -218,7 +225,7 @@ func checkStraightAcrossWin(boardData [][]string, marker string) bool {
 
 func checkDiagonalWin(boardData [][]string, marker string) bool {
 	// Check for diagonal wins
-	columns, rows := getBoardSize(boardData)
+	rows, columns := getBoardSize(boardData)
 	for sum := 0; sum < rows+columns-1; sum++ {
 		count := 0
 		for rowCount := range rows {
