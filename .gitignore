@@ -58,3 +58,4 @@ codealike.json
 .codecontext/
 reviews/archive
 .pnpm-store
+client/.expo-*-check

@@ -142,8 +142,22 @@ client/app/board/index.tsx            # live renderer route
     `lua` and every `luaL_requiref` fails with `upvalue index too large`. The barrel orders its own imports
     correctly, so **use `import {...} from "fengari"`** and the hazard disappears.
   - Metro must resolve these, which fengari references from guarded-but-statically-analysed code paths:
-    `fs`, `os`, `path`, `child_process`, `tmp`, `readline-sync`, plus `util` from fengari-interop. All are
-    shimmed to `shims/empty.js` in `metro.config.js`. `sprintf-js` is genuinely used and must NOT be shimmed.
+    `fs`, `os`, `path`, `child_process`, `crypto`, `util`, `tmp`, `readline-sync`. `sprintf-js` is genuinely
+    used and must NOT be shimmed.
+  - **`resolver.extraNodeModules` is the wrong tool** — it is a *fallback*, consulted only when normal
+    resolution fails. `tmp` and `readline-sync` are really installed as fengari dependencies, so Metro
+    resolved them for real and the fallback was never reached; iOS then failed on `crypto` from inside
+    `tmp`. Use `resolver.resolveRequest`, which overrides. Scope it by `context.originModulePath` so other
+    packages that legitimately need `path`/`util`/`crypto` are untouched.
+  - **Two shims cannot be empty objects** — they are *called* at module scope. `luaconf.js:60` runs
+    `require('os').platform()` (picking the LUA_PATH separator; any non-`win32` string works) and
+    `ldblib.js:474` runs `require('readline-sync').setDefaultOptions(...)` (for the `lua_debug>` prompt we
+    never reach). An empty `os` is exactly what produced the web error `os.platform is not a function`.
+    `shims/os.js` and `shims/readline-sync.js` cover both, and `layout/lua/metro-shims.node-test.ts`
+    reproduces the bundled module set so a regression fails `pnpm test` rather than only a device run.
+  - **Verified end to end on web:** `npx expo export --platform web` statically renders `/board/spike` to
+    `ALL PROBES PASSED`, so Lua genuinely executes inside the Metro bundle. `--platform ios` produces a
+    `.hbc`, so Hermes' compiler accepts all of fengari; only the on-device *runtime* remains unproven.
   - React Native defines a global `process`, so fengari's `typeof process !== "undefined"` guards are TRUE
     on device and it takes its Node branch. That is why the shims are required rather than optional.
   - `luaopen_base` installs `load`/`loadstring`/`dofile`/`loadfile`, so selective `luaL_requiref` is **not**
