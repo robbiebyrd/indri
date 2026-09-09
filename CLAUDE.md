@@ -224,6 +224,11 @@ is never wired up — an unregistered action is silently unreachable, so the tes
   Add or change an exported `Store` method and you must update `interface.go` too, or the build breaks.
 - The client uses pnpm and has no test runner beyond `node --experimental-strip-types` on
   `*.node-test.ts` files.
+- A green local `pnpm run typecheck` does not prove CI will pass. A working `client/node_modules` can
+  have transitive packages hoisted to the top level, so an **undeclared** dependency still resolves
+  locally while CI's clean `pnpm install --frozen-lockfile` fails on it. After touching client imports,
+  verify the way CI does:
+  `rm -rf node_modules && pnpm install --frozen-lockfile && pnpm run typecheck && pnpm test`.
 
 ## Known rough edges
 
