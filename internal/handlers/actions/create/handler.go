@@ -5,12 +5,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/robbiebyrd/indri/internal/transport"
-
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -21,39 +19,31 @@ func New(i *injector.Injector) *Handler {
 	return &Handler{i}
 }
 
-// Handle processes a join game request, and adds a player to a game.
-func (h *Handler) Handle(
-	s transport.Conn,
-	decodedMsg map[string]interface{},
-) error {
-	cs := connection.NewService(s, h.i.Transport)
-
-	gameCode, teamId, err := utils.RequireGameCodeAndTeamID(decodedMsg)
-	if err != nil {
-		return fmt.Errorf("game code not provided: %w", err)
+// Handle creates a game and adds the caller to it.
+func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
+	if req.Session == nil {
+		return actions.Result{
+			Responses: [][]byte{[]byte(`{"authenticated": false, "stage": { "currentScene": "login"}}`)},
+		}, fmt.Errorf("not authenticated")
 	}
 
-	gamePrivate, _ := decodedMsg["private"].(bool)
+	session := req.Session
 
-	sessionId, err := cs.GetKeyAsString("sessionId")
+	gameCode, teamId, err := utils.RequireGameCodeAndTeamID(req.Payload)
 	if err != nil {
-		_ = cs.Write([]byte(`{"authenticated": false, "stage": { "currentScene": "login"}}`))
-		return fmt.Errorf("unable to get userId: %w", err)
+		return actions.Result{}, fmt.Errorf("game code not provided: %w", err)
 	}
 
-	session, err := h.i.SessionService.Get(*sessionId)
-	if err != nil {
-		return err
-	}
+	gamePrivate, _ := req.Payload["private"].(bool)
 
 	g, err := h.i.GameService.New(*gameCode, gamePrivate)
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
 	user, err := h.i.UserService.Get(*session.UserID)
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
 	displayName := user.Name
@@ -61,29 +51,25 @@ func (h *Handler) Handle(
 		displayName = *user.DisplayName
 	}
 
-	err = h.i.GameService.ConnectPlayer(g.ID.Hex(), *teamId, *session.UserID, displayName)
-	if err != nil {
+	if err = h.i.GameService.ConnectPlayer(g.ID.Hex(), *teamId, *session.UserID, displayName); err != nil {
 		log.Printf("error adding player %v to game %v: %v\n", *session.UserID, *gameCode, err)
 	}
 
 	gameJSONBytes, err := h.i.GameService.GetJSONBytes(g.ID.Hex())
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
-	err = cs.Write(*gameJSONBytes)
-	if err != nil {
-		return err
-	}
+	result := actions.Result{Responses: [][]byte{*gameJSONBytes}}
 
-	if err = h.i.SessionService.Update(*sessionId, &models.UpdateSession{
+	if err = h.i.SessionService.Update(session.ID.Hex(), &models.UpdateSession{
 		GameID:    g.ID.Hex(),
 		UserID:    *session.UserID,
 		TeamID:    *teamId,
 		UpdatedAt: time.Time{},
 	}); err != nil {
-		return err
+		return result, err
 	}
 
-	return nil
+	return result, nil
 }

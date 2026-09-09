@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/robbiebyrd/indri/internal/transport"
-
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/injector"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -19,63 +17,49 @@ func New(i *injector.Injector) *Handler {
 	return &Handler{i}
 }
 
-func (h *Handler) Handle(
-	s transport.Conn,
-	decodedMsg map[string]interface{},
-) error {
-	emailAddress, ok := decodedMsg["email"].(string)
+func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
+	// Refuse to re-authenticate a caller that already holds a session; rebinding
+	// to a different user would strand the first user's presence.
+	if req.Session != nil {
+		return actions.Result{}, fmt.Errorf("already authenticated; log out before logging in again")
+	}
+
+	emailAddress, ok := req.Payload["email"].(string)
 	if !ok || emailAddress == "" {
-		return fmt.Errorf("email address not a string or empty string")
+		return actions.Result{}, fmt.Errorf("email address not a string or empty string")
 	}
 
-	password, ok := decodedMsg["password"].(string)
+	password, ok := req.Payload["password"].(string)
 	if !ok || password == "" {
-		return fmt.Errorf("password not a string or empty string")
-	}
-
-	ss := connection.NewService(s, h.i.Transport)
-
-	// Refuse to re-authenticate a connection that already holds a session;
-	// rebinding it to a different user would leave the first user's presence
-	// (connected: true) stranded. The client must log out first.
-	if _, err := ss.GetKeyAsString("sessionId"); err == nil {
-		return fmt.Errorf("connection is already authenticated; log out before logging in again")
+		return actions.Result{}, fmt.Errorf("password not a string or empty string")
 	}
 
 	session, err := h.i.AuthService.Authenticate(&emailAddress, &password)
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
 	if session.UserID == nil || *session.UserID == "" {
-		return fmt.Errorf("authenticated session has no user id")
+		return actions.Result{}, fmt.Errorf("authenticated session has no user id")
 	}
-
-	// The server-side targeting key uses the non-secret session ObjectID so
-	// broadcasts can find this connection. The client only ever receives the
-	// secret token, which it echoes back on reconnect.
-	ss.SetKey("sessionId", session.ID.Hex())
 
 	user, err := h.i.UserService.Get(*session.UserID)
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
 	jsonUserBytes, err := json.Marshal(h.i.UserService.Sanitize(user))
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
+	// The client receives only the secret token, which it echoes back on
+	// reconnect. Session is returned so the transport binds its channel.
 	authSuccessMessage := bytes.Join([][]byte{
 		[]byte(`{"authenticated": true, "sessionId": "` + session.Token + `", "user": `),
 		jsonUserBytes,
 		[]byte(`}`),
 	}, []byte(""))
 
-	err = ss.Write(authSuccessMessage)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return actions.Result{Responses: [][]byte{authSuccessMessage}, Session: session}, nil
 }

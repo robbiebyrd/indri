@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/robbiebyrd/indri/internal/transport"
-
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/injector"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -18,34 +16,25 @@ func New(i *injector.Injector) *Handler {
 	return &Handler{i}
 }
 
-func (h *Handler) Handle(
-	s transport.Conn,
-	_ map[string]interface{},
-) error {
-	cs := connection.NewService(s, h.i.Transport)
-
-	sessionId, err := cs.GetKeyAsString("sessionId")
-	if err != nil {
-		return err
+func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
+	if req.Session == nil {
+		return actions.Result{}, fmt.Errorf("not authenticated")
 	}
 
-	session, err := h.i.SessionService.Get(*sessionId)
-	if err != nil {
-		return err
-	}
+	session := req.Session
+
 	if session.GameID == nil || *session.GameID == "" {
-		return fmt.Errorf("player is not in a game")
+		return actions.Result{}, fmt.Errorf("player is not in a game")
 	}
 
 	g, err := h.i.GameService.Get(*session.GameID)
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
-	err = h.i.GameService.RemovePlayer(g.ID.Hex(), *session.UserID)
-	if err != nil {
+	if err = h.i.GameService.RemovePlayer(g.ID.Hex(), *session.UserID); err != nil {
 		log.Printf("could not disconnect player %v from game %v: %v\n", *session.UserID, *session.GameID, err)
 	}
 
-	return nil
+	return actions.Result{}, nil
 }

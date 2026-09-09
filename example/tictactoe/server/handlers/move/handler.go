@@ -6,12 +6,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/robbiebyrd/indri/internal/transport"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type TicTacToeMoveHandler struct {
@@ -20,28 +19,6 @@ type TicTacToeMoveHandler struct {
 
 func New(i *injector.Injector) *TicTacToeMoveHandler {
 	return &TicTacToeMoveHandler{i}
-}
-
-func (h *TicTacToeMoveHandler) gameAndTeamFromSession(s transport.Conn) (gameId string, teamId string, err error) {
-	cs := connection.NewService(s, h.i.Transport)
-
-	sessionId, err := cs.GetKeyAsString("sessionId")
-	if err != nil {
-		return "", "", err
-	} else if sessionId == nil {
-		return "", "", fmt.Errorf("sessionId is nil")
-	}
-
-	gid, tid, err := h.i.SessionService.GetGameIDAndTeamID(*sessionId)
-	if err != nil {
-		return "", "", err
-	}
-
-	if gid == nil || tid == nil {
-		return "", "", fmt.Errorf("session is not in a game/team")
-	}
-
-	return *gid, *tid, nil
 }
 
 func (h *TicTacToeMoveHandler) findTeamByMarker(marker string, g *models.Game) (*string, error) {
@@ -54,19 +31,23 @@ func (h *TicTacToeMoveHandler) findTeamByMarker(marker string, g *models.Game) (
 }
 
 // Handle a player's move request.
-func (h *TicTacToeMoveHandler) Handle(
-	s transport.Conn,
-	decodedMsg map[string]interface{},
-) error {
-	gameId, teamId, err := h.gameAndTeamFromSession(s)
-	if err != nil {
-		return err
+func (h *TicTacToeMoveHandler) Handle(req actions.Request) (actions.Result, error) {
+	if req.Session == nil {
+		return actions.Result{}, fmt.Errorf("not authenticated")
 	}
+
+	if req.Session.GameID == nil || req.Session.TeamID == nil {
+		return actions.Result{}, fmt.Errorf("session is not in a game/team")
+	}
+
+	gameId := *req.Session.GameID
+	teamId := *req.Session.TeamID
+	decodedMsg := req.Payload
 
 	// Apply the whole move — validation, board update, win check and turn flip
 	// — as one atomic read-modify-write, so two racing moves can't lose an
 	// update or leave the board advanced with the turn unflipped.
-	return h.i.GameRepo.Mutate(gameId, func(g *models.Game) error {
+	err := h.i.GameRepo.Mutate(gameId, func(g *models.Game) error {
 		thisTeam := g.Teams[teamId]
 
 		marker, ok := thisTeam.PublicData["marker"]
@@ -136,6 +117,8 @@ func (h *TicTacToeMoveHandler) Handle(
 
 		return nil
 	})
+
+	return actions.Result{}, err
 }
 
 func (h *TicTacToeMoveHandler) decodeMove(decodedMsg map[string]interface{}, columns, rows int) (*[]int, error) {

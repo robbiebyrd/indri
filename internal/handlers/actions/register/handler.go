@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/robbiebyrd/indri/internal/transport"
-
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -19,40 +17,27 @@ func New(i *injector.Injector) *Handler {
 	return &Handler{i}
 }
 
-func (h *Handler) Handle(
-	s transport.Conn,
-	decodedMsg map[string]interface{},
-) error {
-	ss := connection.NewService(s, h.i.Transport)
-	authExistsErrorMessage := []byte(`{"registered": false, "error": "user already logged in"}`)
-
-	// "sessionId" is the only key login/reconnect ever set on a connection, so
-	// it is what marks this connection as already authenticated.
-	_, err := ss.GetKeyAsString("sessionId")
-	if err == nil {
-		if writeErr := ss.Write(authExistsErrorMessage); writeErr != nil {
-			return fmt.Errorf("notify already-registered session: %w", writeErr)
-		}
-
-		return nil
+func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
+	// A session already bound to this caller means they are logged in.
+	if req.Session != nil {
+		return actions.Result{
+			Responses: [][]byte{[]byte(`{"registered": false, "error": "user already logged in"}`)},
+		}, nil
 	}
 
-	msg, err := remarshal(decodedMsg)
+	msg, err := remarshal(req.Payload)
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
 	createdUser, err := h.i.UserService.New(*msg)
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
-	err = ss.Write([]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID.Hex())))
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return actions.Result{
+		Responses: [][]byte{[]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID.Hex()))},
+	}, nil
 }
 
 func remarshal(decodedMsg map[string]interface{}) (*models.CreateUser, error) {

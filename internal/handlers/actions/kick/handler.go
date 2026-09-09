@@ -4,12 +4,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/robbiebyrd/indri/internal/transport"
-
-	"github.com/robbiebyrd/indri/internal/entrypoints"
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -20,75 +17,57 @@ func New(i *injector.Injector) *Handler {
 	return &Handler{i}
 }
 
-// Handle processes a kick request and removes a player from a game if the requesting player is host.
-func (h *Handler) Handle(
-	s transport.Conn,
-	decodedMsg map[string]interface{},
-) error {
-	cs := connection.NewService(s, h.i.Transport)
-
-	gameCode, err := handlerUtils.RequireGameCode(decodedMsg)
-	if err != nil {
-		return err
+// Handle removes a player from a game if the caller is the game's host, and
+// asks the transport to force-disconnect the removed player.
+func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
+	if req.Session == nil {
+		return actions.Result{}, fmt.Errorf("must be logged in to kick a player")
 	}
 
-	targetUserId, ok := decodedMsg["userId"].(string)
-	if !ok || targetUserId == "" {
-		return fmt.Errorf("userId to kick must be provided")
-	}
-
-	// Authorize the CALLER from their own connection, never from the
-	// client-supplied target userId.
-	callerSessionId, err := cs.GetKeyAsString("sessionId")
-	if err != nil {
-		return fmt.Errorf("must be logged in to kick a player: %w", err)
-	}
-
-	callerSession, err := h.i.SessionService.Get(*callerSessionId)
-	if err != nil {
-		return fmt.Errorf("could not resolve calling session: %w", err)
-	}
-
+	callerSession := req.Session
 	if callerSession.UserID == nil {
-		return fmt.Errorf("calling session has no user id")
+		return actions.Result{}, fmt.Errorf("calling session has no user id")
+	}
+
+	gameCode, err := handlerUtils.RequireGameCode(req.Payload)
+	if err != nil {
+		return actions.Result{}, err
+	}
+
+	targetUserId, ok := req.Payload["userId"].(string)
+	if !ok || targetUserId == "" {
+		return actions.Result{}, fmt.Errorf("userId to kick must be provided")
 	}
 
 	g, err := h.i.GameService.GetByCode(*gameCode)
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
 	gameId := g.ID.Hex()
 
 	if callerSession.GameID == nil || *callerSession.GameID != gameId {
-		return fmt.Errorf("caller %v is not in game %v", *callerSession.UserID, *gameCode)
+		return actions.Result{}, fmt.Errorf("caller %v is not in game %v", *callerSession.UserID, *gameCode)
 	}
 
 	if !g.Players[*callerSession.UserID].Host {
-		return fmt.Errorf("caller %v is not the host of game %v", *callerSession.UserID, *gameCode)
+		return actions.Result{}, fmt.Errorf("caller %v is not the host of game %v", *callerSession.UserID, *gameCode)
 	}
 
-	// Resolve the target and remove them from the game.
 	targetSession, err := h.i.SessionService.GetByUserID(targetUserId)
 	if err != nil {
-		return err
+		return actions.Result{}, err
 	}
 
 	if targetSession.GameID == nil || *targetSession.GameID != gameId {
-		return fmt.Errorf("target %v is not in game %v", targetUserId, *gameCode)
+		return actions.Result{}, fmt.Errorf("target %v is not in game %v", targetUserId, *gameCode)
 	}
-
-	targetSessionId := targetSession.ID.Hex()
 
 	if err = h.i.GameService.RemovePlayer(gameId, targetUserId); err != nil {
 		log.Printf("could not remove player %v from game %v: %v\n", targetUserId, gameId, err)
 	}
 
-	// Force-disconnect the target if they are currently connected. A target
-	// who is offline has still been removed from the game above.
-	if userConnection, err := cs.Get(&targetSessionId); err == nil {
-		entrypoints.HandleDisconnect(userConnection, h.i.Transport, h.i.GameService, h.i.SessionService)
-	}
-
-	return nil
+	// The transport force-disconnects the target if they are currently
+	// connected; an offline target has still been removed above.
+	return actions.Result{DisconnectIDs: []string{targetSession.ID.Hex()}}, nil
 }

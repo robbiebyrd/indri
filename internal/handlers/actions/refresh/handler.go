@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/robbiebyrd/indri/internal/transport"
-
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -19,42 +17,26 @@ func New(i *injector.Injector) *Handler {
 	return &Handler{i}
 }
 
-func (h *Handler) Handle(
-	s transport.Conn,
-	_ map[string]interface{},
-) error {
-	cs := connection.NewService(s, h.i.Transport)
-
-	sessionId, err := cs.GetKeyAsString("sessionId")
-	if err != nil {
-		_ = cs.Write(models.ErrServerError.BytesError())
-		return nil
+func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
+	if req.Session == nil {
+		return actions.Result{Responses: [][]byte{models.ErrServerError.BytesError()}}, nil
 	}
 
-	session, err := h.i.SessionService.Get(*sessionId)
-	if err != nil {
-		_ = cs.WriteError(models.ErrSessionNotFound)
-		return nil
-	}
+	session := req.Session
 
 	if session.GameID == nil || *session.GameID == "" {
-		_ = cs.Write(models.ErrNoGame.BytesError())
-		return errors.New(models.ErrNoGame.Description())
+		return actions.Result{Responses: [][]byte{models.ErrNoGame.BytesError()}}, errors.New(models.ErrNoGame.Description())
 	}
 
 	g, err := h.i.GameService.Get(*session.GameID)
 	if err != nil {
-		_ = cs.WriteError(models.ErrGameNotFound)
-		return err
+		return actions.Result{Responses: [][]byte{models.ErrGameNotFound.BytesError()}}, err
 	}
 
 	jsonData, err := json.Marshal(h.i.GameService.Sanitize(g))
 	if err != nil {
-		_ = cs.WriteError(models.ErrServerError)
-		return err
+		return actions.Result{Responses: [][]byte{models.ErrServerError.BytesError()}}, err
 	}
 
-	_ = cs.Write(jsonData)
-
-	return nil
+	return actions.Result{Responses: [][]byte{jsonData}}, nil
 }

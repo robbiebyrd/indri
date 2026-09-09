@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/robbiebyrd/indri/internal/transport"
-
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -32,42 +30,33 @@ type GameInfo struct {
 	Teams []TeamInfo `json:"teams,omitempty"`
 }
 
-// Handle processes a join game request, and adds a player to a game.
-func (h *Handler) Handle(
-	s transport.Conn,
-	decodedMsg map[string]interface{},
-) error {
-	var jsonBytes *[]byte
-
-	cs := connection.NewService(s, h.i.Transport)
-
-	_, err := cs.GetKeyAsString("sessionId")
-	if err != nil {
-		_ = cs.Write([]byte(`{"authenticated": false, "stage": { "currentScene": "login"}}`))
-		return fmt.Errorf("unable to get userId: %w", err)
+// Handle answers a game inquiry (available games / game info).
+func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
+	if req.Session == nil {
+		return actions.Result{
+			Responses: [][]byte{[]byte(`{"authenticated": false, "stage": { "currentScene": "login"}}`)},
+		}, fmt.Errorf("not authenticated")
 	}
 
-	inquiryType, ok := decodedMsg["inquiryType"].(string)
+	inquiryType, ok := req.Payload["inquiryType"].(string)
 	if !ok {
-		return errors.New("inquiryType not provided or not a string")
+		return actions.Result{}, errors.New("inquiryType not provided or not a string")
 	}
 
-	if inquiryType == "game" {
-		jbs, err := h.handleGameInquiry(decodedMsg)
-		if err != nil {
-			return err
-		}
+	if inquiryType != "game" {
+		return actions.Result{}, nil
+	}
 
-		jsonBytes = jbs
+	jsonBytes, err := h.handleGameInquiry(req.Payload)
+	if err != nil {
+		return actions.Result{}, err
 	}
 
 	if jsonBytes == nil {
-		return nil
+		return actions.Result{}, nil
 	}
 
-	cs.Write(*jsonBytes)
-
-	return nil
+	return actions.Result{Responses: [][]byte{*jsonBytes}}, nil
 }
 
 func (h *Handler) getGamesList() ([]*models.Game, error) {

@@ -1,26 +1,20 @@
 package router
 
 import (
-	"github.com/robbiebyrd/indri/internal/transport"
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/handlers/utils"
-	"log"
+	"github.com/robbiebyrd/indri/internal/models"
 )
 
-func HandleMessage(s transport.Conn, msg []byte) {
-	// The first step in handling a message is to successfully decode its payload into a map[string]interface{}.
-	// The map must have a string key named "action" that will be used to determine which handler should
-	// process the message. The "action" key is deleted from the decoded message before it is passed to the handler;
-	// the action will still be passed as a string, separate from the payload.
+// DispatchMessage decodes a raw client message (which carries its own "action"
+// field) and dispatches it for the given session. It is the entry point for
+// message-oriented transports (WebSocket); request/response transports that
+// already know the action (GraphQL mutations) call Dispatch directly.
+func DispatchMessage(session *models.Session, msg []byte) (actions.Result, error) {
 	action, decodedMsg, err := utils.DecodeMessageWithAction(msg)
 	if err != nil {
-		log.Printf("error decoding message %v: %v\n", string(msg), err)
-		return
+		return actions.Result{}, err
 	}
 
-	// Next, we pass the message to Act, which decides which handler to invoke based on the incoming `action`
-	// parameter in the message body.
-	err = Act(s, decodedMsg, action)
-	if err != nil {
-		log.Printf("error handling message %v: %v\n", decodedMsg, err)
-	}
+	return Dispatch(session, *action, *decodedMsg)
 }

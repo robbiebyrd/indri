@@ -16,6 +16,8 @@ import (
 	"github.com/robbiebyrd/indri/internal/handlers/actions/register"
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/injector"
+	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/services/connection"
 	"github.com/robbiebyrd/indri/internal/transport"
 )
 
@@ -28,7 +30,7 @@ func registerHandlers(i *injector.Injector) {
 			entrypoints.HandleDisconnect(c, i.Transport, i.GameService, i.SessionService)
 		},
 		Message: func(c transport.Conn, msg []byte) {
-			router.HandleMessage(c, msg)
+			handleClientMessage(i, c, msg)
 		},
 		Error: func(c transport.Conn, err error) {
 			log.Printf("client transport error: %v", err)
@@ -89,4 +91,43 @@ func registerHandlers(i *injector.Injector) {
 	}
 
 	router.RegisterHandlers(actionToHandlerMap)
+}
+
+// handleClientMessage bridges a message-oriented transport (WebSocket) to the
+// connection-independent dispatcher: it resolves the socket's current session,
+// dispatches the message, then applies the result — binding the session on the
+// socket when auth is established, writing responses back, and force-closing
+// any connections the action asked to disconnect (kick/logout).
+func handleClientMessage(i *injector.Injector, c transport.Conn, msg []byte) {
+	cs := connection.NewService(c, i.Transport)
+
+	var session *models.Session
+
+	if idPtr, err := cs.GetKeyAsString("sessionId"); err == nil {
+		if resolved, err := i.SessionService.Get(*idPtr); err == nil {
+			session = resolved
+		}
+	}
+
+	result, dispatchErr := router.DispatchMessage(session, msg)
+
+	if result.Session != nil {
+		cs.SetKey("sessionId", result.Session.ID.Hex())
+	}
+
+	for _, response := range result.Responses {
+		if err := cs.Write(response); err != nil {
+			log.Printf("error writing response: %v", err)
+		}
+	}
+
+	for _, id := range result.DisconnectIDs {
+		if target, err := cs.Get(&id); err == nil {
+			entrypoints.HandleDisconnect(target, i.Transport, i.GameService, i.SessionService)
+		}
+	}
+
+	if dispatchErr != nil {
+		log.Printf("error handling message: %v", dispatchErr)
+	}
 }

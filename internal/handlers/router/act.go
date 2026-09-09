@@ -4,52 +4,51 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/robbiebyrd/indri/internal/transport"
-
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
+	"github.com/robbiebyrd/indri/internal/models"
 )
 
-func Act(
-	s transport.Conn,
-	decodedMsg *map[string]interface{},
-	action *string,
-) error {
-	if decodedMsg == nil {
-		return fmt.Errorf("decoded message is nil")
+// Dispatch runs the handlers registered for action (wrapped in the
+// received/action/processed lifecycle), threading the session through and
+// merging their Results. It is connection-independent: any transport resolves
+// the session and supplies the decoded payload.
+func Dispatch(session *models.Session, action string, payload map[string]interface{}) (actions.Result, error) {
+	if action == "" {
+		return actions.Result{}, fmt.Errorf("action is empty")
 	}
 
-	if action == nil || *action == "" {
-		return fmt.Errorf("action is nil or empty string")
-	}
+	var merged actions.Result
 
-	actions := []string{"received", *action, "processed"}
+	for _, phase := range []string{"received", action, "processed"} {
+		for _, registered := range registeredHandlerMap {
+			if registered.Action != phase {
+				continue
+			}
 
-	for _, a := range actions {
-		err := runHandler(s, decodedMsg, a)
-		if err != nil {
-			return err
-		}
-	}
+			res, err := invokeHandler(registered.Handler, actions.Request{Session: session, Payload: payload})
 
-	return nil
-}
+			merged.Responses = append(merged.Responses, res.Responses...)
+			merged.DisconnectIDs = append(merged.DisconnectIDs, res.DisconnectIDs...)
 
-func runHandler(s transport.Conn, decodedMsg *map[string]interface{}, action string) error {
-	for _, i := range registeredHandlerMap {
-		if i.Action == action {
-			if err := invokeHandler(i.Handler, s, decodedMsg); err != nil {
-				return err
+			if res.Session != nil {
+				// Auth was just established/refreshed; use it for the rest of
+				// the lifecycle and report it back to the transport.
+				merged.Session = res.Session
+				session = res.Session
+			}
+
+			if err != nil {
+				return merged, err
 			}
 		}
 	}
 
-	return nil
+	return merged, nil
 }
 
 // invokeHandler runs a single handler, converting any panic into an error so a
-// malformed client message cannot crash the process or leak the connection
-// (net/http's per-connection recover would otherwise skip the transport's cleanup).
-func invokeHandler(h actions.MessageHandler, s transport.Conn, decodedMsg *map[string]interface{}) (err error) {
+// malformed client message cannot crash the process.
+func invokeHandler(h actions.MessageHandler, req actions.Request) (result actions.Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("recovered from panic handling message: %v", r)
@@ -57,5 +56,5 @@ func invokeHandler(h actions.MessageHandler, s transport.Conn, decodedMsg *map[s
 		}
 	}()
 
-	return h.Handle(s, *decodedMsg)
+	return h.Handle(req)
 }
