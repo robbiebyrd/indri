@@ -1,6 +1,8 @@
 package boot
 
 import (
+	"log"
+
 	"github.com/olahol/melody"
 
 	"github.com/robbiebyrd/indri/internal/entrypoints"
@@ -26,6 +28,9 @@ func registerHandlers(i *injector.Injector) {
 	})
 	i.MelodyClient.HandleMessage(func(s *melody.Session, msg []byte) {
 		router.HandleMessage(s, msg)
+	})
+	i.MelodyClient.HandleError(func(s *melody.Session, err error) {
+		log.Printf("websocket session error: %v", err)
 	})
 
 	actionToHandlerMap := []router.Handler{

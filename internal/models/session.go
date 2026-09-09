@@ -35,5 +35,5 @@ type UpdateSession struct {
 	UserID string `bson:"userId" json:"userId"`
 	TeamID string `bson:"teamId" json:"teamId"`
 
-	UpdatedAt time.Time `bson:"updated_at" json:"updatedAt"`
+	UpdatedAt time.Time `bson:"updatedAt" json:"updatedAt"`
 }

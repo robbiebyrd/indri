@@ -2,8 +2,11 @@ package router
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/olahol/melody"
+
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 )
 
 func Act(
@@ -34,12 +37,25 @@ func Act(
 func runHandler(s *melody.Session, decodedMsg *map[string]interface{}, action string) error {
 	for _, i := range registeredHandlerMap {
 		if i.Action == action {
-			err := i.Handler.Handle(s, *decodedMsg)
-			if err != nil {
+			if err := invokeHandler(i.Handler, s, decodedMsg); err != nil {
 				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+// invokeHandler runs a single handler, converting any panic into an error so a
+// malformed client message cannot crash the process or leak the melody session
+// (net/http's per-connection recover would otherwise skip melody's cleanup).
+func invokeHandler(h actions.MessageHandler, s *melody.Session, decodedMsg *map[string]interface{}) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("recovered from panic handling message: %v", r)
+			err = fmt.Errorf("internal error handling message: %v", r)
+		}
+	}()
+
+	return h.Handle(s, *decodedMsg)
 }

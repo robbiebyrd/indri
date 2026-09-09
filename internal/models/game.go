@@ -37,12 +37,12 @@ type CreateGame struct {
 }
 
 type UpdateGame struct {
-	Teams       *map[string]Team       `bson:"teams,omitempty" json:"teams,omitempty"`
-	Players     *map[string]Player     `bson:"players"         json:"players"`
-	Stage       *Stage                 `bson:"stage"           json:"stage,omitempty"`
-	UpdatedAt   time.Time              `bson:"updated_at"      json:"updatedAt"`
-	PublicData  map[string]interface{} `bson:"data"            json:"data,omitempty"`
-	PrivateData map[string]interface{} `bson:"privateData"     json:"privateData,omitempty"`
-	PlayerData  map[string]interface{} `bson:"playerData"      json:"playerData,omitempty"`
-	Private     bool                   `bson:"private"         json:"private,omitempty"`
+	Teams       *map[string]Team       `bson:"teams,omitempty"       json:"teams,omitempty"`
+	Players     *map[string]Player     `bson:"players,omitempty"     json:"players"`
+	Stage       *Stage                 `bson:"stage,omitempty"       json:"stage,omitempty"`
+	UpdatedAt   time.Time              `bson:"updatedAt"             json:"updatedAt"`
+	PublicData  map[string]interface{} `bson:"data,omitempty"        json:"data,omitempty"`
+	PrivateData map[string]interface{} `bson:"privateData,omitempty" json:"privateData,omitempty"`
+	PlayerData  map[string]interface{} `bson:"playerData,omitempty"  json:"playerData,omitempty"`
+	Private     bool                   `bson:"private,omitempty"     json:"private,omitempty"`
 }

@@ -29,14 +29,16 @@ func HandleDisconnect(s *melody.Session, m *melody.Melody, gs *gameService.Servi
 		return
 	}
 
-	err = cs.Write([]byte(`{"disconnected": true}`))
-	if err != nil {
-		log.Printf("error writing disconnected: %v\n", err)
-	}
+	// When melody drives the disconnect it has already closed the session, so
+	// only notify/close when we still own an open connection (e.g. a kick).
+	if !s.IsClosed() {
+		if err = cs.Write([]byte(`{"disconnected": true}`)); err != nil {
+			log.Printf("error writing disconnected: %v\n", err)
+		}
 
-	err = s.Close()
-	if err != nil {
-		log.Printf("error closing session: %v\n", err)
+		if err = s.Close(); err != nil {
+			log.Printf("error closing session: %v\n", err)
+		}
 	}
 
 	session, err := ss.Get(*sessionId)

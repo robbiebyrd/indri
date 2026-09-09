@@ -13,14 +13,6 @@ func getCollection(db *mongo.Database, collectionName string) *mongo.Collection 
 	return db.Collection(collectionName)
 }
 
-func getDB(client mongo.Client, dbName string) *mongo.Database {
-	return client.Database(dbName)
-}
-
-func getClient(mongoURI string) (*mongo.Client, error) {
-	return mongo.Connect(options.Client().ApplyURI(mongoURI))
-}
-
 func getChangeStream(ctx context.Context, collection *mongo.Collection, filter *bson.D) (*mongo.ChangeStream, error) {
 	pipe := getFilterPipeline(filter)
 

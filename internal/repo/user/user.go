@@ -61,7 +61,9 @@ func (s *Store) New(user models.CreateUser) (*models.User, error) {
 		return nil, fmt.Errorf("a user with email address %v already exists", user.Email)
 	}
 
-	user.CreatedAt = time.Now()
+	now := time.Now()
+	user.CreatedAt = now
+	user.UpdatedAt = now
 
 	doc, err := repoUtils.CreateBSONDoc(user)
 	if err != nil {

@@ -22,7 +22,8 @@ type User struct {
 }
 
 type CreateUser struct {
-	CreatedAt   time.Time `bson:"created_at"  json:"createdAt"`
+	CreatedAt   time.Time `bson:"createdAt"   json:"createdAt"`
+	UpdatedAt   time.Time `bson:"updatedAt"   json:"updatedAt"`
 	Email       string    `bson:"email"       json:"email"`
 	Name        string    `bson:"name"        json:"name"`
 	DisplayName *string   `bson:"displayName" json:"displayName"`
@@ -30,10 +31,10 @@ type CreateUser struct {
 }
 
 type UpdateUser struct {
-	ID          string    `bson:"_id,omitempty" json:"id"`
-	UpdatedAt   time.Time `bson:"updated_at"    json:"updatedAt"`
-	Email       string    `bson:"email"         json:"email"`
-	Name        string    `bson:"name"          json:"name"`
-	DisplayName *string   `bson:"displayName"   json:"displayName"`
-	Password    *string   `bson:"password"      json:"-"`
+	ID          string    `bson:"_id,omitempty"         json:"id"`
+	UpdatedAt   time.Time `bson:"updatedAt"             json:"updatedAt"`
+	Email       string    `bson:"email,omitempty"       json:"email"`
+	Name        string    `bson:"name,omitempty"        json:"name"`
+	DisplayName *string   `bson:"displayName,omitempty" json:"displayName"`
+	Password    *string   `bson:"password,omitempty"    json:"-"`
 }

@@ -165,7 +165,7 @@ func (s *Store) UpdateField(id string, key string, value interface{}) error {
 		bson.D{
 			{Key: "$set", Value: bson.D{
 				{Key: key, Value: value},
-				{Key: "UpdatedAt", Value: time.Now()},
+				{Key: "updatedAt", Value: time.Now()},
 			}},
 		},
 	)
@@ -195,7 +195,7 @@ func (s *Store) DeleteField(id string, key string) error {
 				{Key: key, Value: ""},
 			}},
 			{Key: "$set", Value: bson.D{
-				{Key: "UpdatedAt", Value: time.Now()},
+				{Key: "updatedAt", Value: time.Now()},
 			}},
 		},
 	)
