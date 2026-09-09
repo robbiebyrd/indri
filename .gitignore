@@ -56,3 +56,5 @@ codealike.json
 .claude
 .wiz
 .codecontext/
+reviews/archive
+.pnpm-store
