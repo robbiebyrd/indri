@@ -26,6 +26,14 @@ go.work.sum
 
 # env file
 .env
+# Any .env variant (.env.bak, .env.local, ...) may hold real credentials, so
+# ignore them all and re-include the checked-in template.
+.env.*
+!.env.example
+
+# Stray build/log artifacts that have shown up at the repo root
+/$TMPDIR/
+/indri-server
 
 # Editor/IDE
 # .idea/
