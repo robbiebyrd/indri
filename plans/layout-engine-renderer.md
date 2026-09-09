@@ -155,9 +155,21 @@ client/app/board/index.tsx            # live renderer route
     never reach). An empty `os` is exactly what produced the web error `os.platform is not a function`.
     `shims/os.js` and `shims/readline-sync.js` cover both, and `layout/lua/metro-shims.node-test.ts`
     reproduces the bundled module set so a regression fails `pnpm test` rather than only a device run.
-  - **Verified end to end on web:** `npx expo export --platform web` statically renders `/board/spike` to
-    `ALL PROBES PASSED`, so Lua genuinely executes inside the Metro bundle. `--platform ios` produces a
-    `.hbc`, so Hermes' compiler accepts all of fengari; only the on-device *runtime* remains unproven.
+  - **RN's `process` is not Node's.** It provides `env` but not `versions`, and `liolib.js:134` reads
+    `process.versions.node` at module scope. The fix is not another shim: drop `liolib`, `loslib`,
+    `ldblib` and `loadlib` from the bundle entirely via `resolveRequest`. They are required only by
+    `lualib.js`/`linit.js`, and only to assign `luaopen_*` functions we never call. This also removes the
+    need to shim `tmp`, `crypto`, `child_process`, `path` and `readline-sync` — the minimal remaining set
+    is `fs` (lauxlib.js:901) and `os` (luaconf.js:60), plus `util` once fengari-interop is imported.
+  - Dropping those four libraries makes the sandbox **enforced by the bundle, not by policy**:
+    `luaopen_io`/`luaopen_os`/`luaopen_debug`/`luaopen_package` are `undefined`, so no later change to
+    `state.ts` can open them. This is the "never shipped" property, now actually true.
+  - **Verification caveat, learned the hard way:** `expo export --platform web` static-renders in **Node**,
+    where `process.versions.node` exists. A green SSR render therefore does NOT prove browser/Hermes
+    runtime — it is exactly why an SSR pass coexisted with a device failure. Verify by grepping the
+    *emitted bundle* instead: `process.versions`, `prepare_string_for_write` (liolib) and `lua_debug>`
+    (ldblib) all occur **0 times** in both the web bundle and the iOS `.hbc`, while `FENGARICONF`
+    (luaconf, expected) is present. That check is environment-independent.
   - React Native defines a global `process`, so fengari's `typeof process !== "undefined"` guards are TRUE
     on device and it takes its Node branch. That is why the shims are required rather than optional.
   - `luaopen_base` installs `load`/`loadstring`/`dofile`/`loadfile`, so selective `luaL_requiref` is **not**
