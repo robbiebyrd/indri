@@ -317,8 +317,8 @@ func (s *Store) publish(id string, op events.OperationType, updated map[string]i
 
 // saveWithVersion persists the whole game only if its stored version still
 // equals expectedVersion, bumping the version on success. It reports whether
-// the write committed. Using $set keeps the change stream emitting "update"
-// events so real-time deltas keep flowing.
+// the write committed. Callers publish the resulting delta themselves; see
+// Mutate.
 func (s *Store) saveWithVersion(id string, g *models.Game, expectedVersion int64) (bool, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {

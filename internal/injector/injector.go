@@ -26,7 +26,7 @@ type ReposInjector struct {
 	GameRepo    *gameRepo.Store
 	UserRepo    *userRepo.Store
 	SessionRepo *sessionRepo.Store
-	ScriptRepo *scriptRepo.Store
+	ScriptRepo  *scriptRepo.Store
 }
 
 type ClientsInjector struct {

@@ -12,6 +12,7 @@ import (
 	"github.com/robbiebyrd/indri/internal/handlers/actions/kick"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/leave"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/login"
+	"github.com/robbiebyrd/indri/internal/handlers/actions/logout"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/reconnect"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/refresh"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/register"
@@ -73,6 +74,11 @@ func registerHandlers(i *injector.Injector) {
 			Name:    "indri_login",
 			Action:  "login",
 			Handler: login.New(i),
+		},
+		{
+			Name:    "indri_logout",
+			Action:  "logout",
+			Handler: logout.New(i),
 		},
 		{
 			Name:    "indri_inquire",

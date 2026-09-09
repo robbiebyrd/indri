@@ -97,9 +97,9 @@ func TestDiff_NoChange(t *testing.T) {
 
 func TestSanitizeDelta_DropsPrivatePaths(t *testing.T) {
 	updated := map[string]interface{}{
-		"players.p1.host":        true,
+		"players.p1.host":          true,
 		"stage.privateData.answer": "42",
-		"teams.t1.privateData":   map[string]interface{}{"role": "spy"},
+		"teams.t1.privateData":     map[string]interface{}{"role": "spy"},
 	}
 	removed := []string{"players.p2", "stage.scenes.s1.privateData.key"}
 

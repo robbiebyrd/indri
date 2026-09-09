@@ -21,3 +21,12 @@ func RegisterHandlers(handlers []Handler) {
 		RegisterHandler(handler.Name, handler.Action, handler.Handler)
 	}
 }
+
+// RegisteredHandlers returns a copy of the current registry, so callers can
+// introspect what a boot sequence wired up without being able to mutate it.
+func RegisteredHandlers() []Handler {
+	out := make([]Handler, len(registeredHandlerMap))
+	copy(out, registeredHandlerMap)
+
+	return out
+}

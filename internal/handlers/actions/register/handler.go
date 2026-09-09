@@ -26,7 +26,9 @@ func (h *Handler) Handle(
 	ss := connection.NewService(s, h.i.MelodyClient)
 	authExistsErrorMessage := []byte(`{"registered": false, "error": "user already logged in"}`)
 
-	_, err := ss.GetKeyAsString("userId")
+	// "sessionId" is the only key login/reconnect ever set on a connection, so
+	// it is what marks this connection as already authenticated.
+	_, err := ss.GetKeyAsString("sessionId")
 	if err == nil {
 		_ = ss.Write(authExistsErrorMessage)
 		return nil
