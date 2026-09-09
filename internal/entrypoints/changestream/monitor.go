@@ -2,6 +2,7 @@ package changestream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 )
@@ -9,8 +10,12 @@ import (
 func (cm *MongoChangeMonitor) Monitor(ctx context.Context, channel chan<- ChangeEventOut) {
 	log.Printf("Started watching changes on db %v", cm.database.Name())
 
+	defer close(channel)
+
 	defer func() {
-		if err := cm.changeStream.Close(ctx); err != nil {
+		// The parent context is already cancelled during shutdown, so close
+		// the stream with a fresh context to allow the server-side cleanup.
+		if err := cm.changeStream.Close(context.WithoutCancel(ctx)); err != nil {
 			log.Printf("error closing change stream: %v", err)
 		}
 	}()
@@ -24,7 +29,8 @@ func (cm *MongoChangeMonitor) Monitor(ctx context.Context, channel chan<- Change
 		channel <- *event
 	}
 
-	if err := cm.changeStream.Err(); err != nil {
+	// A cancelled context is the normal shutdown path, not an error.
+	if err := cm.changeStream.Err(); err != nil && !errors.Is(err, context.Canceled) {
 		log.Printf("change stream error occured while monitoring: %v", err)
 	}
 }

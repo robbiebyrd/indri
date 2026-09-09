@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
-	"fmt"
+	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/robbiebyrd/indri/example/tictactoe/server/handlers/move"
 	"github.com/robbiebyrd/indri/internal/handlers/router"
@@ -14,22 +17,26 @@ func main() {
 	scriptFilePath := flag.String("script", "", "A JSON file containing the default game script.")
 	flag.Parse()
 
-	if scriptFilePath == nil || *scriptFilePath == "" {
+	if *scriptFilePath == "" {
 		dir, err := os.Getwd()
 		if err != nil {
-			fmt.Println("Error getting current directory:", err)
-			return
+			log.Fatalf("error getting current directory: %v", err)
 		}
 
 		*scriptFilePath = dir + "/config.json"
 	}
 
-	i, err := boot.Boot(scriptFilePath)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	i, err := boot.Boot(ctx, scriptFilePath)
 	if err != nil {
-		panic(fmt.Errorf("could not bootstrap: %v", err))
+		log.Fatalf("could not bootstrap: %v", err)
 	}
 
 	router.RegisterHandler("ttt_move", "move", move.New(i))
 
-	boot.Serve(i)
+	if err := boot.Serve(i); err != nil {
+		log.Fatalf("server exited with error: %v", err)
+	}
 }

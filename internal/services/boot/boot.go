@@ -2,15 +2,13 @@ package boot
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"os"
 
 	"github.com/robbiebyrd/indri/internal/injector"
 )
 
-func Boot(scriptFilePath *string) (*injector.Injector, error) {
-	ctx := context.Background()
-
+func Boot(ctx context.Context, scriptFilePath *string) (*injector.Injector, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -23,17 +21,17 @@ func Boot(scriptFilePath *string) (*injector.Injector, error) {
 
 	clients, err := injector.GetClients(ctx, nil, nil, nil)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("initializing clients: %w", err)
 	}
 
 	repos, err := injector.GetRepos(ctx, clients, *scriptFilePath)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("initializing repos: %w", err)
 	}
 
 	services, err := injector.GetServices(ctx, clients, repos)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("initializing services: %w", err)
 	}
 
 	i := &injector.Injector{

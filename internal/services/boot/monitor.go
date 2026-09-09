@@ -11,19 +11,24 @@ import (
 func monitorGameChanges(ctx context.Context, i *injector.Injector) error {
 	receiver := make(chan cs.ChangeEventOut)
 
-	_, cancel := context.WithCancel(ctx)
-	defer cancel()
-
+	// Monitor closes receiver when it returns (which it does once ctx is
+	// cancelled), so both the ctx.Done and channel-closed cases end the loop.
 	go i.GlobalMonitor.Monitor(ctx, receiver)
 
-	for val := range receiver {
-		hexId := val.ID.Hex()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case val, ok := <-receiver:
+			if !ok {
+				return nil
+			}
 
-		err := i.BroadcastService.Broadcast(&hexId, nil, val)
-		if err != nil {
-			log.Printf("Error broadcasting change event: %v\n", err)
+			hexId := val.ID.Hex()
+
+			if err := i.BroadcastService.Broadcast(&hexId, nil, val); err != nil {
+				log.Printf("Error broadcasting change event: %v\n", err)
+			}
 		}
 	}
-
-	return nil
 }
