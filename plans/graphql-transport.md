@@ -1,8 +1,12 @@
 ---
 title: GraphQL transport (subscriptions + typed mutations)
-status: in_progress
+status: complete
 created: "2026-09-09"
 ---
+
+> Status: all three increments delivered and verified end to end — WS and
+> GraphQL run side by side; mutations dispatch to the shared action logic and
+> the gameUpdates subscription is fed by the existing broadcast fan-out.
 
 # GraphQL transport
 

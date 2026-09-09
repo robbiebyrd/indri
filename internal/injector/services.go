@@ -9,6 +9,8 @@ import (
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	sessionService "github.com/robbiebyrd/indri/internal/services/session"
 	userService "github.com/robbiebyrd/indri/internal/services/user"
+	"github.com/robbiebyrd/indri/internal/transport"
+	graphqlTransport "github.com/robbiebyrd/indri/internal/transport/graphql"
 )
 
 func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInjector) (*ServicesInjector, error) {
@@ -19,6 +21,15 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 	if repos == nil {
 		return nil, errors.New("clients were not passed to the repo injector")
 	}
+
+	// The GraphQL transport needs the session store (to authenticate bearer
+	// tokens), which only exists now, so it is built here and aggregated with
+	// the WebSocket transport from GetClients. Everything downstream targets the
+	// aggregate.
+	gql := graphqlTransport.New(repos.SessionRepo)
+	multi := transport.NewMulti(clients.Transport, gql)
+	gql.SetPeer(multi)
+	clients.Transport = multi
 
 	gs, err := gameService.NewService(repos.GameRepo, repos.ScriptRepo)
 	if err != nil {

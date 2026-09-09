@@ -1,0 +1,31 @@
+# Arbitrary JSON passthrough for the dynamic parts of the model (game/scene
+# data blobs) and for the delta/keyframe payloads, which are already-marshalled
+# JSON documents. Bound to json.RawMessage — no double encoding.
+scalar JSON
+
+type Query {
+  ping: String!
+}
+
+# Client -> server actions. Each mutation dispatches to the same
+# connection-independent action logic used by the WebSocket transport; auth is
+# taken from the Authorization header (the session bearer token). The JSON
+# result is the action's response document.
+type Mutation {
+  register(email: String!, password: String!, name: String!): JSON!
+  login(email: String!, password: String!): JSON!
+  reconnect(token: String!): JSON!
+  createGame(code: String!, teamId: String!, private: Boolean): JSON!
+  joinGame(code: String!, teamId: String!): JSON!
+  leaveGame: JSON
+  kick(code: String!, userId: String!): JSON
+  logout: JSON
+  inquire(inquiryType: String!, inquiry: String, code: String): JSON
+}
+
+# Server -> client push. The client authenticates the subscription via the
+# connection_init payload (its session token); each event is a game delta
+# (the same document broadcast to WebSocket clients).
+type Subscription {
+  gameUpdates(gameId: String!): JSON!
+}
