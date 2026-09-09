@@ -1,3 +1,4 @@
+import {Text, View} from 'react-native'
 import {MessageHandler} from "@/services/message-handler";
 import {useGameList} from "@/providers/game-list/use-game-list";
 
@@ -8,10 +9,10 @@ export type GameListProps = {
 export default function GameList({ws}: GameListProps) {
 
     const {gameList} = useGameList()
-    return <>
-        <div>{gameList?.length || 0} Games Available</div>
+    return <View>
+        <Text>{gameList?.length || 0} Games Available</Text>
         {gameList?.map((game) =>
-            <div key={game.code}>{game.code} {game.full ? "" : "+"}</div>)
+            <Text key={game.code}>{game.code} {game.full ? "" : "+"}</Text>)
         }
-    </>
+    </View>
 }

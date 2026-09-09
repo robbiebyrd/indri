@@ -1,5 +1,5 @@
 import {Button, Pressable, StyleSheet, Text, View} from 'react-native'
-import {useMemo, useState} from "react"
+import {useEffect, useRef, useState} from "react"
 import {MessageHandler} from "@/services/message-handler";
 import Login from "@/components/auth/login";
 import {useGameState} from "@/providers/game-state/use-game-state";
@@ -18,8 +18,19 @@ export default function Index() {
     const {dispatch: gameListDispatch} = useGameList()
 
 
-    const ws: MessageHandler = useMemo(() => {
-        return new MessageHandler(process.env.EXPO_PUBLIC_API_URL || "", userDispatch, gameDispatch, gameListDispatch)
+    // Create the socket once (lazy ref, not useMemo — opening a socket is a
+    // side effect) and close it on unmount to avoid leaking connections.
+    const wsRef = useRef<MessageHandler | undefined>(undefined)
+    if (!wsRef.current) {
+        wsRef.current = new MessageHandler(process.env.EXPO_PUBLIC_API_URL || "", userDispatch, gameDispatch, gameListDispatch)
+    }
+    const ws: MessageHandler = wsRef.current!
+
+    useEffect(() => {
+        return () => {
+            ws.close()
+            wsRef.current = undefined
+        }
     }, [])
 
     const currentScene = gameState?.stage?.scenes && gameState?.stage.currentScene ? gameState.stage.scenes[gameState.stage.currentScene] : undefined
@@ -42,8 +53,8 @@ export default function Index() {
                                 row.map((column, columnNumber) => {
                                     if (column == "") {
                                         return (
-                                            <View style={styles.gridItem} key={[rowNumber + columnNumber].join("-")}>
-                                                <Pressable id={"a"} key={"a"} style={{width: "100%", height: "100%"}}
+                                            <View style={styles.gridItem} key={`${rowNumber}-${columnNumber}`}>
+                                                <Pressable style={{width: "100%", height: "100%"}}
                                                            onPress={() => ws.send({
                                                                "action": "move",
                                                                "move": `${rowNumber},${columnNumber}`
@@ -54,8 +65,8 @@ export default function Index() {
                                         )
                                     } else {
                                         return (
-                                            <View style={styles.gridItem} key={[rowNumber + columnNumber].join("-")}>
-                                                <Pressable id={"a"} key={"a"} style={{width: "100%", height: "100%"}}>
+                                            <View style={styles.gridItem} key={`${rowNumber}-${columnNumber}`}>
+                                                <Pressable style={{width: "100%", height: "100%"}}>
                                                     <Text style={styles.gridItemText}>{column}</Text>
                                                 </Pressable>
                                             </View>

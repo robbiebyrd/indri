@@ -6,9 +6,7 @@ export default function GameCode() {
 
     return (
         <Text>
-            <p>
-                {JSON.stringify(gameState?.code)}
-            </p>
+            {JSON.stringify(gameState?.code)}
         </Text>
     )
 }

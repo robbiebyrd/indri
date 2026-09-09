@@ -101,9 +101,24 @@ export class MessageHandler {
         } as GameListDispatchMessage)
     }
 
+    close() {
+        if (this.ws) {
+            // Drop handlers before closing so a teardown doesn't fire onclose
+            // logic (e.g. future reconnect) during unmount.
+            this.ws.onmessage = null
+            this.ws.onerror = null
+            this.ws.onclose = null
+            this.ws.close()
+            this.ws = undefined
+        }
+    }
+
     send(message: object) {
-        const msgString = JSON.stringify(message)
-        this.ws?.send(msgString)
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            console.warn("dropping message sent before the socket was open")
+            return
+        }
+        this.ws.send(JSON.stringify(message))
     }
 
     update(parsedMessage?: any) {
@@ -112,6 +127,9 @@ export class MessageHandler {
     }
 
     messageType(parsedMessage: any): string | undefined {
+        if (typeof parsedMessage !== "object" || parsedMessage === null) {
+            return undefined
+        }
         if ("authenticated" in parsedMessage && parsedMessage["authenticated"] == true) {
             return "authenticated"
         } else if ("op" in parsedMessage && parsedMessage["op"] == "update") {
@@ -127,12 +145,16 @@ export class MessageHandler {
     }
 
     updateGameState() {
-        this.setGameState({payload: this.stateList.current(), type: "setGame"} as GameDispatchMessage)
+        const game = this.stateList.current()
+        if (!game) {
+            // No keyframe applied yet; don't dispatch an empty game that would
+            // render the in-game UI over the join/create screen.
+            return
+        }
+        this.setGameState({payload: game, type: "setGame"} as GameDispatchMessage)
     }
 
     updatePlayerState(data: any) {
-        console.log("setting player state")
-        console.log(data.user, data.sessionId)
         this.setPlayerState({
             payload: data.user as User,
             type: "setUser",

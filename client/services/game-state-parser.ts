@@ -1,8 +1,16 @@
-import {UpdateMessage} from "@/models/models";
+import type {UpdateMessage} from "@/models/models";
 
 declare interface Delta {
     timestamp: Date
     data: UpdateMessage
+}
+
+// Keys that must never be written through a dot path, to avoid prototype
+// pollution from server-supplied paths (which include user/team ids).
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"])
+
+function deepClone<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value))
 }
 
 export class GameStateParser<T> {
@@ -13,8 +21,7 @@ export class GameStateParser<T> {
 
     set(data: T, timestamp: Date): void {
         this.setCutoff(timestamp)
-        this.baseState = data
-        this.currentState = data
+        this.baseState = deepClone(data)
         this.deleteBefore(timestamp)
         this.reapply()
     }
@@ -38,76 +45,82 @@ export class GameStateParser<T> {
     }
 
     private reapply(): void {
-        if (this.isEmpty()) {
+        // Deltas can arrive before the first keyframe; hold them until a base
+        // state exists rather than applying them onto undefined.
+        if (this.baseState === undefined) {
+            this.currentState = undefined
             return
         }
 
-        this.currentState = this.baseState
+        // Always rebuild from a fresh clone so the keyframe snapshot is never
+        // mutated and each reapply is deterministic.
+        let state: T = deepClone(this.baseState)
 
         for (const updateMsg of this.deltas) {
             if (updateMsg.data.removed && updateMsg.data.removed.length > 0) {
                 for (const key of updateMsg.data.removed) {
-                    this.currentState = this.deleteJSONKeyByDotPath(this.currentState, key)
+                    state = this.deleteJSONKeyByDotPath(state, key)
                 }
             }
             if (updateMsg.data.updated && Object.keys(updateMsg.data.updated).length > 0) {
                 for (const [key, value] of Object.entries(updateMsg.data.updated)) {
-                    this.currentState = this.updateJSONKeyByDotPath(this.currentState, key, value)
+                    state = this.updateJSONKeyByDotPath(state, key, value)
                 }
             }
         }
+
+        this.currentState = state
     }
 
     private setCutoff(date: Date): void {
         this.cutoff = date.getTime()
     }
 
-    private isEmpty(): boolean {
-        return this.deltas.length === 0
-    }
-
     private deleteBefore(timestamp: Date): void {
-        for (let i = 0; i < this.deltas.length; i++) {
-            if (this.deltas[i].timestamp.getTime() > timestamp.getTime()) {
-                this.deltas.splice(i, 1)
-                i--
-            } else {
-                break
-            }
-        }
+        // Drop deltas already subsumed by the keyframe (at or before its
+        // timestamp); keep everything newer so it replays on top.
+        const cutoff = timestamp.getTime()
+        this.deltas = this.deltas.filter((d) => d.timestamp.getTime() > cutoff)
     }
 
-    private updateJSONKeyByDotPath<T>(obj: T, path: string, value: any): T {
+    private updateJSONKeyByDotPath<S>(obj: S, path: string, value: any): S {
         const parts = path.split('.');
         let current: any = obj;
 
         for (let i = 0; i < parts.length - 1; i++) {
             const part = parts[i];
+            if (UNSAFE_KEYS.has(part)) {
+                return obj;
+            }
             if (typeof current[part] !== 'object' || current[part] === null) {
-                current[part] = {};
+                // Preserve arrays when the next segment is a numeric index.
+                current[part] = /^\d+$/.test(parts[i + 1]) ? [] : {};
             }
             current = current[part];
         }
 
-        current[parts[parts.length - 1]] = value;
+        const lastPart = parts[parts.length - 1];
+        if (!UNSAFE_KEYS.has(lastPart)) {
+            current[lastPart] = value;
+        }
 
         return obj;
     }
 
-    private deleteJSONKeyByDotPath<T>(obj: T, path: string): any {
+    private deleteJSONKeyByDotPath<S>(obj: S, path: string): S {
         const parts = path.split('.');
         let current: any = obj;
 
         for (let i = 0; i < parts.length - 1; i++) {
             const part = parts[i];
-            if (typeof current !== 'object' || current === null || !(part in current)) {
+            if (UNSAFE_KEYS.has(part) || typeof current !== 'object' || current === null || !(part in current)) {
                 return obj;
             }
             current = current[part];
         }
 
         const lastPart = parts[parts.length - 1];
-        if (typeof current === 'object' && current !== null && lastPart in current) {
+        if (!UNSAFE_KEYS.has(lastPart) && typeof current === 'object' && current !== null && lastPart in current) {
             delete current[lastPart];
         }
 
