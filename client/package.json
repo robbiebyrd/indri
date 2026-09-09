@@ -8,7 +8,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types services/game-state-parser.node-test.ts"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
@@ -39,9 +41,7 @@
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
     "react-native-web": "~0.20.0",
-    "react-native-webview": "13.13.5",
-    "react-select": "^5.10.2",
-    "yarn": "^1.22.22"
+    "react-native-webview": "13.13.5"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
