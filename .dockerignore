@@ -1,0 +1,14 @@
+.env
+.git
+.gitignore
+*.md
+client/node_modules
+bin
+mongodb.key
+.aid
+.wiz
+.claude
+.codecontext
+.codex
+.mdkb
+.DS_Store

@@ -35,7 +35,7 @@ func (h *Handler) Handle(
 
 	sessionId, err := cs.GetKeyAsString("sessionId")
 	if err != nil {
-		_ = cs.Write([]byte(`{"authenticated": false, "stage": { "currentScene": "login"}`))
+		_ = cs.Write([]byte(`{"authenticated": false, "stage": { "currentScene": "login"}}`))
 		return fmt.Errorf("unable to get userId: %w", err)
 	}
 

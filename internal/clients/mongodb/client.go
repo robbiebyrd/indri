@@ -28,16 +28,16 @@ func New(ctx context.Context) (*Client, error) {
 
 	vars := envVars.GetEnv()
 
-	log.Printf("Connecting to MongoDB at %s\n", vars.MongoURI)
+	log.Printf("Connecting to MongoDB database %q\n", vars.MongoDatabase)
 
 	mongoClient, err := mongo.Connect(options.Client().ApplyURI(vars.MongoURI))
 	if err != nil {
-		log.Fatal(fmt.Errorf("could not configure connection to MongoDB, exiting: %v", err))
+		return nil, fmt.Errorf("could not configure connection to MongoDB: %w", err)
 	}
 
 	err = mongoClient.Ping(ctx, readpref.Primary())
 	if err != nil {
-		log.Fatal(fmt.Errorf("could not ping MongoDB because it appears offline, exiting: %v", err))
+		return nil, fmt.Errorf("could not ping MongoDB because it appears offline: %w", err)
 	}
 
 	client := mongox.NewClient(mongoClient, &mongox.Config{})
@@ -45,7 +45,7 @@ func New(ctx context.Context) (*Client, error) {
 
 	log.Println("successfully connected to MongoDB")
 
-	mongodbClient := &Client{
+	mongodbClient = &Client{
 		Database:    database,
 		ORM:         client,
 		MongoClient: mongoClient,

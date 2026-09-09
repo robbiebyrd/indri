@@ -43,7 +43,7 @@ func (h *Handler) Handle(
 
 	_, err := cs.GetKeyAsString("sessionId")
 	if err != nil {
-		_ = cs.Write([]byte(`{"authenticated": false, "stage": { "currentScene": "login"}`))
+		_ = cs.Write([]byte(`{"authenticated": false, "stage": { "currentScene": "login"}}`))
 		return fmt.Errorf("unable to get userId: %w", err)
 	}
 
@@ -120,8 +120,6 @@ func (h *Handler) handleGameInquiry(decodedMsg map[string]interface{}) (*[]byte,
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Println(string(jsonBytes))
 
 	return &jsonBytes, nil
 }

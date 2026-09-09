@@ -33,7 +33,7 @@ func (s *Store) UnsetHost(id string) error {
 	}
 
 	for pId := range g.Players {
-		err = s.UpdateField(id, "players."+pId+".host", true)
+		err = s.UpdateField(id, "players."+pId+".host", false)
 		if err != nil {
 			return err
 		}

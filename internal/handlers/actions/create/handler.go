@@ -28,23 +28,16 @@ func (h *Handler) Handle(
 ) error {
 	cs := connection.NewService(s, h.i.MelodyClient)
 
-	fmt.Println(decodedMsg)
-
 	gameCode, teamId, err := utils.RequireGameCodeAndTeamID(decodedMsg)
 	if err != nil {
-		fmt.Println(err)
-		return fmt.Errorf("game code not provided")
+		return fmt.Errorf("game code not provided: %w", err)
 	}
 
-	gamePrivate := false
-
-	if gamePrivateRequest, ok := decodedMsg["private"]; !ok {
-		gamePrivate = gamePrivateRequest.(bool)
-	}
+	gamePrivate, _ := decodedMsg["private"].(bool)
 
 	sessionId, err := cs.GetKeyAsString("sessionId")
 	if err != nil {
-		_ = cs.Write([]byte(`{"authenticated": false, "stage": { "currentScene": "login"}`))
+		_ = cs.Write([]byte(`{"authenticated": false, "stage": { "currentScene": "login"}}`))
 		return fmt.Errorf("unable to get userId: %w", err)
 	}
 
