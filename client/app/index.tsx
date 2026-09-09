@@ -22,7 +22,17 @@ export default function Index() {
     // side effect) and close it on unmount to avoid leaking connections.
     const wsRef = useRef<MessageHandler | undefined>(undefined)
     if (!wsRef.current) {
-        wsRef.current = new MessageHandler(process.env.EXPO_PUBLIC_API_URL || "", userDispatch, gameDispatch, gameListDispatch)
+        // An empty URL is not a harmless default: WebSocket("") resolves
+        // against the page origin, so the app silently dials Metro on :8081
+        // and looks like a broken server rather than missing config.
+        const apiUrl = process.env.EXPO_PUBLIC_API_URL
+        if (!apiUrl) {
+            console.error(
+                "EXPO_PUBLIC_API_URL is not set. Copy client/.env.example to client/.env " +
+                "and restart Metro — EXPO_PUBLIC_* values are inlined at build time.",
+            )
+        }
+        wsRef.current = new MessageHandler(apiUrl ?? "", userDispatch, gameDispatch, gameListDispatch)
     }
     const ws: MessageHandler = wsRef.current!
 
