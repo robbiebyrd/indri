@@ -1,6 +1,5 @@
 import {Button, Pressable, StyleSheet, Text, View} from 'react-native'
 import {useEffect, useRef, useState} from "react"
-import {Link} from "expo-router";
 import {MessageHandler} from "@/services/message-handler";
 import Login from "@/components/auth/login";
 import {useGameState} from "@/providers/game-state/use-game-state";
@@ -48,10 +47,6 @@ export default function Index() {
 
     return (
         <View style={styles.container}>
-            {/* TEMPORARY — story 012 only. There is no other way into /board/spike
-                from the app, and the indriclient:// deep link does not work under
-                Expo Go. Delete this together with app/board/spike.tsx. */}
-            {__DEV__ && <Link href="/board/spike" style={styles.spikeLink}>Open /board/spike →</Link>}
             {!userState && <Login ws={ws}/>}
             {userState && "id" in userState && !gameState && (
                 <>
@@ -130,11 +125,5 @@ const styles = StyleSheet.create({
         color: 'white',
         fontSize: 80,
         textAlign: 'center',
-    },
-    // TEMPORARY — remove with the spike link above.
-    spikeLink: {
-        color: '#2563eb',
-        padding: 12,
-        fontSize: 16,
     }
 });
