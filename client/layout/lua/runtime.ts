@@ -77,8 +77,13 @@ const DISPOSED_ERROR = "lua runtime is disposed"
  * Carries a Lua-side message out of the operation and into `guard`'s catch, so
  * that Lua failures and JS failures share one exit path — and therefore one
  * stack restore and one `onError` call.
+ *
+ * Exported for other code building on `guard`: a Lua message thrown as one of
+ * these is reported verbatim, whereas any other error is prefixed with its JS
+ * type, which would bury `board:3: attempt to index a nil value` under
+ * `Error:`.
  */
-class LuaScriptError extends Error {}
+export class LuaScriptError extends Error {}
 
 export class LuaRuntime {
     private L: lua_State | null

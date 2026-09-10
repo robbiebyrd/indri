@@ -6,6 +6,12 @@ import {knownWidgetTypes} from "@/layout/registry/registry"
 import {SceneView} from "./scene-view"
 import {StyledBox} from "./styled-box"
 
+// Side-effect import: populates the widget registry that `knownWidgetTypes`
+// below and `widget-host.tsx` both read. It lives here because this is the
+// component that first needs the registry filled, and because a registration
+// step in a separate bootstrap file is one that eventually gets forgotten.
+import "./widgets"
+
 import type {LayoutIssue} from "@/layout/schema/layout"
 
 export interface BoardViewProps {
