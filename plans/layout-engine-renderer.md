@@ -221,8 +221,29 @@ client/app/board/index.tsx            # live renderer route
 
 - `GameStateParser.reapply()` deep-clones the **entire** game via `JSON.parse(JSON.stringify(...))` and
   replays **all** retained deltas on **every** message. Deltas are pruned only on keyframe, and keyframes
-  arrive only on create/join/refresh/reconnect. Putting layouts in game state directly inflates both terms.
-  Step 13 measures it; nobody optimises before that.
+  arrive only on create/join/refresh/reconnect.
+- **MEASURED (Step 13, 200-widget layout, 49.8 KB serialised, Node 22 / M-series):**
+
+  | retained deltas | median ms | per-delta |
+  |---|---|---|
+  | 1 | 0.205 | — |
+  | 10 | 0.221 | 0.022 |
+  | 100 | 0.315 | 0.003 |
+  | 500 | 0.680 | 0.001 |
+
+  Deep clone alone is 0.206 ms and flat, so at low backlogs the clone *is* the entire cost. Replay adds
+  ~1 µs per retained delta. The model `0.21 + N × 0.001 ms` fits every point; break-even is ~200 deltas.
+- **Conclusion: layouts are not the problem — unbounded delta retention is.** Widget count is the benign
+  term (300 widgets ≈ 75 KB ≈ 0.3 ms, flat per message). The retained-delta count has no ceiling: a
+  30-minute session at 1 delta/sec retains ~1800 deltas → ~2.1 ms per message here, and Hermes on a
+  mid-range phone is realistically 3–10x slower, so 6–20 ms synchronously on the JS thread before React even
+  re-renders. Putting layouts in game state roughly doubles a sub-millisecond constant; it did not create
+  this.
+- **Deferred fix (not in either plan):** fold settled deltas into `baseState` once they are older than a
+  small reorder window, advancing `cutoff` and dropping them — reusing the `deleteBefore`/`cutoff` machinery
+  keyframes already use. Cost then becomes flat regardless of session length. Cheaper things to price first:
+  `structuredClone` instead of the JSON round-trip, or a periodic server-side keyframe, which needs no
+  client change at all.
 - Every delta yields fresh object identity, defeating naive memoisation → widgets must be id-keyed and
   `React.memo`-wrapped, or the whole tree re-reconciles per message.
 - Collision is O(n²) per check. At the PoC cap (≤300 widgets) that is ~90k comparisons — fine. No spatial

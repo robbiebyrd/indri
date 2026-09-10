@@ -21,14 +21,23 @@ configuration through a panel auto-drawn from the field descriptors declared in 
   computes the minimal delta for free. A whole-layout replace would re-send every widget on every edit and
   waste the entire delta pipeline.
 - Writes are confined to `game.PublicData["layout"]`. Nothing else in the game document is reachable.
-- Authorization copies `internal/handlers/actions/kick/handler.go` exactly: resolve the caller from **their
-  own** connection's `sessionId` key, never from a client-supplied `userId`.
+- **Handlers are now connection-independent** (`internal/handlers/actions/handler.go`). A handler takes an
+  `actions.Request{Session, Payload}` and returns an `actions.Result`. The transport authenticates and
+  resolves the session *before* dispatch, so a handler cannot get caller identity wrong — the old "resolve
+  from your own connection's `sessionId`, never from a client-supplied `userId`" rule is now structural
+  rather than a discipline each handler had to keep. `kick` is still the shape to copy.
+- **Two transports serve the same handlers.** `internal/transport/ws` and `internal/transport/graphql` both
+  dispatch into the same action logic, so a new action is only half-added until it exists in *both*: the WS
+  action registry AND `schema.graphqls` + a resolver (gqlgen codegen). Otherwise it is silently unreachable
+  for GraphQL clients.
 - Structural validation (bounds, overlap, depth, reserved keys) runs **in Go**. The TS validator from Plan A
   is UX feedback; the client is not a security boundary. This duplication across two languages is
   unavoidable and intentional.
 - Editor gestures compute a candidate rect, run Plan A's `canPlace()` locally for instant feedback, then
   emit the op. The server re-validates and is the authority; the local check only avoids a doomed round trip.
-- Key existing files: `internal/handlers/actions/kick/handler.go` (auth reference),
+- Key existing files: `internal/handlers/actions/kick/handler.go` (auth + Result shape reference),
+  `internal/handlers/actions/handler.go` (Request/Result/MessageHandler),
+  `internal/transport/graphql/schema.graphqls` and `resolvers/schema.resolvers.go` (mutation parity),
   `internal/repo/game/game.go:235` (`Mutate`), `internal/repo/game/interface.go` (`Storer` — must be
   updated in step with any new exported method), `internal/services/mutation/mutation_test.go` (test style).
 
@@ -41,7 +50,22 @@ contents are opaque to the server and validated only by the client registry.
 
 ## Verified Go signatures
 
+Re-verified after the transport refactor (`d03e6b0`, `204445a`) — the handler contract changed.
+
 ```go
+// internal/handlers/actions/handler.go — the CURRENT handler contract.
+// Session is already authenticated and resolved by the transport.
+type Request struct {
+    Session *models.Session        // nil only for register/login/reconnect
+    Payload map[string]interface{}
+}
+type Result struct {
+    Responses     [][]byte  // messages back to the caller, in order
+    Session       *models.Session
+    DisconnectIDs []string
+}
+type MessageHandler interface{ Handle(Request) (Result, error) }
+
 // internal/repo/game/game.go — note: Mutate takes NO context
 func (s *Store) Mutate(id string, apply func(g *models.Game) error) error
 func (s *Store) UpdateField(id string, key string, value interface{}) error
@@ -51,6 +75,9 @@ var mutation.ErrAbort = errors.New("mutation aborted")
 // internal/models/game.go
 PublicData map[string]interface{} `bson:"data" json:"data,omitempty"`
 ```
+
+Gone since the first draft: `*melody.Session`, `h.i.MelodyClient`, `connection.NewService(...)` and
+`cs.GetKeyAsString("sessionId")`. A handler no longer touches the connection at all.
 
 ## Op vocabulary
 
@@ -71,20 +98,33 @@ be two names for one write.
 
 | Condition | Result |
 |---|---|
-| Connection has no `sessionId` key | reject — "must be logged in to edit a layout" |
-| Session resolves but `UserID` is nil | reject — "calling session has no user id" |
-| `session.GameID` ≠ the target game | reject — "caller is not in game" |
+| `req.Session == nil` (unauthenticated) | reject — "must be logged in to edit a layout" |
+| `req.Session.UserID == nil` | reject — "calling session has no user id" |
+| `req.Session.GameID` ≠ the target game | reject — "caller is not in game" |
 | `g.Players[userId].Host` is false | reject — "caller is not the host" |
 | Host, but op fails structural validation | reject with the specific issue; no write |
 | Host, valid op | `Mutate` → `Diff` → publish → broadcast |
 
+The first two rows are now cheap because the transport resolved the session already. Caller identity comes
+from `req.Session` and there is no code path by which a `userId` in `req.Payload` could become the caller —
+which is what makes the old spoofing risk structurally absent rather than merely tested for.
+
 ## Research Findings
 
-- `internal/handlers/actions/kick/handler.go` is the only existing handler that does host authorization; it
-  resolves `cs.GetKeyAsString("sessionId")` → `SessionService.Get` → checks `callerSession.GameID` matches,
-  then `g.Players[*callerSession.UserID].Host`. Copy this shape rather than inventing one.
-- `TestRegisterHandlers_CoversEveryActionPackage` fails if a package under `internal/handlers/actions/` is
-  never wired into `boot.registerHandlers` — an unregistered action is silently unreachable.
+- **The transport was refactored mid-plan** (`d03e6b0`, `204445a`, `f3397ef`). Handlers are now
+  connection-independent and a GraphQL transport sits alongside WebSocket. Everything below was re-verified
+  against the current tree, not the tree this plan was first written against.
+- `internal/handlers/actions/kick/handler.go` is still the only handler doing host authorization, but now
+  reads `req.Session` directly: nil check → `UserID` nil check → `GameID` match → `g.Players[uid].Host`. It
+  returns `actions.Result{DisconnectIDs: [...]}` and lets the transport do the disconnecting. Copy this shape.
+- `TestRegisterHandlers_CoversEveryActionPackage` (`internal/services/boot/handlers_test.go:49`) fails if a
+  package under `internal/handlers/actions/` is never wired into `boot.registerHandlers` — an unregistered
+  action is silently unreachable. **Note this guards the WS registry only; nothing equivalent guards GraphQL
+  mutation parity**, so a layout action reachable over WS but absent from `schema.graphqls` would pass CI.
+- GraphQL resolvers are thin: each mutation is one line, `r.dispatch(ctx, "<action>", payload)`
+  (`resolvers/schema.resolvers.go:60`). Adding an action means a `Mutation` field in `schema.graphqls`, a
+  gqlgen regeneration, and a one-line resolver. Auth comes from the Authorization bearer token there, not a
+  socket key — another reason the handler must not care where the session came from.
 - `internal/repo/game/interface.go` asserts `var _ Storer = (*Store)(nil)`. Adding an exported `Store` method
   without updating `Storer` breaks the build by design. This plan adds none — it uses `Mutate` only.
 - `Store.Mutate` snapshots before `apply`, diffs after a committed save, and publishes automatically. No
@@ -112,8 +152,13 @@ be two names for one write.
 
 ## Security Considerations
 
-- **This action lets a client write game state.** Authorization is host-only and resolved from the caller's
-  own connection — never from a client-supplied `userId`. The matrix above is the contract.
+- **This action lets a client write game state.** Authorization is host-only. Since the transport refactor
+  the caller comes from `req.Session`, already authenticated before dispatch, so identity spoofing from the
+  payload is structurally impossible rather than something each handler must remember to avoid. The matrix
+  above is the contract.
+- **Both transports must enforce the same thing.** WS authenticates from a socket key, GraphQL from an
+  Authorization bearer token. The handler is indifferent, which is the point — but it means a weakness in
+  either transport's session resolution reaches this action. Do not re-derive identity here to compensate.
 - Write scope is `game.PublicData["layout"]` and nothing else. The handler must never touch `privateData`,
   `Players`, `Teams`, or `Stage`. Assert this in a test that mutates a full game and diffs everything else.
 - Structural validation is enforced in Go. Bounds, overlap, sub-grid depth and reserved keys are rejected
@@ -213,46 +258,49 @@ func validateLayout(layout map[string]interface{}) error
 
 ### Step 3: the `layout` handler — auth, mutate, register
 - **Depends on:** Steps 1, 2
-- **Test:** `internal/handlers/actions/layout/handler_test.go` — no `sessionId` key rejects; session in a
-  different game rejects; non-host rejects; **a client-supplied `userId` claiming host is ignored**; a valid
-  `addWidget` mutates only `data.layout` and leaves `players`, `teams`, `stage` and `privateData` byte-identical;
-  `removeWidget` on a missing id returns `mutation.ErrAbort` and produces no write.
-- **Implement:** `internal/handlers/actions/layout/handler.go`; register in `boot.registerHandlers`.
+- **Test:** `internal/handlers/actions/layout/handler_test.go` — a nil `req.Session` rejects; a session in a
+  different game rejects; non-host rejects; **a `userId` in `req.Payload` claiming host is ignored** (it is
+  not a code path, so the test pins that it stays one); a valid `addWidget` mutates only `data.layout` and
+  leaves `players`, `teams`, `stage` and `privateData` byte-identical; `removeWidget` on a missing id returns
+  `mutation.ErrAbort` and produces no write.
+- **Implement:** `internal/handlers/actions/layout/handler.go`; register in `boot.registerHandlers`; add the
+  `layout` mutation to `internal/transport/graphql/schema.graphqls` and a resolver.
 - **Code:**
 ```go
-func (h *Handler) Handle(s *melody.Session, decodedMsg map[string]interface{}) error {
-    cs := connection.NewService(s, h.i.MelodyClient)
+// Connection-independent: the transport authenticated the caller and resolved
+// the session before dispatch, so identity cannot be spoofed from the payload.
+func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
+    if req.Session == nil || req.Session.UserID == nil {
+        return actions.Result{}, fmt.Errorf("must be logged in to edit a layout")
+    }
 
-    gameCode, err := handlerUtils.RequireGameCode(decodedMsg)
-    if err != nil { return err }
-
-    // Authorize the CALLER from their own connection, never a supplied userId.
-    callerSessionId, err := cs.GetKeyAsString("sessionId")
-    if err != nil { return fmt.Errorf("must be logged in to edit a layout: %w", err) }
-
-    callerSession, err := h.i.SessionService.Get(*callerSessionId)
-    if err != nil { return fmt.Errorf("could not resolve calling session: %w", err) }
-    if callerSession.UserID == nil { return fmt.Errorf("calling session has no user id") }
+    gameCode, err := handlerUtils.RequireGameCode(req.Payload)
+    if err != nil { return actions.Result{}, err }
 
     g, err := h.i.GameService.GetByCode(*gameCode)
-    if err != nil { return err }
+    if err != nil { return actions.Result{}, err }
     gameId := g.ID.Hex()
 
-    if callerSession.GameID == nil || *callerSession.GameID != gameId {
-        return fmt.Errorf("caller %v is not in game %v", *callerSession.UserID, *gameCode)
+    if req.Session.GameID == nil || *req.Session.GameID != gameId {
+        return actions.Result{}, fmt.Errorf("caller %v is not in game %v", *req.Session.UserID, *gameCode)
     }
-    if !g.Players[*callerSession.UserID].Host {
-        return fmt.Errorf("caller %v is not the host of game %v", *callerSession.UserID, *gameCode)
+    if !g.Players[*req.Session.UserID].Host {
+        return actions.Result{}, fmt.Errorf("caller %v is not the host of game %v", *req.Session.UserID, *gameCode)
     }
 
-    op, err := decodeOp(decodedMsg)
-    if err != nil { return err }
+    op, err := decodeOp(req.Payload)
+    if err != nil { return actions.Result{}, err }
 
     // Mutate diffs before/after and publishes automatically — do not publish here.
-    return h.i.GameRepo.Mutate(gameId, func(g *models.Game) error {
+    // The delta IS the response; nothing goes in Result.Responses.
+    return actions.Result{}, h.i.GameRepo.Mutate(gameId, func(g *models.Game) error {
         return applyLayoutOp(g, op)   // writes only g.PublicData["layout"], then validates
     })
 }
+```
+```graphql
+# schema.graphqls — without this the action is unreachable for GraphQL clients
+layout(code: String!, op: String!, args: JSON): JSON
 ```
 - **Constraint:** `Mutate` takes **no context** — do not invent one. It publishes on commit; adding an
   explicit publish would double-broadcast.
@@ -260,8 +308,12 @@ func (h *Handler) Handle(s *melody.Session, decodedMsg map[string]interface{}) e
   no delta occur.
 - **Constraint:** the package must be registered in `boot.registerHandlers` or
   `TestRegisterHandlers_CoversEveryActionPackage` fails.
-- **Constraint:** protocol errors surfaced to clients are `models.WSError` values written with
-  `connection.Service.WriteError` — match how existing handlers report.
+- **Constraint:** **the action is not done until BOTH transports expose it.** Nothing in CI catches a missing
+  GraphQL mutation, so add the schema field, run gqlgen, and add the one-line
+  `r.dispatch(ctx, "layout", ...)` resolver in the same change. Consider extending the coverage test to
+  assert WS/GraphQL parity — that gap is worth closing while it is small.
+- **Constraint:** errors are returned, not written to a connection. The transport decides how to surface
+  them, which is why `models.WSError`/`WriteError` no longer appear here.
 - **Validation:** `go test -race ./... && go vet ./...`
 
 ### Step 4: client layout mutation sender
@@ -411,7 +463,9 @@ import Select from "@/components/display/select"
 - [ ] A host adds a widget from the palette and removes it; both propagate to all clients.
 - [ ] A host edits a widget's config through the auto-drawn panel; the change propagates.
 - [ ] A non-host attempting any layout op is rejected with a clear error and no state change.
-- [ ] A client-supplied `userId` claiming host is ignored — authorization comes from the caller's own session.
+- [ ] A `userId` in the payload claiming host is ignored — authorization comes from `req.Session`.
+- [ ] The `layout` action is reachable over **both** transports: registered in `boot.registerHandlers` for
+      WebSocket, and present in `schema.graphqls` with a resolver for GraphQL.
 - [ ] The server rejects overlapping non-absolute widgets, out-of-bounds rects, sub-grids past depth 4, and
       any `privateData` key — independently of the client.
 - [ ] A layout op mutates `data.layout` and nothing else in the game document.
