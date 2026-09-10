@@ -1,3 +1,8 @@
+---
+status: approved
+approved_at: "2026-09-10T00:58:00.942Z"
+updated: "2026-09-10T00:58:00.942Z"
+---
 # Plan B: Layout authoring — server action & editor
 
 **Created:** 2026-09-09 | **Status:** Draft | **Effort:** L | **Branch:** `POC-00001/layout-authoring-editor`
