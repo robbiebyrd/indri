@@ -31,8 +31,20 @@ declare module "fengari" {
         lua_setglobal(L: lua_State, name: Uint8Array): void
         lua_getglobal(L: lua_State, name: Uint8Array): number
         lua_pcall(L: lua_State, nargs: number, nresults: number, errfunc: number): number
-        lua_tostring(L: lua_State, idx: number): Uint8Array
         lua_type(L: lua_State, idx: number): number
+
+        /**
+         * Frees the state's stack. Nothing may touch the state afterwards.
+         */
+        lua_close(L: lua_State): void
+
+        /**
+         * Both return null when the value has no string form — `lua_tolstring`
+         * converts only strings and numbers, so a table error object (from
+         * `error({...})`) yields null rather than a description.
+         */
+        lua_tostring(L: lua_State, idx: number): Uint8Array | null
+        lua_tojsstring(L: lua_State, idx: number): string | null
 
         /**
          * Install a debug hook. Verified against fengari 0.1.5: the callback is

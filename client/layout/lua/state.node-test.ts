@@ -10,19 +10,25 @@ import type {lua_State} from "fengari";
 
 type EvalResult = {ok: true; value: string} | {ok: false; error: string};
 
+/** fengari returns null for a value with no string form, e.g. a table. */
+function topAsString(L: lua_State): string {
+    const raw = lua.lua_tostring(L, -1);
+    return raw === null ? "<no string form>" : to_jsstring(raw);
+}
+
 /** Minimal load+call used only by this spike. Story 019 replaces it. */
 function evalLua(L: lua_State, src: string): EvalResult {
     if (lauxlib.luaL_loadbuffer(L, to_luastring(src), null, to_luastring("=test")) !== lua.LUA_OK) {
-        const error = to_jsstring(lua.lua_tostring(L, -1));
+        const error = topAsString(L);
         lua.lua_pop(L, 1);
         return {ok: false, error};
     }
     if (lua.lua_pcall(L, 0, 1, 0) !== lua.LUA_OK) {
-        const error = to_jsstring(lua.lua_tostring(L, -1));
+        const error = topAsString(L);
         lua.lua_pop(L, 1);
         return {ok: false, error};
     }
-    const value = to_jsstring(lua.lua_tostring(L, -1));
+    const value = topAsString(L);
     lua.lua_pop(L, 1);
     return {ok: true, value};
 }

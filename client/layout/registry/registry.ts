@@ -6,22 +6,41 @@
  * This module is where those shapes live, paired with the hand-written field
  * descriptors that drive a config panel.
  *
- * Pure data and zod types only: no react-native, no React. It has to load in
+ * Pure data and zod types only: no react-native, and React appears as a TYPE
+ * ONLY. `import type` is erased before execution, so this module still loads in
  * bare Node for the tests.
  */
 
+import type {ComponentType} from "react"
 import type {z} from "zod"
 
+import type {Widget} from "../schema/widget.ts"
 import type {FieldDescriptor} from "./fields.ts"
+
+/**
+ * What every widget renderer is handed.
+ *
+ * `config` is NOT pre-parsed into the widget's own config type. The registry
+ * stores erased `WidgetDefinition`s, and a `ComponentType<P>` is contravariant
+ * in `P`, so a component typed on a narrow config could not be stored in the
+ * erased map at all. Each renderer therefore parses `widget.config` with its
+ * own schema, which is the same contract the rest of this module already uses.
+ */
+export interface WidgetRenderProps {
+    /** The widget's key in its parent's widget map. Stable across deltas. */
+    id: string
+    /** The whole widget, already structurally validated by `parseLayout`. */
+    widget: Widget
+}
 
 /**
  * Everything the app needs to know about one widget type.
  *
- * `Component` (the React renderer) and `api()` (the Lua host functions) are
- * deliberately ABSENT. They arrive with the renderer and the Lua host, and
- * stub versions now would be placeholders for work that has not been designed
- * yet. Both are additive: a later story adds the properties without changing
- * any of the members below, so nothing written against this type breaks.
+ * `api()` (the Lua host functions) is deliberately ABSENT. It arrives with the
+ * Lua host, and a stub now would be a placeholder for work that has not been
+ * designed yet. It is additive: a later story adds the property without
+ * changing any of the members below, so nothing written against this type
+ * breaks.
  *
  * `C` is constrained to an index-signature-compatible object so that a
  * concrete `WidgetDefinition<TextConfig>` can be stored in the registry's
@@ -38,6 +57,17 @@ export interface WidgetDefinition<C extends Record<string, unknown> = Record<str
     fields: FieldDescriptor[]
     /** The config a freshly created widget of this type starts with. */
     defaults: C
+    /**
+     * The React Native component that draws this widget.
+     *
+     * OPTIONAL, and deliberately so. A definition may exist purely so that a
+     * type is "known" to `parseLayout` and editable by a config panel before
+     * anyone has drawn it, and keeping it optional is also what lets this
+     * module stay importable from bare Node — nothing here ever *calls* React.
+     * A registered type with no `Component` renders a visible placeholder
+     * rather than nothing; see `components/board/widget-host.tsx`.
+     */
+    Component?: ComponentType<WidgetRenderProps>
 }
 
 // Insertion-ordered so `listWidgets` is stable, which keeps any UI built on it
