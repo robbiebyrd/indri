@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"sync"
 
 	pionice "github.com/pion/ice/v4"
 	pion "github.com/pion/webrtc/v4"
@@ -124,4 +126,82 @@ func answerOffer(
 	}
 
 	return pc.LocalDescription(), nil
+}
+
+// peer owns one PeerConnection plus the rtcConn built on its DataChannel, and
+// guarantees the pair is torn down exactly once no matter which callback
+// notices the connection died.
+//
+// peer deliberately does not know about the Registry that will eventually
+// hold every peer (that type is introduced by the transport in a later
+// story): onClose is a callback supplied by the constructor's caller, who is
+// responsible for deregistering the peer. peer's only job is to run that
+// callback, and close its own resources, exactly once.
+type peer struct {
+	pc   *pion.PeerConnection
+	conn *rtcConn
+
+	// teardown guards close so it runs exactly once regardless of which
+	// notification path gets there first -- see handleConnectionStateChange.
+	teardown sync.Once
+
+	// onClose deregisters this peer from whatever holds it (the Registry,
+	// once story 039 introduces one). May be nil for a peer that has not been
+	// registered anywhere yet.
+	onClose func()
+}
+
+// newPeer wires pc's connection-state callback to teardown and returns the
+// peer. conn may be nil for a peer that never reached an open DataChannel
+// (e.g. torn down by the pending-peer TTL before the client sent anything);
+// close tolerates that.
+func newPeer(pc *pion.PeerConnection, conn *rtcConn, onClose func()) *peer {
+	p := &peer{pc: pc, conn: conn, onClose: onClose}
+	pc.OnConnectionStateChange(p.handleConnectionStateChange)
+
+	return p
+}
+
+// handleConnectionStateChange is the pure decision of which states tear the
+// peer down. pion invokes it through the callback registered in newPeer, but
+// it is unexported and side-effect-free enough for tests to call directly,
+// which is what makes criteria 1-4 deterministic instead of dependent on a
+// real ICE failure.
+func (p *peer) handleConnectionStateChange(state pion.PeerConnectionState) {
+	switch state {
+	case pion.PeerConnectionStateFailed, pion.PeerConnectionStateClosed:
+		// Failed and Closed are the only terminal states. Disconnected is
+		// transient and recovers within pion's ~30s default window (see the
+		// plan's Research Findings); tearing down on it would drop players
+		// who would otherwise have reconnected.
+		p.teardown.Do(p.close)
+	case pion.PeerConnectionStateDisconnected:
+		// Deliberately not a teardown trigger -- see the comment above.
+	}
+}
+
+// close releases the peer's resources exactly once. It is only ever invoked
+// through p.teardown.Do: OnConnectionStateChange fires on a fresh goroutine
+// per invocation, while OnICEConnectionStateChange runs synchronously, with
+// no ordering guarantee between them, so two independent notification paths
+// can both observe the failure and race to tear down (pion issue #744).
+// sync.Once is what makes that race harmless rather than a double-close.
+func (p *peer) close() {
+	// pc.Close is idempotent (pion swaps an isClosed flag under its own
+	// lock and returns nil if it was already set), so calling it again when
+	// the state is already Closed is a safe no-op. It still must run for a
+	// Failed peer, which pion does not close automatically.
+	if err := p.pc.Close(); err != nil {
+		log.Printf("webrtc: closing peer connection during teardown: %v", err)
+	}
+
+	if p.conn != nil {
+		if err := p.conn.Close(); err != nil {
+			log.Printf("webrtc: closing conn during peer teardown: %v", err)
+		}
+	}
+
+	if p.onClose != nil {
+		p.onClose()
+	}
 }

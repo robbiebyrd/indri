@@ -6,6 +6,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -493,5 +495,213 @@ func TestAnswerOffer_DataChannelMessagesFlowBothWays(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("client never received the server's message")
+	}
+}
+
+// -- Story 038-b855: peer lifecycle and teardown --
+
+// newTestPeerConnection builds a real, unnegotiated PeerConnection for tests
+// that need a *pion.PeerConnection to satisfy peer.pc (pc.Close is cheap and
+// requires no signalling), so peer.close's call to p.pc.Close() has something
+// real to operate on without dragging in a full offer/answer exchange.
+func newTestPeerConnection(t *testing.T) *pion.PeerConnection {
+	t.Helper()
+
+	api, mux, err := newAPI(Config{UDPPort: 0})
+	if err != nil {
+		t.Fatalf("newAPI: %v", err)
+	}
+	t.Cleanup(func() { _ = mux.Close() })
+
+	pc, err := api.NewPeerConnection(pion.Configuration{})
+	if err != nil {
+		t.Fatalf("NewPeerConnection: %v", err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+
+	return pc
+}
+
+// newTestPeerRTCConn builds an rtcConn backed by a fakeSink (defined in
+// conn_test.go), so teardown tests can assert the conn was actually closed
+// without a real DataChannel.
+func newTestPeerRTCConn() *rtcConn {
+	return newConn("session-1", newFakeSink())
+}
+
+// assertConnClosed fails the test unless conn's drain goroutine has stopped,
+// which is only true once Close has actually run -- proof rather than
+// assumption, mirroring TestRTCConn_CloseStopsDrainGoroutine.
+func assertConnClosed(t *testing.T, conn *rtcConn) {
+	t.Helper()
+
+	select {
+	case <-conn.stopped:
+	case <-time.After(testTimeout):
+		t.Fatal("conn was not closed by peer teardown")
+	}
+}
+
+// assertConnNotClosed fails the test if conn's drain goroutine has already
+// stopped.
+func assertConnNotClosed(t *testing.T, conn *rtcConn) {
+	t.Helper()
+
+	select {
+	case <-conn.stopped:
+		t.Fatal("conn was closed, but this state must not tear the peer down")
+	default:
+	}
+}
+
+// Criterion 1: PeerConnectionStateFailed tears the peer down -- onClose fires
+// exactly once and the conn is closed. handleConnectionStateChange is called
+// directly so the assertion is deterministic, not dependent on a real ICE
+// failure (per the story's testing notes).
+func TestPeer_FailedTearsDownConnAndFiresOnCloseOnce(t *testing.T) {
+	conn := newTestPeerRTCConn()
+	pc := newTestPeerConnection(t)
+
+	var closes int32
+	p := &peer{pc: pc, conn: conn, onClose: func() { atomic.AddInt32(&closes, 1) }}
+
+	p.handleConnectionStateChange(pion.PeerConnectionStateFailed)
+
+	if got := atomic.LoadInt32(&closes); got != 1 {
+		t.Fatalf("onClose called %d times on Failed, want 1", got)
+	}
+
+	assertConnClosed(t, conn)
+}
+
+// Criterion 2: PeerConnectionStateClosed does the same as Failed.
+func TestPeer_ClosedTearsDownConnAndFiresOnCloseOnce(t *testing.T) {
+	conn := newTestPeerRTCConn()
+	pc := newTestPeerConnection(t)
+
+	var closes int32
+	p := &peer{pc: pc, conn: conn, onClose: func() { atomic.AddInt32(&closes, 1) }}
+
+	p.handleConnectionStateChange(pion.PeerConnectionStateClosed)
+
+	if got := atomic.LoadInt32(&closes); got != 1 {
+		t.Fatalf("onClose called %d times on Closed, want 1", got)
+	}
+
+	assertConnClosed(t, conn)
+}
+
+// Criterion 3: PeerConnectionStateDisconnected must NOT tear the peer down.
+// Disconnected is transient and recovers within pion's ~30s window; tearing
+// down here would drop players who would otherwise have reconnected.
+func TestPeer_DisconnectedDoesNotTearDown(t *testing.T) {
+	conn := newTestPeerRTCConn()
+	pc := newTestPeerConnection(t)
+
+	var closes int32
+	p := &peer{pc: pc, conn: conn, onClose: func() { atomic.AddInt32(&closes, 1) }}
+
+	p.handleConnectionStateChange(pion.PeerConnectionStateDisconnected)
+
+	if got := atomic.LoadInt32(&closes); got != 0 {
+		t.Fatalf("onClose called %d times on Disconnected, want 0", got)
+	}
+
+	assertConnNotClosed(t, conn)
+}
+
+// A sequential Failed-then-Closed pair (single goroutine) must still only
+// tear down once. This isolates sync.Once's basic guarantee from the
+// concurrent race exercised below.
+func TestPeer_TeardownRunsOnceAcrossSequentialFailedThenClosed(t *testing.T) {
+	conn := newTestPeerRTCConn()
+	pc := newTestPeerConnection(t)
+
+	var closes int32
+	p := &peer{pc: pc, conn: conn, onClose: func() { atomic.AddInt32(&closes, 1) }}
+
+	p.handleConnectionStateChange(pion.PeerConnectionStateFailed)
+	p.handleConnectionStateChange(pion.PeerConnectionStateClosed)
+
+	if got := atomic.LoadInt32(&closes); got != 1 {
+		t.Fatalf("onClose called %d times across Failed then Closed, want 1", got)
+	}
+}
+
+// Criteria 4 and 5: teardown runs exactly once even when state callbacks fire
+// concurrently. This reproduces, deterministically, the exact race the plan
+// documents: OnConnectionStateChange fires on a fresh goroutine per
+// invocation with no ordering guarantee against the synchronous
+// OnICEConnectionStateChange callback (pion issue #744). Run with -race; a
+// green result without -race proves nothing.
+func TestPeer_TeardownRunsExactlyOnceUnderConcurrentCallbacks(t *testing.T) {
+	conn := newTestPeerRTCConn()
+	pc := newTestPeerConnection(t)
+
+	var closes int32
+	p := &peer{pc: pc, conn: conn, onClose: func() { atomic.AddInt32(&closes, 1) }}
+
+	states := []pion.PeerConnectionState{pion.PeerConnectionStateFailed, pion.PeerConnectionStateClosed}
+
+	const n = 50
+
+	var wg sync.WaitGroup
+
+	wg.Add(n)
+
+	for i := range n {
+		go func(i int) {
+			defer wg.Done()
+
+			p.handleConnectionStateChange(states[i%len(states)])
+		}(i)
+	}
+
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&closes); got != 1 {
+		t.Fatalf("onClose called %d times under concurrent teardown, want exactly 1", got)
+	}
+
+	assertConnClosed(t, conn)
+}
+
+// newPeer must actually wire pc's OnConnectionStateChange to teardown, not
+// just expose a method a test can call directly. Closing a real
+// PeerConnection triggers pion's real (asynchronous, one-goroutine-per-call)
+// callback path end to end.
+func TestNewPeer_ClosingRealPeerConnectionTriggersTeardown(t *testing.T) {
+	conn := newTestPeerRTCConn()
+	pc := newTestPeerConnection(t)
+
+	onClose := make(chan struct{}, 1)
+	newPeer(pc, conn, func() { onClose <- struct{}{} })
+
+	if err := pc.Close(); err != nil {
+		t.Fatalf("pc.Close: %v", err)
+	}
+
+	select {
+	case <-onClose:
+	case <-time.After(testTimeout):
+		t.Fatal("onClose was not invoked after the real PeerConnection closed")
+	}
+
+	assertConnClosed(t, conn)
+}
+
+// newPeer must not panic or fire onClose spuriously when there is no conn yet
+// (e.g. a peer torn down by the pending-peer TTL before its DataChannel ever
+// opened -- Step 6).
+func TestPeer_CloseToleratesNilConn(t *testing.T) {
+	pc := newTestPeerConnection(t)
+
+	var closes int32
+	p := &peer{pc: pc, onClose: func() { atomic.AddInt32(&closes, 1) }}
+
+	p.handleConnectionStateChange(pion.PeerConnectionStateFailed)
+
+	if got := atomic.LoadInt32(&closes); got != 1 {
+		t.Fatalf("onClose called %d times, want 1", got)
 	}
 }
