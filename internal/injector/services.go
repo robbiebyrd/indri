@@ -11,6 +11,8 @@ import (
 	userService "github.com/robbiebyrd/indri/internal/services/user"
 	"github.com/robbiebyrd/indri/internal/transport"
 	graphqlTransport "github.com/robbiebyrd/indri/internal/transport/graphql"
+	restTransport "github.com/robbiebyrd/indri/internal/transport/rest"
+	sseTransport "github.com/robbiebyrd/indri/internal/transport/sse"
 )
 
 func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInjector) (*ServicesInjector, error) {
@@ -22,13 +24,25 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 		return nil, errors.New("clients were not passed to the repo injector")
 	}
 
-	// The GraphQL transport needs the session store (to authenticate bearer
-	// tokens), which only exists now, so it is built here and aggregated with
-	// the WebSocket transport from GetClients. Everything downstream targets the
+	// These transports need the session store (to authenticate bearer tokens),
+	// which only exists now, so they are built here and aggregated with the
+	// WebSocket transport from GetClients. Everything downstream targets the
 	// aggregate.
+	//
+	// sse is push-only and rest is request-only: together they are the third
+	// way to play, alongside WebSocket and GraphQL.
 	gql := graphqlTransport.New(repos.SessionRepo)
-	multi := transport.NewMulti(clients.Transport, gql)
-	gql.SetPeer(multi)
+	events := sseTransport.New(repos.SessionRepo)
+	api := restTransport.New(repos.SessionRepo)
+
+	multi := transport.NewMulti(clients.Transport, gql, events, api)
+
+	// Each needs the aggregate so a kick closes the target's connections on
+	// every transport, not just its own.
+	for _, t := range []interface{ SetPeer(transport.Transport) }{gql, events, api} {
+		t.SetPeer(multi)
+	}
+
 	clients.Transport = multi
 
 	gs, err := gameService.NewService(repos.GameRepo, repos.ScriptRepo)

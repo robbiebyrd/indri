@@ -5,9 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 Indri is a Go backend for real-time, multiplayer, browser/mobile party games. Clients talk to it over a
-swappable transport — WebSocket (`/ws`, JSON messages routed by an `action` field) or GraphQL
-(`/graphql`, typed mutations + a `gameUpdates` subscription) — behind the `internal/transport`
-interface. Game state lives in MongoDB; each write computes its own delta in application code and
+swappable transport — WebSocket (`/ws`, JSON messages routed by an `action` field), GraphQL
+(`/graphql`, typed mutations + a `gameUpdates` subscription), or REST+SSE (`/api/<action>` posts +
+a `/events` stream) — behind the `internal/transport` interface. Game state lives in MongoDB; each write computes its own delta in application code and
 publishes it on an event bus, which broadcasts it to everyone in that game. `client/` is a companion
 Expo/React Native reference client.
 
@@ -77,8 +77,28 @@ change stream. `docker-compose.yml` starts a standalone `mongod`.
 
 `internal/transport` decouples the wire protocol from everything above it: `Conn` (one connection) and
 `Transport` (the hub — `Handle`, `Register(mux)`, `Broadcast`/`BroadcastFilter`, `Conns`, `Close`). `ws`
-(melody — the only melody importer) and `graphql` (gqlgen) are adapters; `transport.Multi` aggregates
-them so broadcast reaches both. Adding a protocol is a new adapter, nothing above the interface.
+(melody — the only melody importer), `graphql` (gqlgen), `sse` (push-only event stream) and `rest`
+(`POST /api/<action>`) are adapters; `transport.Multi` aggregates them so broadcast reaches all of
+them. Adding a protocol is a new adapter, nothing above the interface.
+
+Four shared pieces in the package keep the adapters honest, and new adapters should reuse them rather
+than reimplement:
+
+- `Keys` — per-connection key/value state and the closed flag. Deliver through `WhileOpen`, which holds
+  the read lock so a send cannot race the `Close` that releases its channel; `MarkClosed` is won by
+  exactly one caller.
+- `BufferedConn[T]` — a push-only `Conn` over a buffered channel that drops rather than blocking the
+  broadcaster. Backs both GraphQL subscriptions and SSE streams.
+- `Registry` — the open-connection set and all protocol-independent `Transport` methods. Embed it and
+  supply only `Handle` and `Register`.
+- `OriginPolicy` — the allowlist, same-origin acceptance and CORS middleware, applied once in
+  `internal/entrypoints/http` so every route agrees.
+
+SSE is push-only (no inbound channel), so SSE clients send actions over `rest` or GraphQL mutations.
+`rest` holds no connections: its `Registry` stays empty and it contributes routes only. Because it
+duplicates the action surface, `TestRestRoutesMatchRegisteredActions` fails if a registered action has
+no `/api` route or vice versa — an action added to the router and the mutations but not to
+`internal/transport/rest/routes.go` is unreachable for SSE clients.
 
 ### Inbound: connection-independent dispatch
 
@@ -228,6 +248,12 @@ teams, and the initial stage/scenes. It is loaded once at boot from `-script` an
 Built-in actions register in `boot.registerHandlers` instead, and
 `TestRegisterHandlers_CoversEveryActionPackage` fails if a package under `internal/handlers/actions/`
 is never wired up — an unregistered action is silently unreachable, so the test exists to catch that.
+
+A **built-in** action has three inbound surfaces, and adding one means touching all three: the router
+registration, a mutation in `internal/transport/graphql/schema.graphqls` (plus its resolver), and a
+route in `internal/transport/rest/routes.go`. `TestRestRoutesMatchRegisteredActions` catches a missing
+REST route; nothing yet catches a missing mutation. Game-specific actions registered via
+`router.RegisterHandler` are WebSocket-only unless you add them to the other two yourself.
 
 ## Conventions
 

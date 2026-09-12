@@ -9,6 +9,7 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/injector"
+	"github.com/robbiebyrd/indri/internal/transport/rest"
 	"github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
@@ -85,6 +86,37 @@ func TestRegisterHandlers_BindsCorrectHandler(t *testing.T) {
 		if action != handlerPkg {
 			t.Errorf("action %q is wired to the %q handler package; expected a handler from the %q package",
 				action, handlerPkg, action)
+		}
+	}
+}
+
+// TestRestRoutesMatchRegisteredActions guards the drift the REST action API
+// costs: every action is reachable over WebSocket and GraphQL, so one that is
+// missing a REST route is unreachable for SSE clients, and a REST route for an
+// action nobody registered is a 404 waiting to happen.
+func TestRestRoutesMatchRegisteredActions(t *testing.T) {
+	registered := registeredActions(t)
+
+	exposed := make(map[string]struct{}, len(rest.Actions()))
+	for _, action := range rest.Actions() {
+		exposed[action] = struct{}{}
+	}
+
+	for action := range registered {
+		if _, ok := exposed[action]; !ok {
+			t.Errorf(
+				"action %q is registered but has no POST /api/%s route, so SSE clients cannot invoke it",
+				action, action,
+			)
+		}
+	}
+
+	for action := range exposed {
+		if _, ok := registered[action]; !ok {
+			t.Errorf(
+				"POST /api/%s is routed but %q is not a registered action, so it can only ever fail",
+				action, action,
+			)
 		}
 	}
 }

@@ -1,22 +1,33 @@
 # Indri client protocol
 
-The same actions are reachable over two transports, which run side by side (see
+The same actions are reachable over three transports, which run side by side (see
 [ARCHITECTURE.md](ARCHITECTURE.md#transports) — the `transport.Transport` abstraction):
 
-- **WebSocket** — `ws://<host>:<port>/ws` (default `localhost:5002`). One JSON message per action.
-- **GraphQL** — `http(s)://<host>:<port>/graphql` for typed **mutations** (client→server) and
-  graphql-transport-ws **subscriptions** (server→client). See [GraphQL](#graphql) below.
+| Transport | Client → server | Server → client |
+|---|---|---|
+| **WebSocket** | `ws://<host>:<port>/ws` — one JSON message per action | the same socket |
+| **GraphQL** | `POST /graphql` typed mutations | `gameUpdates` subscription (graphql-transport-ws) |
+| **REST + SSE** | `POST /api/<action>` JSON | `GET /events` event stream |
 
-Both drive the same connection-independent action logic (`router.Dispatch`); only the wire framing and
-auth mechanism differ. The bulk of this document describes the WebSocket message shapes; every action
-also exists as a GraphQL mutation with the same semantics.
+The default address is `localhost:5002`. All three drive the same connection-independent action logic
+(`router.Dispatch`); only the wire framing and auth mechanism differ. The bulk of this document
+describes the WebSocket message shapes; every action also exists as a GraphQL mutation and a REST route
+with the same semantics.
+
+The REST and SSE halves are two sides of one transport pair: SSE is push-only (it has no inbound
+channel), so an SSE client sends its actions over REST — or over GraphQL mutations, which work equally
+well. See [REST and SSE](#rest-and-sse) below.
 
 Every WebSocket message is a JSON object. Client→server messages **must** carry a string `action` field;
-the router uses it to pick handlers and removes it from the payload before the handler sees it.
+the router uses it to pick handlers and removes it from the payload before the handler sees it. REST and
+GraphQL name the action in the route or the mutation instead, so their payloads never carry it.
 
-The WebSocket upgrade is origin-checked (`internal/transport/ws`). Requests with no `Origin` header
-(native apps, CLI tools, server-to-server) are always allowed; browser requests are allowed only if
-their origin appears in `INDRI_ALLOWED_ORIGINS`. An empty allowlist rejects all cross-origin browsers.
+Every route is origin-checked by one shared policy (`transport.OriginPolicy`, applied in
+`internal/entrypoints/http`). Requests with no `Origin` header (native apps, CLI tools,
+server-to-server) are always allowed. A browser request is allowed if its origin appears in
+`INDRI_ALLOWED_ORIGINS` — matched as an exact string, so scheme, host and port must all agree — or if
+it is the server's own origin. An empty allowlist rejects all cross-origin browsers. Allowed
+cross-origin requests get the matching CORS response headers, and preflights are answered centrally.
 
 ---
 
@@ -282,3 +293,78 @@ subscription { gameUpdates(gameId: "<game object id>") }
 Each event is a game **delta** — the same document the WebSocket delta path emits (see
 [Delta](#delta--change-event)), sanitized identically. Reconnecting into an active game over GraphQL:
 call the `reconnect` mutation for the auth payload, then subscribe to `gameUpdates` for state.
+
+---
+
+## REST and SSE
+
+`internal/transport/rest` and `internal/transport/sse` are the third way to play, and the only one that
+needs no persistent socket. They are a pair: SSE carries server→client pushes and has no inbound
+channel, so actions go over REST.
+
+Both share the broadcast pipeline with WebSocket and GraphQL, so clients on all three transports in the
+same game receive identical deltas.
+
+### Actions — `POST /api/<action>`
+
+The route name *is* the action name. The body is a JSON object of the action's arguments; an empty body
+is treated as `{}`, so argument-less actions can be POSTed with nothing.
+
+| Route | Action | Body |
+|---|---|---|
+| `POST /api/register` | register | `{email, password, name}` |
+| `POST /api/login` | login | `{email, password}` — result carries the bearer token in `sessionId` |
+| `POST /api/reconnect` | reconnect | `{token}` |
+| `POST /api/create` | create | `{code, teamId, private?}` |
+| `POST /api/join` | join | `{code, teamId}` |
+| `POST /api/leave` | leave | — |
+| `POST /api/kick` | kick | `{code, userId}` — host-only |
+| `POST /api/logout` | logout | — |
+| `POST /api/inquire` | inquire | `{inquiryType, inquiry?, code?}` |
+| `POST /api/refresh` | refresh | — returns the current keyframe |
+
+**Auth.** `Authorization: Bearer <token>`, the same secret `login`/`reconnect` return.
+`register`/`login`/`reconnect` need none; the rest do. The caller is always resolved from their own
+token, never from a body field.
+
+**Responses.** `200` with the action's response document, or `{}` for an action whose only effect is a
+broadcast. `400` for a missing or mistyped argument and for a handler error, `404` for an unknown
+action, `405` for a non-POST, each as `{"error": "…"}`.
+
+Arguments are validated before dispatch and unknown body keys are dropped, so a caller cannot smuggle
+extra fields into a payload. `TestRestRoutesMatchRegisteredActions` fails if this table drifts from the
+handler registry in either direction.
+
+### Stream — `GET /events`
+
+```
+GET /events?token=<session token>
+```
+
+**Auth.** `Authorization: Bearer <token>` if you can set headers. The browser `EventSource` API cannot,
+so the `token` query parameter is the only option there — it is a first-class part of the protocol, not
+a fallback. Either way the token is the one `login`/`reconnect` returned. An unknown token is `401`.
+
+Each event is a game **delta**, one per `data:` frame — the same document the WebSocket delta path emits
+(see [Delta](#delta--change-event)), sanitized identically:
+
+```
+data: {"id":"…","op":"update","ts":"…","type":"game","updated":{"players.…":{…}}}
+
+```
+
+A payload containing newlines is emitted as consecutive `data:` lines of one event, per the SSE spec.
+An idle stream emits a `:ping` comment frame every 25 seconds so proxies do not drop it.
+
+A subscriber that stops reading is not allowed to stall the broadcaster: once 16 deltas are queued the
+oldest are dropped, and the client recovers with `POST /api/refresh`.
+
+**Bootstrapping.** SSE delivers only deltas, so a client cannot build state from the stream alone:
+
+1. `POST /api/login` (or `/api/reconnect`) → bearer token
+2. `POST /api/join` or `/api/create` → the keyframe, in the response
+3. `GET /events?token=…` → open the stream
+4. `POST /api/refresh` → a fresh keyframe if the stream ever drops or a delta is missed
+
+Open the stream before or immediately after joining. Deltas broadcast while no stream is open are not
+replayed — recover with `refresh`.

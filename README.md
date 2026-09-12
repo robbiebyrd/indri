@@ -4,8 +4,8 @@ A Go framework for real-time multiplayer party games.
 
 Indri gives you the parts every "everyone grab your phone" game needs — accounts, sessions, lobbies,
 rooms, teams, hosts, reconnection, and live state sync — so a game is reduced to a JSON template and a
-handful of action handlers. Players connect over WebSocket or GraphQL; state lives in MongoDB and every
-write is diffed and pushed back to the room as a delta.
+handful of action handlers. Players connect over WebSocket, GraphQL, or REST+SSE; state lives in
+MongoDB and every write is diffed and pushed back to the room as a delta.
 
 Released into the public domain ([Unlicense](LICENSE)).
 
@@ -45,7 +45,16 @@ go run ./cmd/server -script ./config.json
 ```
 
 The server listens on `INDRI_LISTEN_ADDRESS:INDRI_LISTEN_PORT` (default `localhost:5002`) and exposes
-`/ws` (WebSocket) and `/graphql` (GraphQL mutations + subscriptions) — the same actions over both.
+the same actions over three transports at once:
+
+| Route | Transport |
+|---|---|
+| `/ws` | WebSocket — one JSON message per action, both directions |
+| `/graphql` | GraphQL — typed mutations plus a `gameUpdates` subscription |
+| `/api/<action>` + `/events` | REST actions plus a Server-Sent Events stream |
+
+Clients on different transports in the same game receive identical deltas. Pick whichever fits: a
+socket if you want one connection, REST+SSE if you would rather have plain HTTP and no socket at all.
 
 The bundled `docker-compose.yml` starts a standalone MongoDB and Redis. No replica set is needed —
 deltas are computed and published by the application, not tailed from a change stream.
@@ -113,7 +122,7 @@ The ones you are most likely to change:
 | Variable | Default | Purpose |
 |---|---|---|
 | `INDRI_LISTEN_ADDRESS`, `INDRI_LISTEN_PORT` | `localhost`, `5002` | Where to listen |
-| `INDRI_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to open a socket. Empty rejects all cross-origin browsers; clients that send no `Origin` are always allowed |
+| `INDRI_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to open a socket, matched as exact strings — `http://localhost:8081` does not cover `http://127.0.0.1:8081`. Empty rejects all cross-origin browsers; clients that send no `Origin` are always allowed |
 | `INDRI_MONGO_URI`, `INDRI_MONGO_DATABASE` | `localhost`, `indri` | Database |
 | `INDRI_LOCK_BACKEND` | `inprocess` | Multi-instance switch. `redis` moves both the edit locks and the delta bus to Redis |
 | `INDRI_WS_*` | see `.env.example` | Timeouts, ping interval, message size limits |
@@ -134,7 +143,7 @@ Single-instance deployments use in-process locks and an in-process delta bus. Se
 cmd/server/          entry point
 internal/
   clients/           MongoDB, Redis
-  transport/         Conn/Transport interfaces; ws (melody) + graphql (gqlgen) adapters + Multi
+  transport/         Conn/Transport interfaces; ws, graphql, sse, rest adapters + Multi
   entrypoints/       HTTP server, connection lifecycle
   handlers/          action router (connection-independent dispatch) + one package per built-in action
   services/          game, stage, broadcast, auth, session, mutation, lock, events
@@ -163,6 +172,6 @@ checkout. Set `INDRI_TEST_MONGO_URI` to point them at a database.
 ## Further reading
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — component map, request lifecycle, concurrency model
-- **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — the client protocol (WebSocket messages + GraphQL)
+- **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — the client protocol (WebSocket messages, GraphQL, REST+SSE)
 - **[CLAUDE.md](CLAUDE.md)** — orientation for AI coding agents
 - **[docs/tasks.md](docs/tasks.md)** — improvement backlog

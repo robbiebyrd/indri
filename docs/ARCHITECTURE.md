@@ -7,12 +7,14 @@ day-to-day commands and conventions see [../CLAUDE.md](../CLAUDE.md).
 
 ```
 browser / native client
-        │  WebSocket /ws   ·or·   GraphQL /graphql (mutations + subscription)
+        │  WebSocket /ws  ·or·  GraphQL /graphql  ·or·  REST /api/<action> + SSE /events
         ▼
-internal/entrypoints/http/server.go      net/http mux, timeouts, graceful shutdown
+internal/entrypoints/http/server.go      net/http mux, timeouts, one shared OriginPolicy
+                                         (allowlist + CORS), graceful shutdown
         ▼
-internal/transport/                      Transport interface: ws (melody) + graphql (gqlgen),
-                                         aggregated by transport.Multi. Resolves the session, then:
+internal/transport/                      Transport interface: ws (melody), graphql (gqlgen),
+                                         sse, rest — aggregated by transport.Multi.
+                                         Resolves the session, then:
         ▼
 internal/handlers/router/                DispatchMessage (WS) / Dispatch (GraphQL): decode, run
                                          "received" → <action> → "processed"; recover() per handler
@@ -32,7 +34,7 @@ internal/repo/*                          MongoDB stores
         │                   ▼
         │       internal/services/boot/monitor.go    Subscribe, fan out per game
         │                   ▼
-        └────── internal/services/broadcast/         Transport.BroadcastFilter → WS + GraphQL clients
+        └────── internal/services/broadcast/         Transport.BroadcastFilter → WS, GraphQL, SSE
 ```
 
 Note the delta path is driven by the **application**, not by MongoDB. Because the server is the sole
@@ -55,7 +57,7 @@ Three-stage construction, each stage depending only on the previous one.
 |---|---|
 | `clients.go` | Mongo client, the WebSocket transport, lock manager, change-event publisher. Cached process-globally; all injectable for tests. |
 | `repos.go` | `game`, `user`, `session` Mongo stores (each creates its indexes in `NewStore`) plus the script store. |
-| `services.go` | game, broadcast, auth, user, session services. Also builds the GraphQL transport (which needs the session store) and wraps it with the WebSocket transport in a `transport.Multi`, which becomes the injector's `Transport`. |
+| `services.go` | game, broadcast, auth, user, session services. Also builds the GraphQL, SSE and REST transports (each needs the session store to authenticate bearer tokens) and wraps them with the WebSocket transport in a `transport.Multi`, which becomes the injector's `Transport`. Each is given the aggregate as its peer, so a kick closes the target's connections on every transport. |
 
 `injector.Injector` embeds all three structs plus `GlobalContext` and the parsed `Script`, and is the
 single value threaded into every handler.
@@ -73,17 +75,30 @@ services, or routing:
 - `Transport` — the hub: `Handle(Handlers{Connect,Disconnect,Message,Error})`, `Register(mux)` (each
   transport mounts its own routes), `Broadcast`, `BroadcastFilter`, `Conns`, `Close`, `IsClosed`.
 
+Three pieces in the package are shared by the push-only transports, so GraphQL subscriptions and SSE
+streams behave identically rather than approximately:
+
+| Type | What it owns |
+|---|---|
+| `Keys` | Per-connection key/value state and the closed flag. `WhileOpen` holds the read lock for a delivery, so a send cannot overlap the `Close` that releases what it sends to; `MarkClosed` is won by exactly one caller. |
+| `BufferedConn[T]` | A push-only `Conn` queueing onto a buffered channel. Drops the oldest rather than blocking the broadcaster on a slow client. Generic only so each transport hands out the channel type its framework wants. |
+| `Registry` | The open-connection set plus fan-out — every part of `Transport` that is protocol-independent. A transport embeds it and supplies only `Handle` and `Register`. |
+| `OriginPolicy` | The origin allowlist, same-origin acceptance, and the CORS middleware. Applied once in `entrypoints/http`, so all four routes agree. |
+
 | Adapter | Route | Notes |
 |---|---|---|
 | `ws` | `/ws` | melody-backed WebSocket. The **only** package that imports melody. Origin check, ping/pong, size limits. |
 | `graphql` | `/graphql` | gqlgen. Typed mutations → `router.Dispatch` (auth from the `Authorization` header); a `gameUpdates` subscription (graphql-transport-ws, auth from `connection_init`) whose push conn is a channel-backed `Conn` fed by the existing broadcast. Dynamic data uses a `JSON` scalar (`json.RawMessage`). |
-| `Multi` | — | Aggregates the above so `broadcast` fans out to both; `Conns` are unioned. Adding a protocol (REST+SSE, WebRTC, WebTransport) means a new adapter, nothing above the interface. |
+| `sse` | `/events` | Server-Sent Events, push-only. Authenticated at the handshake from `Authorization` or a `token` query parameter — the browser `EventSource` API cannot set headers. Clears the server's `WriteTimeout` per stream (unlike a WebSocket upgrade, SSE never hijacks the connection), emits a `:ping` comment while idle, and frames each delta as `data:`. |
+| `rest` | `/api/<action>` | The inbound half for SSE clients: one POST route per action, arguments validated then dispatched to `router.Dispatch` (auth from the `Authorization` header). Holds no connections — its `Registry` stays empty, so it contributes routes and nothing to fan-out. |
+| `Multi` | — | Aggregates the above so `broadcast` fans out to all of them; `Conns` are unioned. Adding a protocol (WebRTC, WebTransport) means a new adapter, nothing above the interface. |
 
 ### `internal/entrypoints`
 
-- `http/server.go` — mounts every transport's routes (`Transport.Register(mux)`) and runs the HTTP
-  server with read/write/idle timeouts. On context cancellation it closes the transport *first* (so
-  hijacked connections return) and then drains the HTTP server.
+- `http/server.go` — mounts every transport's routes (`Transport.Register(mux)`), wraps the mux in the
+  shared `OriginPolicy.Middleware`, and runs the HTTP server with read/write/idle timeouts. On context
+  cancellation it closes the transport *first* (so hijacked connections and SSE streams return) and
+  then drains the HTTP server.
 - `websocket.go` — `HandleConnect` (sends the login scene) and `HandleDisconnect` (marks the player
   disconnected in the game, closes the connection if we still own it). Both are transport-agnostic
   (`transport.Conn`).
@@ -93,7 +108,7 @@ services, or routing:
 Handlers are **connection-independent**: `Handle(actions.Request{Session, Payload}) (actions.Result,
 error)`. The transport resolves the authenticated session and applies the `Result` (write `Responses`,
 bind `Session` on auth, force-close `DisconnectIDs`). This is what lets WebSocket messages and GraphQL
-mutations share one code path.
+mutations, REST posts and SSE streams share one code path.
 
 - `router/` — `Dispatch(session, action, payload)` runs the registry (`received` → action →
   `processed`; `recover()` per handler); `DispatchMessage` decodes a raw frame for message transports.
@@ -203,7 +218,7 @@ server-supplied dot paths.
 | Variable | Default | Note |
 |---|---|---|
 | `INDRI_LISTEN_ADDRESS` / `INDRI_LISTEN_PORT` | `localhost` / `5002` | |
-| `INDRI_ALLOWED_ORIGINS` | `""` | Comma-separated. Empty rejects all cross-origin browsers. |
+| `INDRI_ALLOWED_ORIGINS` | `""` | Comma-separated, matched as exact strings (host *and* port; `localhost` ≠ `127.0.0.1`). Empty rejects all cross-origin browsers. |
 | `INDRI_MONGO_URI` / `INDRI_MONGO_DATABASE` | `localhost` / `indri` | A replica set is not required. |
 | `INDRI_LOCK_BACKEND` | `inprocess` | Multi-instance switch: `redis` moves both the lock manager and the event bus to Redis. |
 | `INDRI_REDIS_*` | localhost:6379 | Only used in `redis` mode. |
