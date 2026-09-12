@@ -1,12 +1,18 @@
-import {Game, UpdateMessage, User} from "@/models/models";
-import {GameStateParser} from "@/services/game-state-parser";
-import {GameDispatchMessage} from "@/providers/game-state/game-state-actions";
-import {UserDispatchMessage} from "@/providers/user-state/user-state-actions";
-import {Dispatch} from "react";
-import {GameListDispatchMessage} from "@/providers/game-list/game-list-actions";
-import {GameInfo} from "@/providers/game-list/game-list-context";
-import {parseJsonSafely} from "@/services/json";
-import {JsonObject} from "type-fest";
+// The two value imports are RELATIVE, not `@/`-aliased, and the rest are
+// `import type`. That is what lets this module load under bare
+// `node --experimental-strip-types`, which resolves neither tsconfig paths nor
+// the React/Expo modules the aliased provider files pull in. See
+// `layout/lua/bridge.node-test.ts`, which drives the real handler.
+import {GameStateParser} from "./game-state-parser.ts";
+import {parseJsonSafely} from "./json.ts";
+
+import type {Game, UpdateMessage, User} from "@/models/models";
+import type {GameDispatchMessage} from "@/providers/game-state/game-state-actions";
+import type {UserDispatchMessage} from "@/providers/user-state/user-state-actions";
+import type {Dispatch} from "react";
+import type {GameListDispatchMessage} from "@/providers/game-list/game-list-actions";
+import type {GameInfo} from "@/providers/game-list/game-list-context";
+import type {JsonObject} from "type-fest";
 
 type actionHandler = {
     name: string
@@ -15,6 +21,15 @@ type actionHandler = {
     dataKey?: string
 }
 
+/**
+ * Watches the REDUCED game state, not the messages that produced it.
+ *
+ * `kind` distinguishes a resync from an increment; a consumer that keeps local
+ * state derived from the game (the Lua override layer, for one) has to drop it
+ * on a keyframe and keep it on a delta.
+ */
+export type GameStateObserver = (game: Game, kind: "keyframe" | "delta") => void
+
 export class MessageHandler {
     private ws?: WebSocket = undefined
     private stateList: GameStateParser<Game> = new GameStateParser<Game>()
@@ -22,6 +37,7 @@ export class MessageHandler {
     private readonly setPlayerState: Dispatch<UserDispatchMessage>
     private readonly setGameList: Dispatch<GameListDispatchMessage>
     private parsers: actionHandler[]
+    private readonly observers = new Set<GameStateObserver>()
 
     constructor(
         url: string,
@@ -121,9 +137,24 @@ export class MessageHandler {
         this.ws.send(JSON.stringify(message))
     }
 
+    /**
+     * Watch the reduced game state. Returns an unsubscribe function.
+     *
+     * This is the ONLY inbound seam for anything that is not a message parser,
+     * and it deliberately hands over the reduced game rather than the message:
+     * an observer that re-interpreted a raw delta could disagree with the
+     * reducer, and then two versions of "the game" would exist at once.
+     */
+    observe(observer: GameStateObserver): () => void {
+        this.observers.add(observer)
+        return () => {
+            this.observers.delete(observer)
+        }
+    }
+
     update(parsedMessage?: any) {
         this.stateList.update(parsedMessage as UpdateMessage)
-        this.updateGameState()
+        this.updateGameState("delta")
     }
 
     messageType(parsedMessage: any): string | undefined {
@@ -144,7 +175,7 @@ export class MessageHandler {
         return undefined
     }
 
-    updateGameState() {
+    updateGameState(kind: "keyframe" | "delta") {
         const game = this.stateList.current()
         if (!game) {
             // No keyframe applied yet; don't dispatch an empty game that would
@@ -152,6 +183,16 @@ export class MessageHandler {
             return
         }
         this.setGameState({payload: game, type: "setGame"} as GameDispatchMessage)
+
+        for (const observer of this.observers) {
+            try {
+                observer(game, kind)
+            } catch (e) {
+                // The reducer has already been told. A misbehaving observer
+                // must not also cost the next observer its notification.
+                console.warn("a game state observer threw:", e)
+            }
+        }
     }
 
     updatePlayerState(data: any) {
@@ -165,7 +206,7 @@ export class MessageHandler {
     keyframe(gameData: any) {
         const g = gameData as Game
         this.stateList.set(g as JsonObject, new Date(g.updatedAt ?? new Date().toISOString()))
-        this.updateGameState()
+        this.updateGameState("keyframe")
     }
 }
 
