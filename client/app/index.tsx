@@ -1,4 +1,5 @@
 import {Button, StyleSheet, View} from 'react-native'
+import {Link} from "expo-router"
 import {useCallback, useState} from "react"
 import Login from "@/components/auth/login";
 import {useGameState} from "@/providers/game-state/use-game-state";
@@ -63,6 +64,14 @@ export default function Index() {
                         />
                     </View>
                     <GameRefreshButton ws={ws}/>
+                    {/*
+                      A Link, not a typed URL. Navigating by URL is a full page
+                      load, which resets every provider — and nothing restores a
+                      session on load (see the reconnect TODO in
+                      services/message-handler.ts), so the board route would
+                      find no game state and say so.
+                    */}
+                    <Link href="/board" style={styles.boardLink}>Open board editor →</Link>
                 </>
             )}
         </View>
@@ -83,5 +92,10 @@ const styles = StyleSheet.create({
     board: {
         flex: 1,
         width: '100%',
+    },
+    boardLink: {
+        color: '#2563eb',
+        padding: 12,
+        fontSize: 16,
     },
 });
