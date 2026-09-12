@@ -1,11 +1,11 @@
 ---
 id: 037-68ff
 title: Peer factory and the non-trickle ICE answer
-status: pending
+status: ready
 priority: P1
 type: feature
 created: "2026-09-12T01:27:30.675Z"
-updated: "2026-09-12T01:27:41.189Z"
+updated: "2026-09-12T01:39:14.871Z"
 dependencies: ["035-f2e8"]
 plan: plans/webrtc-transport.md
 plan_step: Step 4

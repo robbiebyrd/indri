@@ -1,15 +1,16 @@
 ---
 id: 032-0be8
 title: Field pickers for every descriptor kind
-status: ready
+status: in_progress
 priority: P2
 type: feature
 created: "2026-09-10T00:58:00.969Z"
-updated: "2026-09-10T00:58:09.318Z"
+updated: "2026-09-12T02:35:49.726Z"
 dependencies: ["031"]
 plan: plans/layout-authoring-editor.md
 plan_step: Step 8
 depends_on: ["stories/031-a610-pending-P2-config-panel-drawn-from-field-descriptors.md"]
+started_at: "2026-09-12T02:35:49.726Z"
 ---
 
 # Field pickers for every descriptor kind

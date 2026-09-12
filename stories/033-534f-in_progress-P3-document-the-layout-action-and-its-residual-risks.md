@@ -1,15 +1,16 @@
 ---
 id: 033-534f
 title: Document the layout action and its residual risks
-status: ready
+status: in_progress
 priority: P3
 type: chore
 created: "2026-09-10T00:58:00.969Z"
-updated: "2026-09-10T00:58:09.426Z"
+updated: "2026-09-12T02:35:49.829Z"
 dependencies: ["027", "029", "031"]
 plan: plans/layout-authoring-editor.md
 plan_step: Step 9
 depends_on: ["stories/027-7e5e-pending-P1-host-only-layout-action-handler-reachable-from-bot.md", "stories/029-f12a-pending-P2-editor-drag-and-resize-with-collision-rejection.md", "stories/031-a610-pending-P2-config-panel-drawn-from-field-descriptors.md"]
+started_at: "2026-09-12T02:35:49.829Z"
 ---
 
 # Document the layout action and its residual risks
