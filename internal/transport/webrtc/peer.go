@@ -138,8 +138,16 @@ func answerOffer(
 // responsible for deregistering the peer. peer's only job is to run that
 // callback, and close its own resources, exactly once.
 type peer struct {
-	pc   *pion.PeerConnection
-	conn *rtcConn
+	pc *pion.PeerConnection
+
+	// connMu guards conn: the transport attaches it later, once the client's
+	// "game" DataChannel actually opens (setConn), which runs on pion's
+	// OnDataChannel callback goroutine. That can race with teardown reading
+	// conn in close, since OnConnectionStateChange fires on its own goroutine
+	// with no ordering guarantee against it (pion issue #744) -- the same
+	// hazard teardown itself guards against with sync.Once.
+	connMu sync.Mutex
+	conn   *rtcConn
 
 	// teardown guards close so it runs exactly once regardless of which
 	// notification path gets there first -- see handleConnectionStateChange.
@@ -149,6 +157,15 @@ type peer struct {
 	// once story 039 introduces one). May be nil for a peer that has not been
 	// registered anywhere yet.
 	onClose func()
+}
+
+// setConn attaches the DataChannel-backed conn once the client's "game"
+// channel opens. A peer torn down by the pending-peer TTL before that ever
+// happens simply never calls this, and close's nil check applies as before.
+func (p *peer) setConn(c *rtcConn) {
+	p.connMu.Lock()
+	p.conn = c
+	p.connMu.Unlock()
 }
 
 // newPeer wires pc's connection-state callback to teardown and returns the
@@ -195,8 +212,12 @@ func (p *peer) close() {
 		log.Printf("webrtc: closing peer connection during teardown: %v", err)
 	}
 
-	if p.conn != nil {
-		if err := p.conn.Close(); err != nil {
+	p.connMu.Lock()
+	conn := p.conn
+	p.connMu.Unlock()
+
+	if conn != nil {
+		if err := conn.Close(); err != nil {
 			log.Printf("webrtc: closing conn during peer teardown: %v", err)
 		}
 	}
