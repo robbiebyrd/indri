@@ -2,6 +2,7 @@
 title: GraphQL transport (subscriptions + typed mutations)
 status: complete
 created: "2026-09-09"
+archived_at: 2026-09-12T01:00:59.752Z
 ---
 
 > Status: all three increments delivered and verified end to end — WS and

@@ -1,15 +1,16 @@
 ---
 id: 026-0ae1
 title: Structural layout validation in Go
-status: ready
+status: in_progress
 priority: P2
 type: feature
 created: "2026-09-10T00:58:00.963Z"
-updated: "2026-09-10T00:58:08.711Z"
+updated: "2026-09-12T00:53:03.899Z"
 dependencies: ["025"]
 plan: plans/layout-authoring-editor.md
 plan_step: Step 2
 depends_on: ["stories/025-6b2f-pending-P2-layout-op-envelope-types-and-decoding.md"]
+started_at: "2026-09-12T00:53:03.897Z"
 ---
 
 # Structural layout validation in Go

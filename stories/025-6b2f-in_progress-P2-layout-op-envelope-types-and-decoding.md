@@ -1,14 +1,15 @@
 ---
 id: 025-6b2f
 title: "Layout op envelope: types and decoding"
-status: ready
+status: in_progress
 priority: P2
 type: feature
 created: "2026-09-10T00:58:00.941Z"
-updated: "2026-09-10T00:58:08.591Z"
+updated: "2026-09-12T00:24:27.036Z"
 dependencies: []
 plan: plans/layout-authoring-editor.md
 plan_step: Step 1
+started_at: "2026-09-12T00:24:27.034Z"
 ---
 
 # Layout op envelope: types and decoding

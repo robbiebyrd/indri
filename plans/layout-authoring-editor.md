@@ -1,7 +1,8 @@
 ---
-status: approved
+status: in_progress
 approved_at: "2026-09-10T00:58:00.942Z"
-updated: "2026-09-10T00:58:00.942Z"
+updated: "2026-09-12T00:24:27.103Z"
+started_at: "2026-09-12T00:24:27.103Z"
 ---
 # Plan B: Layout authoring — server action & editor
 
