@@ -233,6 +233,26 @@ A **Script** (`config.json`, `models.Script`) is the template a new game is stam
 teams, and the initial stage/scenes. It is loaded once at boot from `-script` and exposed as
 `i.Script`.
 
+### Layout
+
+`game.data.layout` is the canonical layout location — one object per game, a `scenes` map inside it,
+selected by `stage.currentScene`. Nothing goes in `scene.data`. Widgets are a map keyed by id, never an
+array (`events.Diff` replaces arrays whole). The host-only `layout` action
+(`internal/handlers/actions/layout/`) is the only writer.
+
+- `privateData` is **reserved anywhere inside a layout, at any depth**. `SanitizeDelta` strips any path
+  containing that segment, so a `privateData` key would be silently deleted in transit. Both validators
+  reject it outright.
+- The Go validator (`internal/handlers/actions/layout/validate.go`) and the TypeScript one
+  (`client/layout/schema/layout.ts`, `client/layout/grid/collision.ts`, `client/layout/grid/coords.ts`)
+  **must change together**. They cannot share code across languages, so the constants and the AABB overlap
+  test are kept textually identical on purpose. Change one side, change the other.
+- The Go half is the security boundary and rejects; the TS half is UX feedback and clamps. A rule enforced
+  only on the client is not enforced.
+- Host-supplied media URIs and Lua source are **not** reviewed or allow-listed. See
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#host-authored-content--accepted-risk) before any public
+  deployment.
+
 ## Adding a game action
 
 1. Create `example/<game>/server/handlers/<action>/handler.go` with a `Handler` struct holding

@@ -152,6 +152,78 @@ Removes the caller from their game and from any team, atomically.
 Host-only. The caller is authorized from their own connection's session — never from the payload. The
 target is removed from the game and force-disconnected if currently connected.
 
+### `layout`
+
+```json
+{ "action": "layout", "code": "my-room", "op": "addWidget",
+  "sceneId": "board", "widgetId": "title",
+  "widget": { "type": "text",
+              "placement": { "kind": "grid", "col": 0, "row": 0, "w": 12, "h": 2 },
+              "config": { "text": "Tic Tac Toe" } } }
+```
+
+Host-only. Edits `game.data.layout`, the board that every player in the game renders (see
+[ARCHITECTURE.md](ARCHITECTURE.md#layout-engine)). The caller is resolved from their own authenticated
+session. A `userId` in the payload is never read as the caller — payload fields are only ever the *subject*
+of an edit.
+
+`code` and `op` are required on every message. One action carries all seven operations behind the `op`
+discriminator; `op` selects which other fields the message may carry.
+
+| `op` | Required fields | Effect |
+|---|---|---|
+| `addWidget` | `sceneId`, `widgetId`, `widget` | Inserts a widget. Creates the scene if it does not exist yet — there is no `addScene` op. An id that is already in use is an error, not a replace. |
+| `removeWidget` | `sceneId`, `widgetId` | Deletes the widget. A missing scene or a missing widget is a no-op, so a client can retry after a reconnect. |
+| `setPlacement` | `sceneId`, `widgetId`, `placement` | Replaces the whole placement. This is **both move and resize**: they write the same field, so there is no separate resize op. A partial placement is not a placement. |
+| `setWidgetConfig` | `sceneId`, `widgetId`, `config` | Merges into the widget's config, so a panel can send one field at a time. Deleting a config key is not expressible; remove and re-add the widget. |
+| `setStyle` | `scope`, `style` | Replaces the style of the board, a scene, or a widget. |
+| `setGrid` | `grid` | Sets the board grid, `{cols, rows}`. Not scoped. A sub-grid's own grid lives in its config — change it with `setWidgetConfig`. |
+| `setScript` | `scope`, `source` | Sets the Lua script of the board, a scene, or a widget. An empty `source` deletes the field rather than storing `""`. |
+
+`setStyle` and `setScript` name their target with `scope`. The scope decides which address fields the
+message must carry. An address a scope does not use is rejected, not ignored — ignoring it would edit a
+different target than the client meant.
+
+| `scope` | `sceneId` | `widgetId` |
+|---|---|---|
+| `board` | must **not** be set | must **not** be set |
+| `scene` | required | must **not** be set |
+| `widget` | required | required |
+
+Unknown keys are rejected **per op**, so a field that one op accepts is an error on another: `widget` is
+required by `addWidget` and rejected by `setPlacement`. Only `code` and `op` are accepted by every op.
+
+**There is no reply.** The action returns no response document. The edit reaches every player in the game —
+the editing host included — as a broadcast [delta](#delta--change-event). A rejected op writes nothing and
+returns an error. An op that changes nothing commits nothing and publishes nothing, so no empty delta occurs.
+
+**Validation.** The op is applied to a detached copy, and the whole resulting layout is then validated. Only
+a copy that passes is stored, so a rejected op leaves the game exactly as it was. Errors name the dotted path
+of the offending value, for example `scenes.board.widgets.title.placement`. The limits are:
+
+| Limit | Value |
+|---|---|
+| Widgets per layout | 300, counted across all scenes and all nested sub-grids |
+| Serialised layout size | 256 KiB |
+| Grid dimensions (`cols`, `rows`, at every level) | 8 to 4096 |
+| Sub-grid nesting | 4 grid levels, counting the scene's own grid as level 1 — at most three nested sub-grids |
+
+A layout must have a `grid`, so the first op on a game with no layout must be `setGrid`. Grid-placed widgets
+may not overlap their siblings at the same level; edge-touching is not an overlap. Absolute placements are
+exempt from the overlap rule, and their offsets are percentage strings only (`"25%"`) — pixel values are
+rejected. `privateData` is rejected anywhere in a layout at any depth (see
+[Data model](ARCHITECTURE.md#data-model)).
+
+A widget's `config` and `style` contents stay opaque to the server. Indri is a framework and does not know
+what a "text" widget is, so it validates structure and not widget semantics.
+
+The action is reachable on all three transports: as the WebSocket message above, as the `layout`
+[GraphQL mutation](#graphql), and as `POST /api/layout` ([REST](#rest-and-sse)).
+
+> **Deployment warning.** A host can set arbitrary media URIs and arbitrary Lua source, and the server
+> delivers both to every player in the game, where the client renders and executes them. See
+> [Host-authored content](ARCHITECTURE.md#host-authored-content--accepted-risk).
+
 ### `logout`
 
 ```json
@@ -276,6 +348,12 @@ Each returns a `JSON` result — the same response document the WebSocket action
 | `kick(code, userId)` | kick | host-only |
 | `logout` | logout | |
 | `inquire(inquiryType, inquiry, code)` | inquire | |
+| `layout(code, op, args)` | layout | host-only; result is always null |
+
+An op's own fields ride in `args` because their shape depends on the op, which the GraphQL type system
+cannot express. The resolver flattens `args` into the payload, then sets `code` and `op` last — so an `args`
+that carries its own `code` or `op` cannot redirect the edit. There is no `refresh` mutation; use the REST
+route or the WebSocket action for a keyframe.
 
 ```graphql
 mutation { login(email: "u@e.io", password: "…") }        # returns JSON incl. sessionId token
@@ -322,6 +400,7 @@ is treated as `{}`, so argument-less actions can be POSTed with nothing.
 | `POST /api/logout` | logout | — |
 | `POST /api/inquire` | inquire | `{inquiryType, inquiry?, code?}` |
 | `POST /api/refresh` | refresh | — returns the current keyframe |
+| `POST /api/layout` | layout | `{code, op, …the op's own fields}` — host-only |
 
 **Auth.** `Authorization: Bearer <token>`, the same secret `login`/`reconnect` return.
 `register`/`login`/`reconnect` need none; the rest do. The caller is always resolved from their own
@@ -332,8 +411,10 @@ broadcast. `400` for a missing or mistyped argument and for a handler error, `40
 action, `405` for a non-POST, each as `{"error": "…"}`.
 
 Arguments are validated before dispatch and unknown body keys are dropped, so a caller cannot smuggle
-extra fields into a payload. `TestRestRoutesMatchRegisteredActions` fails if this table drifts from the
-handler registry in either direction.
+extra fields into a payload. `layout` is the one exception, because an op's arguments are objects whose
+shape depends on the op: its body passes through whole, and the handler rejects every field the op does not
+declare. `TestRestRoutesMatchRegisteredActions` fails if this table drifts from the handler registry in
+either direction.
 
 ### Stream — `GET /events`
 

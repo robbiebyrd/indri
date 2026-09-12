@@ -198,6 +198,116 @@ A `Script` (`models.Script`, loaded from `config.json`) is the template new game
 `Config` (pvp, maxTeams, maxPlayersPerTeam, profanityFilter, createTeams), initial `Teams`, initial
 `Stage`, and initial data stores.
 
+## Layout engine
+
+A **layout** is the board a game draws: a grid, a set of scenes, and the widgets placed in them. It is data,
+not code, so a game changes its board without a rebuild.
+
+### Where it lives
+
+`game.data.layout` is the canonical location — **one object per game**, with a `scenes` map inside it keyed
+by scene id. `stage.currentScene` selects which entry renders. Nothing is stored under `scene.data`. One
+object gives the `layout` action a single subtree to authorize and to validate, and makes a scene switch a
+pure lookup.
+
+```
+game.data.layout
+├── grid            { cols, rows }          the board's coordinate space, 8..4096 each
+├── style                                   board style, optional
+├── script                                  board Lua script, optional
+└── scenes  map[sceneId] → { style?, script?, widgets }
+                            └── widgets map[widgetId] → { type, placement, config?, style?, script? }
+```
+
+**Widgets are a map keyed by id, never an array.** `events.Diff` replaces arrays whole, so an array would
+re-send every widget on any single change and defeat the delta pipeline the engine is built on. Because
+every level is a JSON object, `Diff` walks to the leaf and one cell update arrives as one tight path:
+
+```
+data.layout.scenes.board.widgets.cells.config.widgets.c01.config.text  =  "X"
+```
+
+### Server side — `internal/handlers/actions/layout`
+
+One host-only action carries seven ops behind an `op` discriminator (see
+[PROTOCOL.md](PROTOCOL.md#layout)). `op.go` decodes and shape-checks the op, `apply.go` applies it to a
+detached copy of the layout inside `Store.Mutate`, and `validate.go` validates the **whole resulting
+document** before the copy is assigned back. Validating the op alone could not work: only the result tells
+you whether an overlap now exists. A rejected op leaves the game exactly as it was, and the write is confined
+to `PublicData["layout"]` — `PrivateData`, `Players`, `Teams` and `Stage` are not reachable from there.
+
+### Client side — pure core, thin renderer
+
+The client is split in two, and the boundary is enforced by what each half may import.
+
+| Path | Contains |
+|---|---|
+| `client/layout/` | Pure TypeScript, no React Native imports: schema, grid geometry, collision, style compile, the widget registry, and the Lua host. Runs in bare Node, which is what makes the feature testable at all — the client has no React test renderer. |
+| `client/components/board/` | React Native components only. They render what the core computes and hold no layout logic. |
+
+`parseLayout` never throws. It runs against wire data on every keyframe, so it degrades to an issue list
+instead. Bad geometry is clamped, but a schema violation is an error-severity issue and the parse returns no
+layout at all.
+
+### Lua is the binding layer
+
+There is no declarative binding language. A script does the mapping from game state to widgets, so a second
+expression evaluator over the same state would be redundant surface area.
+
+Scripts are **asymmetric**: they send actions outbound through `indri.send(…)`, and receive nothing inbound.
+A script learns about the world only by observing the reduced game state through the `stateChanged` event. A
+script that read raw messages could interpret one differently from the reducer and desynchronise from
+authoritative state, so there is deliberately no `message` event.
+
+A script never writes game state. Presentation writes land in a local **override layer**
+(`client/layout/lua/overrides.ts`), which `mergeOverrides` composites over the server layout at render time.
+The delta stream and the scripts therefore never touch the same object. Overrides are cleared on a keyframe
+and only on a keyframe: a keyframe is a resync, while a delta is incremental and must not wipe a script's
+work.
+
+### Two validators, on purpose
+
+`internal/handlers/actions/layout/validate.go` and the TypeScript schema under `client/layout/schema/` are a
+**deliberately duplicated pair**. They cannot share code across languages, so the rules are written twice and
+the constants and the AABB overlap test are kept textually identical. Every Go rule names the file it
+mirrors. Change one side and you must change the other.
+
+The two halves are not interchangeable. The client's `parseLayout` is UX feedback: it clamps and warns so a
+sloppy board still renders. The Go validator is the security boundary: it rejects rather than repairs,
+because a rule that only the client enforces is not enforced at all.
+
+## Host-authored content — accepted risk
+
+**Read this before any public deployment.**
+
+A host can set arbitrary media URIs and arbitrary Lua source in their game's layout. The server delivers both
+to every player in that game, where the client loads the URI and executes the script. **There is no URI
+allow-listing and no script review.** This is an accepted risk for a proof of concept. Do not ship it to a
+public deployment without both.
+
+The caps that do exist are structural only. They bound the cost of a layout; they do not judge its content.
+
+| Cap | Value | Source |
+|---|---|---|
+| Widgets per layout | 300 | `maxWidgets` — counted across all scenes and all nested sub-grids |
+| Serialised layout size | 256 KiB | `maxBytes` |
+| Sub-grid nesting | 4 grid levels | `maxDepth` — the scene's own grid is level 1, so at most three nested sub-grids |
+| Grid dimension (`cols`, `rows`) | 8 to 4096 | `minDim`, `maxDim` |
+
+All four are in `internal/handlers/actions/layout/validate.go`.
+
+**Script source length is not capped directly.** `maxBytes` bounds it only transitively, as part of the
+serialised layout. A single script can therefore be almost 256 KiB of text that every client will execute.
+The client runs scripts under an instruction budget (`DEFAULT_INSTRUCTION_BUDGET`, 200 000 VM instructions
+per top-level call), but that budget is best-effort: it counts VM instructions, and one instruction can do
+unbounded work.
+
+**Widget `config` and `style` contents are opaque to the server by design.** Indri is a framework and does
+not know what a "text" widget is, so encoding widget semantics server-side would duplicate the client
+registry and go stale. The consequence is worth stating: a bad `style` key passes the server, and the
+client's strict parse then rejects the **whole** layout. Every player in that game sees "This board could not
+be loaded." instead of any board at all. One typo in one widget takes down the board for everyone.
+
 ## Client (`client/`)
 
 Expo Router / React Native app, three context providers (`game-state`, `user-state`, `game-list`), each

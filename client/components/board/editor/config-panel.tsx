@@ -7,9 +7,9 @@
  * dispatch from a descriptor's `kind` to the control that draws it, plus the
  * error and pending-edit state that only a mounted component has.
  *
- * The pickers themselves are placeholders. They are replaced one-for-one by
- * `editor/pickers/*` in a later story; nothing outside `PICKERS` needs to
- * change when they are.
+ * The controls themselves are in `editor/pickers/*`, and their own parse and
+ * format logic is in `editor/pickers/parse.ts` for the same reason: it is
+ * testable without a renderer, so it is tested without one.
  */
 
 import {useEffect, useMemo, useRef, useState} from "react"
@@ -21,6 +21,14 @@ import {
     isDrawableField,
 } from "../../../layout/edit/panel.ts"
 import {setWidgetConfig} from "../../../layout/edit/ops.ts"
+import {BooleanPicker} from "./pickers/boolean"
+import {ColorPicker} from "./pickers/color"
+import {DatePicker} from "./pickers/date"
+import {MultiSelectPicker} from "./pickers/multiselect"
+import {NumberPicker} from "./pickers/number"
+import {SelectPicker} from "./pickers/select"
+import {TextPicker} from "./pickers/text"
+import {UriPicker} from "./pickers/uri"
 
 import type {ComponentType} from "react"
 
@@ -28,16 +36,7 @@ import type {EditContext, LayoutSocket} from "../../../layout/edit/ops.ts"
 import type {FieldInput} from "../../../layout/edit/panel.ts"
 import type {FieldDescriptor} from "../../../layout/registry/fields.ts"
 import type {WidgetDefinition} from "../../../layout/registry/registry.ts"
-
-/** What every picker is handed. `value` is unknown: the schema, not the picker, decides. */
-export interface PickerProps {
-    field: FieldDescriptor
-    /** The current config value, falling back to the widget's default. */
-    value: unknown
-    /** Why the last thing typed here was rejected, if it was. */
-    error?: string
-    onChange: (raw: FieldInput) => void
-}
+import type {PickerProps} from "./pickers/props"
 
 /**
  * The descriptor-kind to control table.
@@ -50,14 +49,14 @@ export interface PickerProps {
  * production. Weakening this type to a `Record` defeats the whole design.
  */
 const PICKERS: {[K in FieldDescriptor["kind"]]: ComponentType<PickerProps>} = {
-    text: PlaceholderPicker,
-    number: PlaceholderPicker,
-    color: PlaceholderPicker,
-    boolean: PlaceholderPicker,
-    date: PlaceholderPicker,
-    select: PlaceholderPicker,
-    multiselect: PlaceholderPicker,
-    uri: PlaceholderPicker,
+    text: TextPicker,
+    number: NumberPicker,
+    color: ColorPicker,
+    boolean: BooleanPicker,
+    date: DatePicker,
+    select: SelectPicker,
+    multiselect: MultiSelectPicker,
+    uri: UriPicker,
 }
 
 export interface ConfigPanelProps {
@@ -145,23 +144,6 @@ export function ConfigPanel({def, widgetId, config, socket, ctx}: ConfigPanelPro
 }
 
 /**
- * A stand-in for the real control, used for every kind until the pickers land.
- *
- * It shows the label and the current value rather than nothing, so the panel is
- * already a readable description of a widget's config and a missing picker is
- * obvious instead of invisible.
- */
-function PlaceholderPicker({field, value, error}: PickerProps) {
-    return (
-        <View style={styles.field}>
-            <Text style={styles.label}>{field.required ? `${field.label} *` : field.label}</Text>
-            <Text style={styles.value}>{`${field.kind}: ${format(value)}`}</Text>
-            {error === undefined ? null : <Text style={styles.error}>{error}</Text>}
-        </View>
-    )
-}
-
-/**
  * Drawn in place of a field whose value no single input can edit.
  *
  * Shown rather than skipped: a config key that a panel silently omits is
@@ -177,13 +159,6 @@ function UndrawableField({field}: {field: FieldDescriptor}) {
     )
 }
 
-function format(value: unknown): string {
-    if (value === undefined) return "—"
-    if (typeof value === "string") return value === "" ? "(empty)" : value
-
-    return JSON.stringify(value)
-}
-
 const styles = StyleSheet.create({
     panel: {
         padding: 8,
@@ -196,10 +171,6 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: "600",
         color: "#111111",
-    },
-    value: {
-        fontSize: 12,
-        color: "#374151",
     },
     note: {
         fontSize: 11,
