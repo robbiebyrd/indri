@@ -70,6 +70,18 @@ being connected.
   m= section"` (issue #1169).
 - **`GatheringCompletePromise` leaks** a blocked goroutine if the PeerConnection closes mid-gather
   (issue #2507). Select against a cancellation channel, never `<-gatherComplete` bare.
+- **Selecting against a context is necessary but NOT sufficient** (found while building Step 4, v4.2.20).
+  pion deliberately fires the gather-complete handler when the PeerConnection closes, so the channel
+  firing does *not* mean gathering succeeded — a peer closed mid-gather otherwise returns a truncated
+  SDP with a nil error. Check `pc.SignalingState() == SignalingStateClosed` after the select and turn
+  that into an error.
+- `SetNAT1To1IPs` is deprecated in v4.2.20 in favour of `SetICEAddressRewriteRules`. Still used, since
+  the change was out of scope for Step 4; revisit before this ships.
+- `NewMultiUDPMuxFromPort` **excludes loopback by default** — in-process tests need
+  `UDPMuxFromPortWithLoopback()` or they gather no reachable candidates.
+- The mux binds one socket **per interface**, so port 0 yields a different ephemeral port on each. Any
+  test asserting that peers share *one* port must reserve a concrete free port first, or it passes or
+  fails depending on how many interfaces are up.
 - Single-port UDP mux (`ice.NewMultiUDPMuxFromPort` + `SetICEUDPMux`) is the container-friendly choice.
   `SetEphemeralUDPPortRange` does **not** constrain server-reflexive candidate ports, so it cannot
   actually lock down exposure. The mux must exist before any PeerConnection uses it.
