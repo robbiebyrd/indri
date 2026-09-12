@@ -56,7 +56,5 @@ codealike.json
 .claude
 .wiz
 .codecontext/
-reviews/archive
 .pnpm-store
 client/.expo-*-check
-stories/archive
