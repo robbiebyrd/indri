@@ -22,7 +22,10 @@ services:
     image: 'bitnami/redis:latest'
     environment:
       - REDIS_PASSWORD=${INDRI_REDIS_PASSWORD}
-      - ALLOW_EMPTY_PASSWORD=${INDRI_REDIS_EMPTY_PASSWORD:-no}
+      # Local development stack only: INDRI_REDIS_PASSWORD is empty by default,
+      # and bitnami/redis refuses to start with an empty password unless this is
+      # set. Do not reuse this compose file for a deployment.
+      - ALLOW_EMPTY_PASSWORD=yes
     ports:
       - '${INDRI_REDIS_PORT:-6379}:6379'
 
