@@ -51,7 +51,7 @@ func New(sessions resolvers.SessionLookup) *Transport {
 	srv.AddTransport(gqlhttp.POST{})
 	srv.AddTransport(gqlhttp.Websocket{
 		KeepAlivePingInterval: 10 * time.Second,
-		Implementation:        originGuard{origins: t.origins},
+		Implementation:        originGuard{transport: t},
 		InitFunc: func(ctx context.Context, initPayload gqlhttp.InitPayload) (context.Context, *gqlhttp.InitPayload, error) {
 			// Authenticate the subscription from the connection_init payload's
 			// Authorization value (the session bearer token).
@@ -70,8 +70,11 @@ func New(sessions resolvers.SessionLookup) *Transport {
 // internal/entrypoints/http is not what decides it; without this, gqlgen's
 // websocket library falls back to its own same-origin rule and refuses an
 // allowlisted browser that every other route accepts.
+// It holds the transport rather than the policy so the policy is read at accept
+// time. Capturing it here instead would freeze whatever New built, leaving no
+// way to substitute one afterwards.
 type originGuard struct {
-	origins *transport.OriginPolicy
+	transport *Transport
 }
 
 var _ gqlhttp.WebsocketImplementation = originGuard{}
@@ -88,7 +91,7 @@ func (g originGuard) Accept(
 	r *http.Request,
 	options gqlhttp.WebsocketAcceptOptions,
 ) (gqlhttp.WebsocketConn, error) {
-	if !g.origins.Allows(r) {
+	if !g.transport.origins.Allows(r) {
 		return nil, fmt.Errorf("origin %q is not allowed", r.Header.Get("Origin"))
 	}
 
