@@ -1,15 +1,16 @@
 ---
 id: 027-7e5e
 title: Host-only layout action handler, reachable from both transports
-status: ready
+status: in_progress
 priority: P1
 type: feature
 created: "2026-09-10T00:58:00.964Z"
-updated: "2026-09-10T00:58:08.818Z"
+updated: "2026-09-12T01:12:44.493Z"
 dependencies: ["025", "026"]
 plan: plans/layout-authoring-editor.md
 plan_step: Step 3
 depends_on: ["stories/025-6b2f-pending-P2-layout-op-envelope-types-and-decoding.md", "stories/026-0ae1-pending-P2-structural-layout-validation-in-go.md"]
+started_at: "2026-09-12T01:12:44.492Z"
 ---
 
 # Host-only layout action handler, reachable from both transports
