@@ -55,6 +55,20 @@ var routes = map[string]build{
 	"refresh": args(),
 
 	"inquire": args(required("inquiryType"), optional("inquiry", "code")),
+
+	// The layout route cannot use args(): an op's arguments are objects whose
+	// shape depends on the op, not a fixed list of strings. The body is passed
+	// through whole and the handler's decodeOp rejects every field the op does
+	// not declare, so a caller still cannot smuggle an unknown key past it.
+	"layout": func(in map[string]interface{}) (map[string]interface{}, error) {
+		for _, name := range []string{"code", "op"} {
+			if _, err := requiredString(in, name); err != nil {
+				return nil, err
+			}
+		}
+
+		return in, nil
+	},
 }
 
 // Actions returns every action the REST API exposes, sorted. It exists so a

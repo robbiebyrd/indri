@@ -42,6 +42,7 @@ type ComplexityRoot struct {
 		Inquire    func(childComplexity int, inquiryType string, inquiry *string, code *string) int
 		JoinGame   func(childComplexity int, code string, teamID string) int
 		Kick       func(childComplexity int, code string, userID string) int
+		Layout     func(childComplexity int, code string, op string, args model.JSON) int
 		LeaveGame  func(childComplexity int) int
 		Login      func(childComplexity int, email string, password string) int
 		Logout     func(childComplexity int) int
@@ -72,6 +73,7 @@ type MutationResolver interface {
 	Kick(ctx context.Context, code string, userID string) (model.JSON, error)
 	Logout(ctx context.Context) (model.JSON, error)
 	Inquire(ctx context.Context, inquiryType string, inquiry *string, code *string) (model.JSON, error)
+	Layout(ctx context.Context, code string, op string, args model.JSON) (model.JSON, error)
 }
 type QueryResolver interface {
 	Ping(ctx context.Context) (string, error)
@@ -142,6 +144,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.Kick(childComplexity, args["code"].(string), args["userId"].(string)), true
+	case "Mutation.layout":
+		if e.ComplexityRoot.Mutation.Layout == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_layout_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.Layout(childComplexity, args["code"].(string), args["op"].(string), args["args"].(model.JSON)), true
 	case "Mutation.leaveGame":
 		if e.ComplexityRoot.Mutation.LeaveGame == nil {
 			break
@@ -329,6 +342,12 @@ type Mutation {
   kick(code: String!, userId: String!): JSON
   logout: JSON
   inquire(inquiryType: String!, inquiry: String, code: String): JSON
+
+  # Host-only layout authoring. One mutation carries every op behind the "op"
+  # discriminator; "args" holds that op's own fields, whose shape depends on it.
+  # The result is always null — the edit reaches every player, the author
+  # included, as a gameUpdates delta.
+  layout(code: String!, op: String!, args: JSON): JSON
 }
 
 # Server -> client push. The client authenticates the subscription via the
@@ -562,6 +581,36 @@ func (ec *executionContext) field_Mutation_kick_args(ctx context.Context, rawArg
 		return nil, err
 	}
 	args["userId"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_layout_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "code",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["code"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "op",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["op"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "args",
+		func(ctx context.Context, v any) (model.JSON, error) {
+			return ec.unmarshalOJSON2githubᚗcomᚋrobbiebyrdᚋindriᚋinternalᚋtransportᚋgraphqlᚋmodelᚐJSON(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["args"] = arg2
 	return args, nil
 }
 
@@ -1067,6 +1116,50 @@ func (ec *executionContext) fieldContext_Mutation_inquire(ctx context.Context, f
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_inquire_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_layout(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_layout(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().Layout(ctx, fc.Args["code"].(string), fc.Args["op"].(string), fc.Args["args"].(model.JSON))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v model.JSON) graphql.Marshaler {
+			return ec.marshalOJSON2githubᚗcomᚋrobbiebyrdᚋindriᚋinternalᚋtransportᚋgraphqlᚋmodelᚐJSON(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_layout(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type JSON does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_layout_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -2362,6 +2455,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "inquire":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_inquire(ctx, field)
+			})
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "layout":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_layout(ctx, field)
 			})
 			if out.Values[i] == graphql.RequiredNull {
 				out.Invalids++

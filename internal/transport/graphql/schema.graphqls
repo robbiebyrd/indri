@@ -21,6 +21,12 @@ type Mutation {
   kick(code: String!, userId: String!): JSON
   logout: JSON
   inquire(inquiryType: String!, inquiry: String, code: String): JSON
+
+  # Host-only layout authoring. One mutation carries every op behind the "op"
+  # discriminator; "args" holds that op's own fields, whose shape depends on it.
+  # The result is always null — the edit reaches every player, the author
+  # included, as a gameUpdates delta.
+  layout(code: String!, op: String!, args: JSON): JSON
 }
 
 # Server -> client push. The client authenticates the subscription via the
