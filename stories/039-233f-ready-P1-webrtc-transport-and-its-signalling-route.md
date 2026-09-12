@@ -1,11 +1,11 @@
 ---
 id: 039-233f
 title: WebRTC transport and its signalling route
-status: pending
+status: ready
 priority: P1
 type: feature
 created: "2026-09-12T01:27:30.677Z"
-updated: "2026-09-12T01:27:41.484Z"
+updated: "2026-09-12T02:58:06.133Z"
 dependencies: ["034-e42b", "036-f0c7", "038-b855"]
 plan: plans/webrtc-transport.md
 plan_step: Step 6
