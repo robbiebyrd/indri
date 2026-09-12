@@ -284,11 +284,18 @@ func childObject(parent map[string]interface{}, key, path string, create bool) (
 // object at all — validateLayout will reject the replacement anyway, and there
 // is nothing in a non-object to preserve).
 //
-// It exists for two reasons. A layout read back from MongoDB arrives as bson.D,
-// an ordered slice of key/value pairs that validateLayout cannot walk and no
-// client could parse, so it has to be converted before it can be edited. And
-// copying rather than editing in place is what lets applyLayoutOp validate the
-// result before deciding whether the game is allowed to see it.
+// It exists for two reasons.
+//
+// First, a layout read back from MongoDB is not a plain map. With
+// DefaultDocumentM set (see internal/clients/mongodb) it decodes as bson.M;
+// without it, as bson.D. Neither satisfies a `map[string]interface{}` type
+// assertion — bson.M is a NAMED type, so Go requires exact type identity even
+// though the underlying type matches — and validateLayout cannot walk either.
+// Handling both keeps this correct regardless of how the client is configured,
+// which matters because that option lives a long way from here.
+//
+// Second, copying rather than editing in place is what lets applyLayoutOp
+// validate the result before deciding whether the game is allowed to see it.
 func normalizeLayout(value interface{}) map[string]interface{} {
 	normalized, ok := normalizeValue(value).(map[string]interface{})
 	if !ok {
