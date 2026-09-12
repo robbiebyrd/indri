@@ -9,15 +9,22 @@ import (
 	"time"
 
 	"github.com/robbiebyrd/indri/internal/injector"
+	"github.com/robbiebyrd/indri/internal/transport"
 )
 
 func Serve(ctx context.Context, i *injector.Injector) error {
 	mux := http.NewServeMux()
 	i.Transport.Register(mux)
 
+	// One origin allowlist for every route: the WebSocket upgrade, the GraphQL
+	// endpoint, the SSE stream and the REST actions. Browsers need the CORS
+	// response headers to use any of the HTTP transports cross-origin, and a
+	// rejected origin is refused here rather than separately by each transport.
+	handler := transport.OriginPolicyFromEnv().Middleware(mux)
+
 	server := &http.Server{
 		Addr:              i.EnvVars.ListenAddress + ":" + strconv.Itoa(i.EnvVars.ListenPort),
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

@@ -4,8 +4,9 @@
 package ws
 
 import (
+	"errors"
+	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/olahol/melody"
@@ -50,7 +51,9 @@ func New() *Transport {
 		MessageBufferSize:         vars.WSMessageBufferSize,
 	}
 
-	m.Upgrader.CheckOrigin = originChecker(vars.AllowedOrigins)
+	// A WebSocket upgrade is not subject to CORS, so it consults the shared
+	// origin policy directly instead of going through its middleware.
+	m.Upgrader.CheckOrigin = transport.NewOriginPolicy(vars.AllowedOrigins).Allows
 
 	return &Transport{m: m}
 }
@@ -75,8 +78,18 @@ func (t *Transport) Handle(h transport.Handlers) {
 
 func (t *Transport) Register(mux *http.ServeMux) {
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-		if err := t.m.HandleRequest(w, r); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		err := t.m.HandleRequest(w, r)
+
+		switch {
+		case err == nil:
+		case errors.Is(err, melody.ErrClosed):
+			// Rejected before the upgrader touched the response writer.
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		default:
+			// A failed upgrade (bad handshake, disallowed Origin) has already
+			// written its own status and body; writing again would only log a
+			// superfluous WriteHeader warning.
+			log.Printf("websocket upgrade failed (origin %q): %v", r.Header.Get("Origin"), err)
 		}
 	})
 }
@@ -111,28 +124,4 @@ func (t *Transport) Close() error {
 
 func (t *Transport) IsClosed() bool {
 	return t.m.IsClosed()
-}
-
-// originChecker guards the upgrade against Cross-Site WebSocket Hijacking:
-// requests with no Origin (native/CLI clients) are allowed; browser Origins
-// are allowed only if in the allowlist.
-func originChecker(allowedOrigins string) func(*http.Request) bool {
-	allowed := make(map[string]struct{})
-
-	for _, o := range strings.Split(allowedOrigins, ",") {
-		if o = strings.TrimSpace(o); o != "" {
-			allowed[o] = struct{}{}
-		}
-	}
-
-	return func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true
-		}
-
-		_, ok := allowed[origin]
-
-		return ok
-	}
 }

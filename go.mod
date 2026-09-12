@@ -6,6 +6,7 @@ require (
 	github.com/99designs/gqlgen v0.17.95
 	github.com/TwiN/go-away v1.6.16
 	github.com/chenmingyong0423/go-mongox/v2 v2.7.1
+	github.com/coder/websocket v1.8.15
 	github.com/joho/godotenv v1.5.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/kpechenenko/rword v0.0.4
@@ -20,7 +21,6 @@ require (
 require (
 	github.com/agnivade/levenshtein v1.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect

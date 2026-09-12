@@ -102,7 +102,7 @@ func (r *subscriptionResolver) GameUpdates(ctx context.Context, gameID string) (
 		_ = conn.Close()
 	}()
 
-	return conn.events(), nil
+	return conn.Events(), nil
 }
 
 // Mutation returns generated.MutationResolver implementation.
