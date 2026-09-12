@@ -120,6 +120,21 @@ export const MAX_PAYLOAD_DEPTH = 8
  */
 const MAX_STATE_DEPTH = 32
 
+/**
+ * Stack slots one level of marshalling reserves before it pushes anything.
+ *
+ * LUA DOES NOT GROW THE STACK FOR YOU. A host function is entered with
+ * `LUA_MINSTACK` (20) slots reserved, and fengari's `api_check` throws a bare
+ * `Error("stack overflow")` the moment a push goes past them — no Lua traceback,
+ * no chunk name, nothing pointing at the marshaller. Marshalling recurses, so
+ * every level has to ask for its own room; a real game state is several levels
+ * deep and exceeds 20 without this.
+ *
+ * Eight is the deepest any single level goes: a table, a key, and the four slots
+ * `wrapReadOnly` needs to build a proxy over it, with margin.
+ */
+const MARSHAL_SLOTS = 8
+
 const INDEX = to_luastring("__index")
 const NEWINDEX = to_luastring("__newindex")
 const LEN = to_luastring("__len")
@@ -497,6 +512,8 @@ export class LuaHost {
  * `./state.ts` has already removed `rawset`, which would walk around it.
  */
 function pushReadOnly(L: lua_State, value: unknown, depth: number): void {
+    reserve(L)
+
     switch (typeof value) {
         case "boolean":
             lua.lua_pushboolean(L, value)
@@ -652,6 +669,7 @@ function tableToJs(L: lua_State, idx: number, depth: number): unknown {
     // message the enclosing pcall is about to read. The failure path is the
     // enclosing `LuaRuntime.guard`'s job — it restores the stack unconditionally.
     const base = lua.lua_gettop(L)
+    reserve(L)
 
     let table = lua.lua_absindex(L, idx)
     // A read-only view stores nothing of its own, so iterating it directly
@@ -717,6 +735,22 @@ function toObject(
 }
 
 // ---- small helpers -------------------------------------------------------
+
+/**
+ * Make room for one more level of marshalling.
+ *
+ * Thrown rather than raised through `luaL_error`: raising needs stack room to
+ * push its message, which is precisely what is missing here. The throw unwinds
+ * to the enclosing `LuaRuntime.guard`, which restores the stack and reports it
+ * like any other script failure. Unreachable in practice — `LUAI_MAXSTACK` is a
+ * million slots and the depth caps bound this at a few hundred — but a silently
+ * ignored failure here is the bug this function exists to prevent.
+ */
+function reserve(L: lua_State): void {
+    if (!lua.lua_checkstack(L, MARSHAL_SLOTS)) {
+        throw new LuaScriptError(`cannot reserve ${MARSHAL_SLOTS} more Lua stack slots`)
+    }
+}
 
 /** Push a host function and store it under `name` in the table below it. */
 function setFunction(L: lua_State, name: string, fn: LuaCFunction): void {

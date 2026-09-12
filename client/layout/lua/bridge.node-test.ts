@@ -249,6 +249,49 @@ test("state that never produced a game does not reach Lua", () => {
     h.dispose();
 });
 
+// ---- 3b. sceneChanged -----------------------------------------------------
+
+const WATCH_SCENE = `
+    indri.on("stateChanged", function(g) indri.log("state", g.stage.currentScene) end)
+    indri.on("sceneChanged", function(id) indri.log("scene", id) end)
+`;
+
+test("sceneChanged fires only when currentScene moves, and after stateChanged", () => {
+    const h = harness();
+    h.keyframe(gameWith({scene: WATCH_SCENE}));
+
+    assert.deepEqual(
+        h.logs,
+        ["state board", "scene board"],
+        "the first keyframe is a scene change, and state is already current when it lands",
+    );
+
+    // A delta that changes something else must not re-announce the scene.
+    h.delta({code: "WXYZ"}, "2020-01-01T00:00:01.000Z");
+    assert.deepEqual(h.logs, ["state board", "scene board", "state board"]);
+
+    h.delta({"stage.currentScene": "results"}, "2020-01-01T00:00:02.000Z");
+    assert.deepEqual(
+        h.logs,
+        ["state board", "scene board", "state board", "state results", "scene results"],
+        "a handler told the scene is now X must find a state that already says X",
+    );
+
+    assert.deepEqual(h.errors, []);
+    h.dispose();
+});
+
+test("a keyframe for the same scene does not re-announce it", () => {
+    const h = harness();
+    h.keyframe(gameWith({scene: WATCH_SCENE}));
+    h.logs.length = 0;
+
+    h.keyframe(gameWith({scene: WATCH_SCENE}, "2020-01-01T00:00:01.000Z"));
+
+    assert.deepEqual(h.logs, ["state board"], "nothing moved, so no scene change happened");
+    h.dispose();
+});
+
 // ---- 4. keyframe clears overrides, delta does not -------------------------
 
 test("a keyframe clears the override layer and a delta leaves it alone", () => {
@@ -304,7 +347,10 @@ test("the bridge registers no parser and routes no message into Lua", () => {
             indri.on("widgetPress", function() indri.log("widgetPress") end)
         `,
     }));
-    assert.deepEqual(h.logs, ["stateChanged"]);
+    // Both of these are announcements the bridge makes about reduced state.
+    // `widgetPress` is absent because no one pressed anything, which is the
+    // point: nothing here is driven by an incoming message.
+    assert.deepEqual(h.logs, ["stateChanged", "sceneChanged"]);
     h.logs.length = 0;
 
     // Messages that do not produce new game state must reach no script at all.

@@ -1,12 +1,29 @@
-import {memo} from "react"
-import {StyleSheet, Text, View} from "react-native"
+import {createContext, memo, useContext} from "react"
+import {Pressable, StyleSheet, Text, View} from "react-native"
 
 import {getWidget} from "@/layout/registry/registry"
+import {SUBGRID_TYPE} from "@/layout/schema/widget"
 import {placementBox, placementZIndex} from "./placement"
 import {StyledBox} from "./styled-box"
 
+import type {ReactNode} from "react"
 import type {GridSize} from "@/layout/grid/coords"
 import type {Widget} from "@/layout/schema/widget"
+
+/** Told which widget was pressed. The caller decides what that means. */
+export type WidgetPressHandler = (widgetId: string) => void
+
+/**
+ * How a press reaches the Lua host.
+ *
+ * A CONTEXT, NOT A PROP, because the path from the board to a widget runs
+ * through `SceneView` and then through every sub-grid on the way down, and a
+ * prop would have to be re-threaded by each of them — including by any widget
+ * type a game adds later. The board is the only provider; see `BoardView`.
+ */
+const WidgetPressContext = createContext<WidgetPressHandler | undefined>(undefined)
+
+export const WidgetPressProvider = WidgetPressContext.Provider
 
 export interface WidgetHostProps {
     /** The widget's key in its parent's widget map. Also its React key. */
@@ -29,6 +46,7 @@ export interface WidgetHostProps {
 function WidgetHostView({id, widget, grid}: WidgetHostProps) {
     const Component = getWidget(widget.type)?.Component
     const zIndex = placementZIndex(widget.placement)
+    const onPress = useContext(WidgetPressContext)
 
     return (
         <StyledBox
@@ -39,10 +57,39 @@ function WidgetHostView({id, widget, grid}: WidgetHostProps) {
                 zIndex === undefined ? null : {zIndex},
             ]}
         >
-            {Component === undefined
-                ? <UnrenderableWidget id={id} type={widget.type}/>
-                : <Component id={id} widget={widget}/>}
+            <PressTarget id={id} type={widget.type} onPress={onPress}>
+                {Component === undefined
+                    ? <UnrenderableWidget id={id} type={widget.type}/>
+                    : <Component id={id} widget={widget}/>}
+            </PressTarget>
         </StyledBox>
+    )
+}
+
+/**
+ * Makes one widget pressable, or leaves it alone.
+ *
+ * A SUB-GRID IS NEVER A PRESS TARGET. It is a coordinate space whose children
+ * are the real widgets, and wrapping it would nest one press surface inside
+ * another: on web the DOM click reaches both, so a press on cell `c01` would
+ * also report a press on the sub-grid that contains it, and the script would
+ * see an id it never placed. A container that swallowed or duplicated its
+ * children's presses is the bug this rule exists to prevent.
+ */
+function PressTarget(
+    {id, type, onPress, children}: {
+        id: string
+        type: string
+        onPress: WidgetPressHandler | undefined
+        children: ReactNode
+    },
+) {
+    if (onPress === undefined || type === SUBGRID_TYPE) return <>{children}</>
+
+    return (
+        <Pressable style={styles.press} onPress={() => onPress(id)}>
+            {children}
+        </Pressable>
     )
 }
 
@@ -81,6 +128,11 @@ const styles = StyleSheet.create({
     // container, so a widget's position never depends on its siblings.
     widget: {
         position: 'absolute',
+    },
+    // Fills the widget box so the whole widget is the target, not just the
+    // area its content happens to cover.
+    press: {
+        flex: 1,
     },
     unrenderable: {
         flex: 1,

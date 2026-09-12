@@ -46,6 +46,8 @@ declare module "fengari" {
         lua_settop(L: lua_State, n: number): void
         lua_gettop(L: lua_State): number
         lua_absindex(L: lua_State, idx: number): number
+        /** False when the stack cannot grow. Lua never grows it on its own. */
+        lua_checkstack(L: lua_State, n: number): boolean
         lua_remove(L: lua_State, idx: number): void
         lua_pushvalue(L: lua_State, idx: number): void
         lua_pushnil(L: lua_State): void

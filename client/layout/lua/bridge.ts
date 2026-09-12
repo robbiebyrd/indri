@@ -113,6 +113,14 @@ export class LuaBridge {
      * hears about the state that introduced it; a script registered a moment
      * later would have missed its own first `stateChanged`.
      *
+     * `sceneChanged` fires AFTER `stateChanged`, and only when
+     * `stage.currentScene` actually moved. The order is what makes the event
+     * usable: a handler told "the scene is now X" can read `indri.state()` and
+     * find a game that already agrees. The first keyframe counts as a change
+     * (undefined -> the scene), so a script does not have to special-case its
+     * own arrival. A scene going AWAY is not announced — there is no scene to
+     * name, and every script has already had `stateChanged` for it.
+     *
      * TWO CONSEQUENCES FOLLOW, AND SCRIPT AUTHORS HAVE TO KNOW THEM. A chunk's
      * top-level code runs before this update lands, so `indri.state()` there
      * returns the PREVIOUS snapshot — empty on the very first keyframe — and
@@ -124,9 +132,14 @@ export class LuaBridge {
     private apply(game: Game, kind: StateKind): void {
         if (this.disposed) return
 
+        const previous = this.sceneId
         this.sceneId = game.stage?.currentScene
         this.syncScripts(game)
         this.host.applyGameState(game, kind)
+
+        if (this.sceneId !== undefined && this.sceneId !== previous) {
+            this.host.broadcast("sceneChanged", this.sceneId)
+        }
     }
 
     /**

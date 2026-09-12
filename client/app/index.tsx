@@ -1,5 +1,5 @@
-import {Button, Pressable, StyleSheet, Text, View} from 'react-native'
-import {useEffect, useRef, useState} from "react"
+import {Button, StyleSheet, View} from 'react-native'
+import {useCallback, useEffect, useRef, useState} from "react"
 import {MessageHandler} from "@/services/message-handler";
 import Login from "@/components/auth/login";
 import {useGameState} from "@/providers/game-state/use-game-state";
@@ -9,6 +9,8 @@ import GameRefreshButton from "@/components/game/refresh";
 import Join from "@/components/join/join";
 import {useGameList} from "@/providers/game-list/use-game-list";
 import GameCreate from "@/components/join/create";
+import {BoardView} from "@/components/board/board-view";
+import {useLuaBridge, useOverrides} from "@/providers/lua/use-lua-bridge";
 
 export default function Index() {
     const [showJoin, setShowJoin] = useState(true)
@@ -43,7 +45,25 @@ export default function Index() {
         }
     }, [])
 
-    const currentScene = gameState?.stage?.scenes && gameState?.stage.currentScene ? gameState.stage.scenes[gameState.stage.currentScene] : undefined
+    // The scripts in `game.data.layout` run here. The bridge observes the same
+    // reduced game state the reducer produced, so a script can never disagree
+    // with what is on screen.
+    const bridge = useLuaBridge(ws)
+    const overrides = useOverrides(bridge)
+
+    const sceneId = gameState?.stage?.currentScene
+
+    // The other half of the loop: a press becomes a `widgetPress` event that
+    // bubbles widget -> scene -> board through the scripts, and whatever they
+    // decide to do about it leaves through `indri.send`. Nothing about the game
+    // is decided here — this component does not know what a cell is.
+    const onWidgetPress = useCallback(
+        (widgetId: string) => {
+            if (bridge === undefined || sceneId === undefined) return
+            bridge.host.emit("widgetPress", {kind: "widget", sceneId, widgetId}, widgetId)
+        },
+        [bridge, sceneId],
+    )
 
     return (
         <View style={styles.container}>
@@ -57,35 +77,13 @@ export default function Index() {
             {gameState && (
                 <>
                     <GameCode/>
-                    <View>
-                        {currentScene?.data?.board?.map((row: string[], rowNumber: number) => (
-                            <View style={styles.gridContainer} key={rowNumber}>{
-                                row.map((column, columnNumber) => {
-                                    if (column == "") {
-                                        return (
-                                            <View style={styles.gridItem} key={`${rowNumber}-${columnNumber}`}>
-                                                <Pressable style={{width: "100%", height: "100%"}}
-                                                           onPress={() => ws.send({
-                                                               "action": "move",
-                                                               "move": `${rowNumber},${columnNumber}`
-                                                           })}>
-                                                    <Text style={styles.gridItemText}>&nbsp;</Text>
-                                                </Pressable>
-                                            </View>
-                                        )
-                                    } else {
-                                        return (
-                                            <View style={styles.gridItem} key={`${rowNumber}-${columnNumber}`}>
-                                                <Pressable style={{width: "100%", height: "100%"}}>
-                                                    <Text style={styles.gridItemText}>{column}</Text>
-                                                </Pressable>
-                                            </View>
-                                        )
-                                    }
-                                })
-                            }
-                            </View>)
-                        )}
+                    <View style={styles.board}>
+                        <BoardView
+                            layout={gameState.data?.layout}
+                            sceneId={sceneId}
+                            overrides={overrides}
+                            onWidgetPress={onWidgetPress}
+                        />
                     </View>
                     <GameRefreshButton ws={ws}/>
                 </>
@@ -102,28 +100,11 @@ const styles = StyleSheet.create({
         height: '100%',
         width: "100%",
     },
-    gridContainer: {
-        height: '100%',
+    // `width: '100%'` because the container centres its children on the cross
+    // axis, which would otherwise shrink the board to its content — and the
+    // board has no content of its own, only absolutely-positioned widgets.
+    board: {
+        flex: 1,
         width: '100%',
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'space-around',
-        padding: 0,
-        flex: 3
     },
-    gridItem: {
-        width: "33%",
-        height: 100,
-        aspectRatio: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: 'blue',
-        borderWidth: 2,
-        borderColor: 'black',
-    },
-    gridItemText: {
-        color: 'white',
-        fontSize: 80,
-        textAlign: 'center',
-    }
 });

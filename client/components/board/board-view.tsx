@@ -2,9 +2,11 @@ import {useMemo} from "react"
 import {StyleSheet, Text, View} from "react-native"
 
 import {parseLayout} from "@/layout/schema/layout"
+import {EMPTY_OVERRIDES, mergeOverrides} from "@/layout/lua/overrides"
 import {knownWidgetTypes} from "@/layout/registry/registry"
 import {SceneView} from "./scene-view"
 import {StyledBox} from "./styled-box"
+import {WidgetPressProvider} from "./widget-host"
 
 // Side-effect import: populates the widget registry that `knownWidgetTypes`
 // below and `widget-host.tsx` both read. It lives here because this is the
@@ -13,6 +15,8 @@ import {StyledBox} from "./styled-box"
 import "./widgets"
 
 import type {LayoutIssue} from "@/layout/schema/layout"
+import type {Overrides} from "@/layout/lua/overrides"
+import type {WidgetPressHandler} from "./widget-host"
 
 export interface BoardViewProps {
     /**
@@ -23,23 +27,46 @@ export interface BoardViewProps {
     layout: unknown
     /** `stage.currentScene` — which of the layout's scenes to draw. */
     sceneId?: string
+    /**
+     * The presentation a script has painted, from `useOverrides`. Composited
+     * over the server layout here; the server layout itself is never mutated.
+     */
+    overrides?: Overrides
+    /**
+     * Where a press on a widget goes — in practice `LuaHost.emit("widgetPress",
+     * …)`. Omitted, the board is inert, which is what a preview wants.
+     */
+    onWidgetPress?: WidgetPressHandler
 }
 
 /**
- * The whole board: parse the layout, draw the current scene over the board's
- * background, and surface anything the parse complained about.
+ * The whole board: parse the layout, composite the script's overrides over it,
+ * draw the current scene, and surface anything the parse complained about.
+ *
+ * THIS IS WHERE LUA MEETS THE RENDERER. A script's `setStyle`/`setConfig` write
+ * lands in the override layer and reaches the screen only through the
+ * `mergeOverrides` below; without it the whole host API would be inert.
  *
  * `parseLayout` never throws, so there is no error boundary here; every
  * malformed-data path ends in an issue and a message rather than a blank
  * screen.
  */
-export function BoardView({layout, sceneId}: BoardViewProps) {
+export function BoardView({layout, sceneId, overrides, onWidgetPress}: BoardViewProps) {
     // Keyed on the raw layout's identity. `GameStateParser` clones the game on
     // every message, so this recomputes more often than it needs to — but the
     // alternative is hashing the layout, which costs more than the parse.
-    const {layout: parsed, issues} = useMemo(
+    const {layout: server, issues} = useMemo(
         () => parseLayout(layout, {knownWidgetTypes: knownWidgetTypes()}),
         [layout],
+    )
+
+    // Kept separate from the parse so a script painting a cell re-merges
+    // without re-validating the whole layout. `mergeOverrides` is
+    // structure-sharing, so an untouched subtree comes back by reference and
+    // `WidgetHost`'s identity memo still holds.
+    const parsed = useMemo(
+        () => server === undefined ? undefined : mergeOverrides(server, overrides ?? EMPTY_OVERRIDES),
+        [server, overrides],
     )
 
     const scene = parsed !== undefined && sceneId !== undefined
@@ -48,9 +75,11 @@ export function BoardView({layout, sceneId}: BoardViewProps) {
 
     return (
         <StyledBox style={parsed?.style} boxStyle={styles.board}>
-            {parsed !== undefined && scene !== undefined && (
-                <SceneView scene={scene} grid={parsed.grid}/>
-            )}
+            <WidgetPressProvider value={onWidgetPress}>
+                {parsed !== undefined && scene !== undefined && (
+                    <SceneView scene={scene} grid={parsed.grid}/>
+                )}
+            </WidgetPressProvider>
             {parsed === undefined && (
                 <BoardMessage text="This board could not be loaded."/>
             )}

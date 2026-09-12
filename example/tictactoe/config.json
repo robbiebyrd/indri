@@ -55,6 +55,272 @@
       }
     }
   },
-  "data": {},
+  "data": {
+    "layout": {
+      "grid": {
+        "cols": 12,
+        "rows": 12
+      },
+      "style": {
+        "backgroundGradient": {
+          "colors": [
+            "#0f172a",
+            "#1e293b"
+          ]
+        }
+      },
+      "scenes": {
+        "board": {
+          "style": {
+            "padding": 8
+          },
+          "script": "-- Tic-tac-toe's binding layer.\n--\n-- The server owns the board: the Go \"move\" handler writes\n-- stage.scenes.board.data.board and the delta carries it here. This script only\n-- maps that state onto widget text, and turns a press back into a \"move\".\n--\n-- LUA IS 1-INDEXED AND THE CELL IDS ARE 0-INDEXED. Widget \"c12\" is row 1,\n-- column 2, which is board[2][3]. Get the +1 wrong and the board transposes\n-- silently: it still looks like a game, it just plays a different one.\n\nlocal function cellId(row, col)\n    return string.format(\"c%d%d\", row, col)\nend\n\nindri.on(\"stateChanged\", function(g)\n    local stage = g.stage\n    local scenes = stage and stage.scenes\n    local scene = scenes and scenes[stage.currentScene]\n    local board = scene and scene.data and scene.data.board\n    if not board then return end\n\n    for row = 0, 2 do\n        for col = 0, 2 do\n            indri.widget(cellId(row, col)).setConfig({text = board[row + 1][col + 1]})\n        end\n    end\nend)\n\nindri.on(\"widgetPress\", function(id)\n    -- Scene handlers see every widget in the scene, the title included, so the\n    -- id is matched rather than assumed. An unmatched press is not this\n    -- script's business.\n    local row, col = string.match(id, \"^c(%d)(%d)$\")\n    if row == nil then return end\n\n    indri.send(\"move\", {move = row .. \",\" .. col})\nend)\n",
+          "widgets": {
+            "title": {
+              "type": "text",
+              "placement": {
+                "kind": "grid",
+                "col": 0,
+                "row": 0,
+                "w": 12,
+                "h": 2
+              },
+              "config": {
+                "text": "Tic Tac Toe",
+                "fontSize": 32,
+                "align": "center",
+                "color": "#e2e8f0"
+              }
+            },
+            "cells": {
+              "type": "subgrid",
+              "placement": {
+                "kind": "grid",
+                "col": 2,
+                "row": 3,
+                "w": 8,
+                "h": 8
+              },
+              "config": {
+                "grid": {
+                  "cols": 9,
+                  "rows": 9
+                },
+                "widgets": {
+                  "c00": {
+                    "type": "text",
+                    "placement": {
+                      "kind": "grid",
+                      "col": 0,
+                      "row": 0,
+                      "w": 3,
+                      "h": 3
+                    },
+                    "style": {
+                      "backgroundColor": "#1e3a8a",
+                      "border": {
+                        "width": 2,
+                        "color": "#0f172a"
+                      }
+                    },
+                    "config": {
+                      "text": "",
+                      "fontSize": 48,
+                      "align": "center",
+                      "color": "#f8fafc"
+                    }
+                  },
+                  "c01": {
+                    "type": "text",
+                    "placement": {
+                      "kind": "grid",
+                      "col": 3,
+                      "row": 0,
+                      "w": 3,
+                      "h": 3
+                    },
+                    "style": {
+                      "backgroundColor": "#1e3a8a",
+                      "border": {
+                        "width": 2,
+                        "color": "#0f172a"
+                      }
+                    },
+                    "config": {
+                      "text": "",
+                      "fontSize": 48,
+                      "align": "center",
+                      "color": "#f8fafc"
+                    }
+                  },
+                  "c02": {
+                    "type": "text",
+                    "placement": {
+                      "kind": "grid",
+                      "col": 6,
+                      "row": 0,
+                      "w": 3,
+                      "h": 3
+                    },
+                    "style": {
+                      "backgroundColor": "#1e3a8a",
+                      "border": {
+                        "width": 2,
+                        "color": "#0f172a"
+                      }
+                    },
+                    "config": {
+                      "text": "",
+                      "fontSize": 48,
+                      "align": "center",
+                      "color": "#f8fafc"
+                    }
+                  },
+                  "c10": {
+                    "type": "text",
+                    "placement": {
+                      "kind": "grid",
+                      "col": 0,
+                      "row": 3,
+                      "w": 3,
+                      "h": 3
+                    },
+                    "style": {
+                      "backgroundColor": "#1e3a8a",
+                      "border": {
+                        "width": 2,
+                        "color": "#0f172a"
+                      }
+                    },
+                    "config": {
+                      "text": "",
+                      "fontSize": 48,
+                      "align": "center",
+                      "color": "#f8fafc"
+                    }
+                  },
+                  "c11": {
+                    "type": "text",
+                    "placement": {
+                      "kind": "grid",
+                      "col": 3,
+                      "row": 3,
+                      "w": 3,
+                      "h": 3
+                    },
+                    "style": {
+                      "backgroundColor": "#1e3a8a",
+                      "border": {
+                        "width": 2,
+                        "color": "#0f172a"
+                      }
+                    },
+                    "config": {
+                      "text": "",
+                      "fontSize": 48,
+                      "align": "center",
+                      "color": "#f8fafc"
+                    }
+                  },
+                  "c12": {
+                    "type": "text",
+                    "placement": {
+                      "kind": "grid",
+                      "col": 6,
+                      "row": 3,
+                      "w": 3,
+                      "h": 3
+                    },
+                    "style": {
+                      "backgroundColor": "#1e3a8a",
+                      "border": {
+                        "width": 2,
+                        "color": "#0f172a"
+                      }
+                    },
+                    "config": {
+                      "text": "",
+                      "fontSize": 48,
+                      "align": "center",
+                      "color": "#f8fafc"
+                    }
+                  },
+                  "c20": {
+                    "type": "text",
+                    "placement": {
+                      "kind": "grid",
+                      "col": 0,
+                      "row": 6,
+                      "w": 3,
+                      "h": 3
+                    },
+                    "style": {
+                      "backgroundColor": "#1e3a8a",
+                      "border": {
+                        "width": 2,
+                        "color": "#0f172a"
+                      }
+                    },
+                    "config": {
+                      "text": "",
+                      "fontSize": 48,
+                      "align": "center",
+                      "color": "#f8fafc"
+                    }
+                  },
+                  "c21": {
+                    "type": "text",
+                    "placement": {
+                      "kind": "grid",
+                      "col": 3,
+                      "row": 6,
+                      "w": 3,
+                      "h": 3
+                    },
+                    "style": {
+                      "backgroundColor": "#1e3a8a",
+                      "border": {
+                        "width": 2,
+                        "color": "#0f172a"
+                      }
+                    },
+                    "config": {
+                      "text": "",
+                      "fontSize": 48,
+                      "align": "center",
+                      "color": "#f8fafc"
+                    }
+                  },
+                  "c22": {
+                    "type": "text",
+                    "placement": {
+                      "kind": "grid",
+                      "col": 6,
+                      "row": 6,
+                      "w": 3,
+                      "h": 3
+                    },
+                    "style": {
+                      "backgroundColor": "#1e3a8a",
+                      "border": {
+                        "width": 2,
+                        "color": "#0f172a"
+                      }
+                    },
+                    "config": {
+                      "text": "",
+                      "fontSize": 48,
+                      "align": "center",
+                      "color": "#f8fafc"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
   "privateData": {}
 }
