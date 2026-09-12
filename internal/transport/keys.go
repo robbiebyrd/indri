@@ -21,11 +21,20 @@ type Keys struct {
 	closed bool
 }
 
-// NewKeys returns connection state already carrying sessionID under
-// SessionIDKey, so the connection is reachable by broadcast from the moment it
-// is registered.
+// NewKeys returns connection state carrying sessionID under SessionIDKey, so
+// the connection is reachable by broadcast from the moment it is registered.
+//
+// An empty sessionID leaves the key unset rather than storing "": an
+// anonymous connection (e.g. a WebRTC peer before login binds a session)
+// must carry no session key at all, or a broadcast filter comparing against
+// the empty string could match it.
 func NewKeys(sessionID string) *Keys {
-	return &Keys{keys: map[string]any{SessionIDKey: sessionID}}
+	keys := make(map[string]any)
+	if sessionID != "" {
+		keys[SessionIDKey] = sessionID
+	}
+
+	return &Keys{keys: keys}
 }
 
 func (k *Keys) Get(key string) (any, bool) {

@@ -18,6 +18,17 @@ func TestKeys_SessionIDIsSetOnConstruction(t *testing.T) {
 	}
 }
 
+// An anonymous WebRTC peer that has not logged in yet must carry no session
+// key at all — otherwise a broadcast filter comparing against the empty
+// string could match a connection nobody has authenticated.
+func TestKeys_EmptyIDLeavesSessionIDKeyAbsent(t *testing.T) {
+	k := NewKeys("")
+
+	if _, ok := k.Get(SessionIDKey); ok {
+		t.Errorf("Get(%q) reported the key as present for an anonymous connection", SessionIDKey)
+	}
+}
+
 func TestKeys_SetAndUnSet(t *testing.T) {
 	k := NewKeys("abc123")
 
