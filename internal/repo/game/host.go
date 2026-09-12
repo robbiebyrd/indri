@@ -34,7 +34,7 @@ func (s *Store) PlayerIsHost(id string, playerId string) bool {
 
 // UnsetHost clears the host flag on every player, atomically.
 func (s *Store) UnsetHost(id string) error {
-	return s.Mutate(id, func(g *models.Game) error {
+	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
 		for pId, p := range g.Players {
 			if p.Host {
 				p.Host = false
@@ -48,7 +48,7 @@ func (s *Store) UnsetHost(id string) error {
 
 // SetPlayerAsHost makes the given player the sole host of the game, atomically.
 func (s *Store) SetPlayerAsHost(id string, playerId string) error {
-	return s.Mutate(id, func(g *models.Game) error {
+	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
 		if _, ok := g.Players[playerId]; !ok {
 			return fmt.Errorf("player with id %v is not in game %v", playerId, id)
 		}

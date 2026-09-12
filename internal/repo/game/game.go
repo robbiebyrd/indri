@@ -23,6 +23,10 @@ import (
 var collectionName = "game"
 
 type Store struct {
+	// ctx is the process-lifetime context handed in at boot. It bounds writes
+	// that have no caller to speak of (change-event fan-out) and the convenience
+	// helpers below, which take no context of their own yet. A request-scoped
+	// deadline must never be derived from it — that is what Mutate's ctx is for.
 	ctx        *context.Context
 	collection *mongox.Collection[models.Game]
 	client     *mongodb.Client
@@ -98,12 +102,17 @@ func (s *Store) New(code string, script *models.Script, privateGame bool) (*mode
 
 // Get retrieves game data for a specific game ID.
 func (s *Store) Get(id string) (*models.Game, error) {
+	return s.get(*s.ctx, id)
+}
+
+// get is Get under an explicit context, so a mutation can bound its own reads.
+func (s *Store) get(ctx context.Context, id string) (*models.Game, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.collection.Finder().Filter(query.Id(objectId)).FindOne(*s.ctx)
+	return s.collection.Finder().Filter(query.Id(objectId)).FindOne(ctx)
 }
 
 // FindByCode retrieves game data by its game code.
@@ -238,15 +247,21 @@ func (s *Store) DeleteField(id string, key string) error {
 // the game and how to save it conditionally on its version. A different
 // backend (SQLite, ...) reuses the same coordinator by implementing just those
 // two operations.
-func (s *Store) Mutate(id string, apply func(g *models.Game) error) error {
+//
+// ctx is the caller's context, not the store's: it bounds the wait for the
+// game lock and every database round trip this mutation makes, so a caller
+// whose deadline expires (a scripted handler, a disconnecting client) unwinds
+// instead of pinning a goroutine. The change event published after a commit
+// deliberately does not use it — see publish.
+func (s *Store) Mutate(ctx context.Context, id string, apply func(g *models.Game) error) error {
 	var before map[string]interface{}
 
 	return mutation.Run(
-		*s.ctx,
+		ctx,
 		s.locks,
 		"game:"+id,
 		func() (*models.Game, int64, error) {
-			g, err := s.Get(id)
+			g, err := s.get(ctx, id)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -262,7 +277,7 @@ func (s *Store) Mutate(id string, apply func(g *models.Game) error) error {
 		},
 		apply,
 		func(g *models.Game, expectedVersion int64) (bool, error) {
-			committed, err := s.saveWithVersion(id, g, expectedVersion)
+			committed, err := s.saveWithVersion(ctx, id, g, expectedVersion)
 			if err != nil || !committed {
 				return committed, err
 			}
@@ -294,6 +309,11 @@ func (s *Store) publishDiff(id string, before map[string]interface{}, after *mod
 }
 
 // publish emits a change event for the game, if a publisher is configured.
+//
+// It uses the store's own context rather than the caller's on purpose: the
+// write has already committed, so a cancelled request must not stop the players
+// in that game from learning about it. A write that never publishes is
+// invisible.
 func (s *Store) publish(id string, op events.OperationType, updated map[string]interface{}, removed []string) {
 	if s.publisher == nil {
 		return
@@ -325,7 +345,12 @@ func (s *Store) publish(id string, op events.OperationType, updated map[string]i
 // equals expectedVersion, bumping the version on success. It reports whether
 // the write committed. Callers publish the resulting delta themselves; see
 // Mutate.
-func (s *Store) saveWithVersion(id string, g *models.Game, expectedVersion int64) (bool, error) {
+func (s *Store) saveWithVersion(
+	ctx context.Context,
+	id string,
+	g *models.Game,
+	expectedVersion int64,
+) (bool, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return false, err
@@ -340,7 +365,7 @@ func (s *Store) saveWithVersion(id string, g *models.Game, expectedVersion int64
 	}
 
 	result, err := s.collection.Collection().UpdateOne(
-		*s.ctx,
+		ctx,
 		bson.D{{Key: "_id", Value: objectId}, {Key: "version", Value: expectedVersion}},
 		bson.D{{Key: "$set", Value: withoutKey(doc, "_id")}},
 	)

@@ -1,6 +1,10 @@
 package game
 
-import "github.com/robbiebyrd/indri/internal/models"
+import (
+	"context"
+
+	"github.com/robbiebyrd/indri/internal/models"
+)
 
 // Storer is the contract a game store must satisfy. The assertion below keeps
 // it in step with *Store: change one without the other and the build fails.
@@ -21,7 +25,7 @@ type Storer interface {
 	Update(id string, game *models.UpdateGame) error
 	UpdateField(id string, key string, value interface{}) error
 	DeleteField(id string, key string) error
-	Mutate(id string, apply func(g *models.Game) error) error
+	Mutate(ctx context.Context, id string, apply func(g *models.Game) error) error
 	HasPlayer(id string, userId string) bool
 	PlayerOnATeam(id string, userId string) bool
 	AddPlayer(id string, userId string, displayName string) error

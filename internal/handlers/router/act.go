@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -9,10 +10,18 @@ import (
 )
 
 // Dispatch runs the handlers registered for action (wrapped in the
-// received/action/processed lifecycle), threading the session through and
-// merging their Results. It is connection-independent: any transport resolves
-// the session and supplies the decoded payload.
-func Dispatch(session *models.Session, action string, payload map[string]interface{}) (actions.Result, error) {
+// received/action/processed lifecycle), threading the caller's context and
+// session through and merging their Results. It is connection-independent: any
+// transport resolves the session and supplies the decoded payload.
+//
+// Every handler sees the dispatched action, not the lifecycle phase it is
+// registered under, so a received/processed hook can tell what actually fired.
+func Dispatch(
+	ctx context.Context,
+	session *models.Session,
+	action string,
+	payload map[string]interface{},
+) (actions.Result, error) {
 	if action == "" {
 		return actions.Result{}, fmt.Errorf("action is empty")
 	}
@@ -25,7 +34,14 @@ func Dispatch(session *models.Session, action string, payload map[string]interfa
 				continue
 			}
 
-			res, err := invokeHandler(registered.Handler, actions.Request{Session: session, Payload: payload})
+			req := actions.Request{
+				Context: ctx,
+				Action:  action,
+				Session: session,
+				Payload: payload,
+			}
+
+			res, err := invokeHandler(registered.Handler, req)
 
 			merged.Responses = append(merged.Responses, res.Responses...)
 			merged.DisconnectIDs = append(merged.DisconnectIDs, res.DisconnectIDs...)

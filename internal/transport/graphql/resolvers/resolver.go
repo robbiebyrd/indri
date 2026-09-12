@@ -68,7 +68,7 @@ func (r *Resolver) sessionFromContext(ctx context.Context) *models.Session {
 func (r *Resolver) dispatch(ctx context.Context, action string, payload map[string]interface{}) (model.JSON, error) {
 	session := r.sessionFromContext(ctx)
 
-	result, err := router.Dispatch(session, action, payload)
+	result, err := router.Dispatch(ctx, session, action, payload)
 
 	if len(result.DisconnectIDs) > 0 {
 		r.Sinks.Disconnect(result.DisconnectIDs)

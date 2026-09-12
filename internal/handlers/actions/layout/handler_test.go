@@ -1,6 +1,7 @@
 package layout
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -40,13 +41,15 @@ func (f *fakeGames) GetByCode(code string) (*models.Game, error) {
 // a test can assert "no write, no delta" rather than only "no error".
 type fakeMutator struct {
 	game      *models.Game
+	ctx       context.Context
 	id        string
 	called    bool
 	committed bool
 	applyErr  error
 }
 
-func (f *fakeMutator) Mutate(id string, apply func(g *models.Game) error) error {
+func (f *fakeMutator) Mutate(ctx context.Context, id string, apply func(g *models.Game) error) error {
+	f.ctx = ctx
 	f.id = id
 	f.called = true
 
@@ -396,5 +399,56 @@ func TestEditLayout_SurfacesALookupFailure(t *testing.T) {
 
 	if mutator.called {
 		t.Errorf("a failed lookup still reached Mutate")
+	}
+}
+
+// TestEditLayout_GivesMutateTheRequestContext matters because Mutate waits on
+// the game lock and then talks to the database. Handed the store's boot-time
+// context instead of the caller's, an edit from a client that has already gone
+// away would sit on that lock with nobody left to care.
+func TestEditLayout_GivesMutateTheRequestContext(t *testing.T) {
+	type callerKey struct{}
+
+	g := hostedGame()
+	mutator := &fakeMutator{game: g}
+	ctx := context.WithValue(context.Background(), callerKey{}, "the caller")
+
+	if _, err := editLayout(
+		actions.Request{
+			Context: ctx,
+			Session: sessionFor(ptr(hostID), ptr(g.ID.Hex())),
+			Payload: addWidgetPayload(),
+		},
+		&fakeGames{game: g},
+		mutator,
+	); err != nil {
+		t.Fatalf("editLayout(host adding a widget) = %v, want no error", err)
+	}
+
+	if mutator.ctx != ctx {
+		t.Errorf("Mutate got context %v, want the request's own context %v", mutator.ctx, ctx)
+	}
+}
+
+// TestEditLayout_SurvivesARequestWithNoContext covers the handler being called
+// by something other than the router (a test, a future transport): a nil
+// Context must degrade to Background, not panic inside the lock.
+func TestEditLayout_SurvivesARequestWithNoContext(t *testing.T) {
+	g := hostedGame()
+	mutator := &fakeMutator{game: g}
+
+	if _, err := editLayout(
+		actions.Request{
+			Session: sessionFor(ptr(hostID), ptr(g.ID.Hex())),
+			Payload: addWidgetPayload(),
+		},
+		&fakeGames{game: g},
+		mutator,
+	); err != nil {
+		t.Fatalf("editLayout(request with no context) = %v, want no error", err)
+	}
+
+	if mutator.ctx == nil {
+		t.Errorf("Mutate got a nil context, want context.Background()")
 	}
 }

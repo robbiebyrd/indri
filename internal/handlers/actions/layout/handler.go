@@ -1,6 +1,7 @@
 package layout
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
@@ -16,11 +17,12 @@ type gameLookup interface {
 	GetByCode(gameCode string) (*models.Game, error)
 }
 
-// gameMutator is the read-modify-write path. Mutate takes no context, diffs
-// before against after, and publishes the delta itself on commit — which is
-// why this handler never publishes and never fills Result.Responses.
+// gameMutator is the read-modify-write path. Mutate bounds its lock wait and
+// its database calls with the context it is given, diffs before against after,
+// and publishes the delta itself on commit — which is why this handler never
+// publishes and never fills Result.Responses.
 type gameMutator interface {
-	Mutate(id string, apply func(g *models.Game) error) error
+	Mutate(ctx context.Context, id string, apply func(g *models.Game) error) error
 }
 
 type Handler struct {
@@ -88,7 +90,7 @@ func editLayout(req actions.Request, games gameLookup, mutator gameMutator) (act
 	// The published delta is the response: every player in the game, the
 	// editing host included, learns about the edit through the broadcast.
 	// Nothing goes back to the caller directly.
-	if err := mutator.Mutate(gameId, func(g *models.Game) error {
+	if err := mutator.Mutate(req.Ctx(), gameId, func(g *models.Game) error {
 		return applyLayoutOp(g, op)
 	}); err != nil {
 		return actions.Result{}, fmt.Errorf("editing the layout of game %v: %w", *gameCode, err)

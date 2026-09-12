@@ -10,6 +10,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,7 +39,12 @@ type SessionLookup interface {
 
 // Dispatcher runs an action through the shared handler registry. It is a field
 // so tests can drive the transport without booting the whole injector.
-type Dispatcher func(session *models.Session, action string, payload map[string]interface{}) (actions.Result, error)
+type Dispatcher func(
+	ctx context.Context,
+	session *models.Session,
+	action string,
+	payload map[string]interface{},
+) (actions.Result, error)
 
 // Transport is the REST action API.
 type Transport struct {
@@ -106,7 +112,9 @@ func (t *Transport) handle(w http.ResponseWriter, r *http.Request) {
 	// actions that require a session reject it themselves.
 	session, _ := t.sessions.GetByToken(bearerToken(r))
 
-	result, err := t.Dispatch(session, action, payload)
+	// The request's own context bounds the action: a client that hangs up mid
+	// action unwinds the handler instead of leaving it on a game lock.
+	result, err := t.Dispatch(r.Context(), session, action, payload)
 
 	if len(result.DisconnectIDs) > 0 {
 		t.Disconnect(result.DisconnectIDs)

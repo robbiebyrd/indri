@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"context"
 	"log"
 
 	"github.com/robbiebyrd/indri/internal/entrypoints"
@@ -115,7 +116,14 @@ func handleClientMessage(i *injector.Injector, c transport.Conn, msg []byte) {
 		}
 	}
 
-	result, dispatchErr := router.DispatchMessage(session, msg)
+	// The transport's message callback carries no per-message context, so this
+	// dispatch is scoped to the process: shutdown cancels it, nothing else does.
+	ctx := i.GlobalContext
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	result, dispatchErr := router.DispatchMessage(ctx, session, msg)
 
 	if result.Session != nil {
 		cs.SetKey("sessionId", result.Session.ID.Hex())

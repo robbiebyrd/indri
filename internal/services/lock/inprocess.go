@@ -23,6 +23,15 @@ func NewInProcess() *InProcess {
 	return &InProcess{locks: make(map[string]*refCounted)}
 }
 
+// Acquire takes the lock for key, waiting until the current holder releases it
+// or ctx is done, whichever comes first.
+//
+// The wait is cancellable: a sync.Mutex cannot be waited on with a deadline, so
+// the blocking acquisition runs in its own goroutine and Acquire selects over
+// it. When ctx wins the race that goroutine is still queued for the mutex, so
+// it is handed the job of releasing the lock the moment it gets it. Abandoning
+// it instead would leave the key locked by a caller that has already given up —
+// a permanent deadlock for every later writer of that game.
 func (m *InProcess) Acquire(ctx context.Context, key string) (Handle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -37,9 +46,24 @@ func (m *InProcess) Acquire(ctx context.Context, key string) (Handle, error) {
 	entry.refs++
 	m.mu.Unlock()
 
-	entry.mu.Lock()
+	acquired := make(chan struct{})
 
-	return &inProcessHandle{manager: m, key: key, entry: entry}, nil
+	go func() {
+		entry.mu.Lock()
+		close(acquired)
+	}()
+
+	select {
+	case <-acquired:
+		return &inProcessHandle{manager: m, key: key, entry: entry}, nil
+	case <-ctx.Done():
+		go func() {
+			<-acquired
+			m.release(key, entry)
+		}()
+
+		return nil, ctx.Err()
+	}
 }
 
 // release drops a reference to the key's lock and removes the map entry once no

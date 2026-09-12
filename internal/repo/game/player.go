@@ -55,7 +55,7 @@ func (s *Store) AddPlayer(id string, userId string, displayName string) error {
 		return err
 	}
 
-	return s.Mutate(id, func(g *models.Game) error {
+	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
 		if _, ok := g.Players[userId]; ok {
 			return fmt.Errorf("player with id %v already exists in game %v", userId, id)
 		}
@@ -80,7 +80,7 @@ func (s *Store) RemovePlayer(id string, userId string) error {
 		return err
 	}
 
-	return s.Mutate(id, func(g *models.Game) error {
+	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
 		removePlayerFromTeams(g, userId)
 		delete(g.Players, userId)
 

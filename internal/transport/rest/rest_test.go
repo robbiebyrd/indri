@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -35,6 +36,7 @@ func (f fakeSessions) GetByToken(token string) (*models.Session, error) {
 type recorder struct {
 	mu sync.Mutex
 
+	ctx     context.Context
 	action  string
 	payload map[string]interface{}
 	session *models.Session
@@ -44,11 +46,17 @@ type recorder struct {
 	err    error
 }
 
-func (d *recorder) dispatch(session *models.Session, action string, payload map[string]interface{}) (actions.Result, error) {
+func (d *recorder) dispatch(
+	ctx context.Context,
+	session *models.Session,
+	action string,
+	payload map[string]interface{},
+) (actions.Result, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	d.calls++
+	d.ctx = ctx
 	d.action = action
 	d.payload = payload
 	d.session = session

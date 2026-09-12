@@ -47,7 +47,7 @@ func (h *TicTacToeMoveHandler) Handle(req actions.Request) (actions.Result, erro
 	// Apply the whole move — validation, board update, win check and turn flip
 	// — as one atomic read-modify-write, so two racing moves can't lose an
 	// update or leave the board advanced with the turn unflipped.
-	err := h.i.GameRepo.Mutate(gameId, func(g *models.Game) error {
+	err := h.i.GameRepo.Mutate(req.Ctx(), gameId, func(g *models.Game) error {
 		thisTeam := g.Teams[teamId]
 
 		marker, ok := thisTeam.PublicData["marker"]

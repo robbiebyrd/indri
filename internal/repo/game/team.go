@@ -31,7 +31,7 @@ func (s *Store) ChangePlayerTeam(id string, teamId string, userId string) error 
 		return err
 	}
 
-	return s.Mutate(id, func(g *models.Game) error {
+	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
 		if _, ok := g.Players[userId]; !ok {
 			return fmt.Errorf("player with id %s is not in this game", userId)
 		}
@@ -49,7 +49,7 @@ func (s *Store) AddPlayerToTeam(id string, teamId string, userId string) error {
 		return err
 	}
 
-	return s.Mutate(id, func(g *models.Game) error {
+	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
 		if _, ok := g.Players[userId]; !ok {
 			return fmt.Errorf("player with id %s is not in this game", userId)
 		}
@@ -72,7 +72,7 @@ func (s *Store) RemovePlayerFromTeam(id string, userId string) error {
 		return err
 	}
 
-	return s.Mutate(id, func(g *models.Game) error {
+	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
 		if !removePlayerFromTeams(g, userId) {
 			return mutation.ErrAbort
 		}
