@@ -37,7 +37,7 @@ import {setAbsolutePlacement, setPlacement} from "@/layout/edit/ops"
 import {knownWidgetTypes} from "@/layout/registry/registry"
 import {parseLayout} from "@/layout/schema/layout"
 import {allowsOverlap} from "@/layout/schema/placement"
-import {cellSize, lineIndexes, moveAbsolute, rectToPixels, resizeAbsolute, showGridLines, snapMove, snapResize} from "./snap"
+import {cellSize, lineIndexes, moveAbsolute, rectToPixels, resizeAbsolute, resizeAbsoluteOrigin, showGridLines, snapMove, snapResize, snapResizeOrigin} from "./snap"
 
 import type {LayoutChangeEvent} from "react-native"
 import type {EditContext, LayoutSocket} from "@/layout/edit/ops"
@@ -223,6 +223,8 @@ function AbsoluteFrame({id, selected, onSelect, placement, board, ctx, ws}: Abso
     const ty = useSharedValue(0)
     const dw = useSharedValue(0)
     const dh = useSharedValue(0)
+    const ox = useSharedValue(0)
+    const oy = useSharedValue(0)
 
     function commitMove(dx: number, dy: number) {
         setAbsolutePlacement(ws, ctx, id, moveAbsolute(placement, dx, dy, board))
@@ -236,6 +238,12 @@ function AbsoluteFrame({id, selected, onSelect, placement, board, ctx, ws}: Abso
         setAbsolutePlacement(ws, ctx, id, resizeAbsolute(placement, dx, dy, board))
         dw.value = 0
         dh.value = 0
+    }
+
+    function commitResizeOrigin(dx: number, dy: number) {
+        setAbsolutePlacement(ws, ctx, id, resizeAbsoluteOrigin(placement, dx, dy, board))
+        ox.value = 0
+        oy.value = 0
     }
 
     const drag = Gesture.Pan()
@@ -260,6 +268,15 @@ function AbsoluteFrame({id, selected, onSelect, placement, board, ctx, ws}: Abso
             runOnJS(commitResize)(dw.value, dh.value)
         })
 
+    const resizeOrigin = Gesture.Pan()
+        .onChange((e) => {
+            ox.value += e.changeX
+            oy.value += e.changeY
+        })
+        .onEnd(() => {
+            runOnJS(commitResizeOrigin)(ox.value, oy.value)
+        })
+
     // Percentages of the board, converted once here: an animated style cannot
     // mix a percentage base with a pixel offset, so the base is resolved to
     // pixels and the gesture offset added to it.
@@ -269,10 +286,10 @@ function AbsoluteFrame({id, selected, onSelect, placement, board, ctx, ws}: Abso
     const baseHeight = (Number.parseFloat(placement.height) / 100) * board.height
 
     const frameStyle = useAnimatedStyle(() => ({
-        left: baseLeft,
-        top: baseTop,
-        width: Math.max(8, baseWidth + dw.value),
-        height: Math.max(8, baseHeight + dh.value),
+        left: baseLeft + ox.value,
+        top: baseTop + oy.value,
+        width: Math.max(8, baseWidth + dw.value - ox.value),
+        height: Math.max(8, baseHeight + dh.value - oy.value),
         transform: [{translateX: tx.value}, {translateY: ty.value}],
         borderColor: ABSOLUTE_COLOR,
         borderWidth: selected ? 2 : 1,
@@ -283,6 +300,11 @@ function AbsoluteFrame({id, selected, onSelect, placement, board, ctx, ws}: Abso
             <Text style={styles.frameLabel} numberOfLines={1}>{id}</Text>
             <GestureDetector gesture={Gesture.Race(drag, select)}>
                 <Animated.View style={styles.dragSurface}/>
+            </GestureDetector>
+            <GestureDetector gesture={resizeOrigin}>
+                <Animated.View style={styles.originHandle}>
+                    <View style={styles.handleGrip}/>
+                </Animated.View>
             </GestureDetector>
             <GestureDetector gesture={resize}>
                 <Animated.View style={styles.handle}>
@@ -337,6 +359,10 @@ function EditableFrame({id, selected, onSelect, rect, cell, grid, ctx, ws}: Edit
     const ty = useSharedValue(0)
     const dw = useSharedValue(0)
     const dh = useSharedValue(0)
+    // The origin handle's own offset. Kept apart from the drag offset so a
+    // resize from the top-left does not read as a move.
+    const ox = useSharedValue(0)
+    const oy = useSharedValue(0)
     const rejected = useSharedValue(0)
 
     const box = rectToPixels(rect, cell)
@@ -368,6 +394,21 @@ function EditableFrame({id, selected, onSelect, rect, cell, grid, ctx, ws}: Edit
 
         tx.value = withTiming(0, {duration: SNAP_BACK_MS})
         ty.value = withTiming(0, {duration: SNAP_BACK_MS})
+        flashRejected()
+    }
+
+    function commitResizeOrigin(dx: number, dy: number) {
+        const next = snapResizeOrigin(rect, dx, dy, cell, grid)
+
+        if (setPlacement(ws, ctx, id, next)) {
+            ox.value = 0
+            oy.value = 0
+
+            return
+        }
+
+        ox.value = withTiming(0, {duration: SNAP_BACK_MS})
+        oy.value = withTiming(0, {duration: SNAP_BACK_MS})
         flashRejected()
     }
 
@@ -412,14 +453,25 @@ function EditableFrame({id, selected, onSelect, rect, cell, grid, ctx, ws}: Edit
             runOnJS(commitResize)(dw.value, dh.value)
         })
 
+    const resizeOrigin = Gesture.Pan()
+        .onChange((e) => {
+            ox.value += e.changeX
+            oy.value += e.changeY
+        })
+        .onEnd(() => {
+            runOnJS(commitResizeOrigin)(ox.value, oy.value)
+        })
+
     const frameStyle = useAnimatedStyle(() => ({
-        left: box.left,
-        top: box.top,
+        // The origin handle moves the corner and grows the box by the same
+        // amount, so the far edge stays where it is during the gesture too.
+        left: box.left + ox.value,
+        top: box.top + oy.value,
         // Floored at one cell so a shrink past zero cannot invert the box while
         // the gesture is still running; `snapResize` enforces the same floor on
         // the value that is actually sent.
-        width: Math.max(cell.width, box.width + dw.value),
-        height: Math.max(cell.height, box.height + dh.value),
+        width: Math.max(cell.width, box.width + dw.value - ox.value),
+        height: Math.max(cell.height, box.height + dh.value - oy.value),
         transform: [{translateX: tx.value}, {translateY: ty.value}],
         borderColor: rejected.value > 0 ? REJECT_COLOR : FRAME_COLOR,
         borderWidth: selected ? 2 : 1,
@@ -430,6 +482,11 @@ function EditableFrame({id, selected, onSelect, rect, cell, grid, ctx, ws}: Edit
             <Text style={styles.frameLabel} numberOfLines={1}>{id}</Text>
             <GestureDetector gesture={Gesture.Race(drag, select)}>
                 <Animated.View style={styles.dragSurface}/>
+            </GestureDetector>
+            <GestureDetector gesture={resizeOrigin}>
+                <Animated.View style={styles.originHandle}>
+                    <View style={styles.handleGrip}/>
+                </Animated.View>
             </GestureDetector>
             <GestureDetector gesture={resize}>
                 <Animated.View style={styles.handle}>
@@ -493,6 +550,17 @@ const styles = StyleSheet.create({
     // Hangs off the bottom-right corner. 44pt square regardless of how small
     // the widget is — a one-cell widget on a 64-column grid is a few pixels
     // wide, and a handle that size would be unusable on touch.
+    // Mirror of `handle`, pinned to the opposite corner. Same 44pt target: a
+    // resize from the origin is no less of a touch than one from the far edge.
+    originHandle: {
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        width: HANDLE_SIZE,
+        height: HANDLE_SIZE,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     handle: {
         position: 'absolute',
         right: -HANDLE_SIZE / 2,

@@ -9,9 +9,11 @@ import {
     moveAbsolute,
     rectToPixels,
     resizeAbsolute,
+    resizeAbsoluteOrigin,
     showGridLines,
     snapMove,
     snapResize,
+    snapResizeOrigin,
 } from "./snap.ts";
 
 import type {CellSize} from "./snap.ts";
@@ -168,3 +170,58 @@ test("overlap and z survive a move, because a drag must not silently reset them"
     assert.equal(moved.overlap, true);
     assert.equal(moved.z, 3);
 });
+
+// --- resizing from the origin ------------------------------------------------
+
+// Without this a widget can only grow right and down, so one pinned against
+// the left edge could never be widened at all.
+test("snapResizeOrigin moves the origin and keeps the far edge put", () => {
+    const base = {col: 4, row: 4, w: 3, h: 3};
+    const cell = {width: 10, height: 10};
+    const grid = {cols: 12, rows: 12};
+
+    // Two cells left and one up: the right/bottom edges must not move.
+    const grown = snapResizeOrigin(base, -20, -10, cell, grid);
+    assert.deepStrictEqual(grown, {col: 2, row: 3, w: 5, h: 4});
+    assert.equal(grown.col + grown.w, base.col + base.w, "right edge fixed");
+    assert.equal(grown.row + grown.h, base.row + base.h, "bottom edge fixed");
+});
+
+test("snapResizeOrigin floors the span at one cell rather than inverting", () => {
+    const shrunk = snapResizeOrigin(
+        {col: 0, row: 0, w: 3, h: 3}, 10_000, 10_000, {width: 10, height: 10}, {cols: 12, rows: 12},
+    );
+    assert.equal(shrunk.w, 1);
+    assert.equal(shrunk.h, 1);
+    assert.equal(shrunk.col + shrunk.w, 3, "the far edge still does not move");
+});
+
+test("snapResizeOrigin clamps at the board edge", () => {
+    const base = {col: 2, row: 2, w: 2, h: 2};
+    const out = snapResizeOrigin(base, -10_000, -10_000, {width: 10, height: 10}, {cols: 12, rows: 12});
+    assert.equal(out.col, 0);
+    assert.equal(out.row, 0);
+    assert.equal(out.w, 4, "it grew to the edge, not past it");
+});
+
+test("resizeAbsoluteOrigin is the viewport equivalent", () => {
+    const grown = resizeAbsoluteOrigin(ABS, -40, 0, BOARD);
+    // 40px of 400 is 10%: left 10% -> 0%, width 30% -> 40%.
+    assert.equal(grown.left, "0%");
+    assert.equal(grown.width, "40%");
+    assert.equal(
+        pctNum(grown.left) + pctNum(grown.width),
+        pctNum(ABS.left) + pctNum(ABS.width),
+        "the right edge must not move",
+    );
+});
+
+test("resizeAbsoluteOrigin floors the span", () => {
+    const shrunk = resizeAbsoluteOrigin(ABS, 10_000, 10_000, BOARD);
+    assert.equal(shrunk.width, `${MIN_ABSOLUTE_SPAN}%`);
+    assert.equal(shrunk.height, `${MIN_ABSOLUTE_SPAN}%`);
+});
+
+function pctNum(v: string): number {
+    return Number.parseFloat(v);
+}

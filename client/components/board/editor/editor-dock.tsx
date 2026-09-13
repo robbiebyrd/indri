@@ -6,6 +6,7 @@ import {ConfigPanel} from "./config-panel"
 import {useEditorScene} from "./drag-resize"
 import {Palette} from "./palette"
 import {PlacementPanel} from "./placement-panel"
+import {WidgetList} from "./widget-list"
 
 import type {LayoutSocket} from "@/layout/edit/ops"
 
@@ -65,6 +66,7 @@ export function EditorDock({ws, layout, sceneId, gameCode, selectedId, onSelect}
                 onAdd={onSelect}
                 onRemove={() => onSelect(undefined)}
             />
+            <WidgetList widgets={scene.widgets} selectedId={selectedId} onSelect={onSelect}/>
             {selected !== undefined && selectedId !== undefined && (
                 <PlacementPanel
                     ws={ws}

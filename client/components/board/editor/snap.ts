@@ -131,6 +131,35 @@ export function snapResize(
 }
 
 /**
+ * Where a widget's TOP-LEFT corner lands after the origin handle is dragged.
+ *
+ * The far edge stays put and the origin moves, which is the opposite of
+ * `snapResize`. Without this a widget can only ever grow right and down, so
+ * one pinned against the left edge could never be widened at all.
+ *
+ * Both the origin and the span move together: dragging the corner left by two
+ * cells means col -= 2 AND w += 2. The span is floored at one cell, which is
+ * also what stops the origin sliding past the far edge.
+ */
+export function snapResizeOrigin(
+    base: GridRect,
+    dx: number,
+    dy: number,
+    cell: CellSize,
+    grid: GridSize,
+): GridRect {
+    const right = base.col + base.w
+    const bottom = base.row + base.h
+
+    // Clamped to the board first, then the span is whatever is left to the far
+    // edge — so the two can never disagree about where the widget ends.
+    const col = clampOrigin(base.col + cellsSpanned(dx, cell.width), right - 1)
+    const row = clampOrigin(base.row + cellsSpanned(dy, cell.height), bottom - 1)
+
+    return {col, row, w: right - col, h: bottom - row}
+}
+
+/**
  * A pixel distance as a whole number of cells, rounding at the half cell.
  *
  * An unmeasured board has zero width, and a non-finite delta can arrive from a
@@ -213,4 +242,37 @@ export function resizeAbsolute(
     )
 
     return {...placement, width: pct(width), height: pct(height)}
+}
+
+/**
+ * The viewport equivalent of `snapResizeOrigin`: the far edge stays, the
+ * origin moves.
+ */
+export function resizeAbsoluteOrigin(
+    placement: AbsolutePlacement,
+    dx: number,
+    dy: number,
+    board: BoardSize,
+): AbsolutePlacement {
+    const right = pctValue(placement.left) + pctValue(placement.width)
+    const bottom = pctValue(placement.top) + pctValue(placement.height)
+
+    const left = clamp(
+        pctValue(placement.left) + (dx / board.width) * 100,
+        0,
+        right - MIN_ABSOLUTE_SPAN,
+    )
+    const top = clamp(
+        pctValue(placement.top) + (dy / board.height) * 100,
+        0,
+        bottom - MIN_ABSOLUTE_SPAN,
+    )
+
+    return {
+        ...placement,
+        left: pct(left),
+        top: pct(top),
+        width: pct(right - left),
+        height: pct(bottom - top),
+    }
 }
