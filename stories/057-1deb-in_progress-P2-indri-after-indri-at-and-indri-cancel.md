@@ -1,15 +1,16 @@
 ---
 id: 057-1deb
 title: indri.after, indri.at and indri.cancel
-status: pending
+status: in_progress
 priority: P2
 type: feature
 created: "2026-09-12T01:28:12.572Z"
-updated: "2026-09-12T01:29:08.011Z"
+updated: "2026-09-13T23:21:48.664Z"
 dependencies: ["054", "056"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 12
 depends_on: ["stories/054-5cca-pending-P2-indri-reply-and-indri-send-with-depth-and-fan-out-.md", "stories/056-f2b1-pending-P2-durable-schedule-store-for-deferred-events.md"]
+started_at: "2026-09-13T23:21:48.663Z"
 ---
 
 # indri.after, indri.at and indri.cancel

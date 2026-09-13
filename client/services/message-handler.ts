@@ -81,7 +81,10 @@ export class MessageHandler {
             ...parsers
         ]
 
-        this.transport.connect(url)
+        // The rejection is already reported by whoever owns reconnection
+        // policy — the supervisor, or the transport's own warning. Catching
+        // it here only stops an unhandled rejection crashing the app.
+        this.transport.connect(url).catch(() => undefined)
 
         this.transport.onOpen(() => {
             this.opened = true

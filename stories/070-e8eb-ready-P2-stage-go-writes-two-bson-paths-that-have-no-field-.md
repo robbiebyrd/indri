@@ -1,11 +1,11 @@
 ---
-id: "070-e8eb"
-title: "stage.go writes two bson paths that have no field on the model"
-status: pending
+id: 070-e8eb
+title: stage.go writes two bson paths that have no field on the model
+status: ready
 priority: P2
 type: fix
-created: 2026-09-13T23:12:28.181Z
-updated: 2026-09-13T23:12:28.181Z
+created: "2026-09-13T23:12:28.181Z"
+updated: "2026-09-13T23:19:58.468Z"
 dependencies: []
 ---
 

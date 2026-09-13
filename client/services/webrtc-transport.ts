@@ -19,6 +19,7 @@
 // webrtc-transport.node-test.ts run at all.
 import {RTCPeerConnection} from "react-native-webrtc-web-shim"
 
+import {Handlers} from "./transport.ts"
 import {ChunkReassembler, buildOfferSignal, normaliseMessage, parseSignalFromJson, signalUrl, waitForIceGatheringComplete} from "./webrtc-signal.ts"
 
 import type {ClientTransport} from "./transport.ts"
@@ -30,6 +31,8 @@ const GAME_CHANNEL_LABEL = "game"
 const SIGNAL_CHANNEL_LABEL = "signal"
 
 export class WebRTCTransport implements ClientTransport {
+    readonly name = "webrtc"
+
     private pc?: RTCPeerConnection = undefined
     private game?: RTCDataChannel = undefined
     // One reassembler per connection: a fresh one every connect(), and
@@ -38,10 +41,20 @@ export class WebRTCTransport implements ClientTransport {
     // comment in webrtc-signal.ts).
     private reassembler?: ChunkReassembler = undefined
 
-    connect(url: string): void {
+    private readonly messageHandlers = new Handlers<(data: string) => void>()
+    private readonly openHandlers = new Handlers<() => void>()
+    private readonly closeHandlers = new Handlers<(reason: string) => void>()
+
+    private pending?: {resolve: () => void, reject: (err: Error) => void} = undefined
+
+    connect(url: string): Promise<void> {
         const pc = new RTCPeerConnection()
         this.pc = pc
         this.reassembler = new ChunkReassembler()
+
+        const connected = new Promise<void>((resolve, reject) => {
+            this.pending = {resolve, reject}
+        })
 
         // "game" carries every action to/from the server, and is left at the
         // DataChannel default — reliable, ordered (no maxRetransmits or
@@ -61,19 +74,69 @@ export class WebRTCTransport implements ClientTransport {
         // reads anything on it.
         pc.createDataChannel(SIGNAL_CHANNEL_LABEL)
 
-        //TODO: Handle errors appropriately.
-        game.onerror = (e: Event) => {
-            console.log(e)
+        game.onopen = () => {
+            this.settle(true, "")
+            this.openHandlers.emit()
         }
 
-        //TODO: Handle reconnects
+        game.onmessage = (e: MessageEvent) => {
+            if (!this.reassembler) {
+                return
+            }
+            const message = normaliseMessage(e.data, this.reassembler)
+            // undefined means a chunk sequence is still in progress: nothing
+            // to hand upward yet (criterion 5).
+            if (message !== undefined) {
+                this.messageHandlers.emit(message)
+            }
+        }
+
+        game.onerror = () => {
+            console.warn("webrtc: data channel error")
+        }
+
         game.onclose = () => {
-            console.log("webrtc game channel closed")
+            const reason = "webrtc data channel closed"
+
+            // Before open the candidate never came up, which is a connect
+            // failure; after open it is a live channel dying, which is what a
+            // supervisor fails over on.
+            if (this.settle(false, reason)) {
+                return
+            }
+
+            this.closeHandlers.emit(reason)
         }
 
+        // Signalling failing is a connect failure like any other: reject so a
+        // supervisor moves to the next candidate instead of waiting on a
+        // channel that will never open.
         this.negotiate(pc, url).catch((err: unknown) => {
-            console.log(err)
+            this.settle(false, err instanceof Error ? err.message : String(err))
         })
+
+        return connected
+    }
+
+    /**
+     * Settles the in-flight connect, if there is one. Returns whether it did,
+     * which is what tells a close "the channel never opened".
+     */
+    private settle(ok: boolean, reason: string): boolean {
+        const pending = this.pending
+        if (!pending) {
+            return false
+        }
+
+        this.pending = undefined
+
+        if (ok) {
+            pending.resolve()
+        } else {
+            pending.reject(new Error(reason))
+        }
+
+        return true
     }
 
     private async negotiate(pc: RTCPeerConnection, url: string): Promise<void> {
@@ -114,28 +177,16 @@ export class WebRTCTransport implements ClientTransport {
         this.game.send(JSON.stringify(message))
     }
 
-    onMessage(handler: (data: string) => void): void {
-        if (!this.game) {
-            return
-        }
-        this.game.onmessage = (e: MessageEvent) => {
-            if (!this.reassembler) {
-                return
-            }
-            const message = normaliseMessage(e.data, this.reassembler)
-            // undefined means a chunk sequence is still in progress: nothing
-            // to hand upward yet (criterion 5).
-            if (message !== undefined) {
-                handler(message)
-            }
-        }
+    onMessage(handler: (data: string) => void): () => void {
+        return this.messageHandlers.add(handler)
     }
 
-    onOpen(handler: () => void): void {
-        if (!this.game) {
-            return
-        }
-        this.game.onopen = () => handler()
+    onOpen(handler: () => void): () => void {
+        return this.openHandlers.add(handler)
+    }
+
+    onClose(handler: (reason: string) => void): () => void {
+        return this.closeHandlers.add(handler)
     }
 
     close(): void {
@@ -158,5 +209,9 @@ export class WebRTCTransport implements ClientTransport {
             this.pc.close()
             this.pc = undefined
         }
+
+        // A caller still awaiting connect has to be told, or an abandoned
+        // attempt leaves that promise pending forever.
+        this.settle(false, "webrtc: closed before the data channel opened")
     }
 }
