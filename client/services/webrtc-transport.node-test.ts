@@ -28,7 +28,6 @@ import {
     normaliseMessage,
     parseSignal,
     parseSignalFromJson,
-    signalUrl,
     waitForIceGatheringComplete,
 } from "./webrtc-signal.ts";
 
@@ -82,13 +81,8 @@ test("parseSignalFromJson returns undefined rather than throwing on malformed JS
     assert.equal(logged, 1, "the parse failure is logged, not silent");
 });
 
-test("signalUrl derives the fixed signalling route from a ws:// url, ignoring its path", () => {
-    assert.equal(signalUrl("ws://localhost:5004/ws"), "http://localhost:5004/rtc/offer");
-});
-
-test("signalUrl maps wss:// to https://", () => {
-    assert.equal(signalUrl("wss://example.com/ws?x=1"), "https://example.com/rtc/offer");
-});
+// The signalling URL derivation moved to endpoints.ts, where it is shared with
+// the SSE and REST routes; it is covered by endpoints.node-test.ts.
 
 /**
  * `Uint8Array.prototype.buffer` is typed `ArrayBufferLike` (it can in theory

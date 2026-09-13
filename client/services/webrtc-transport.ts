@@ -10,8 +10,8 @@
 // both (criterion 4). Its types come from ./react-native-webrtc-web-shim.d.ts
 // — the shim itself ships none.
 //
-// This is also why the pure parts (the signal envelope, URL derivation,
-// payload normalisation, the gather-complete wait) live in webrtc-signal.ts
+// This is also why the pure parts (the signal envelope, payload
+// normalisation, the gather-complete wait) live in webrtc-signal.ts
 // rather than here: the shim's own internals use extensionless relative
 // imports Node's ESM loader cannot resolve, so importing anything at all from
 // THIS file crashes under `node --experimental-strip-types`. Keeping the
@@ -19,8 +19,9 @@
 // webrtc-transport.node-test.ts run at all.
 import {RTCPeerConnection} from "react-native-webrtc-web-shim"
 
+import {endpoints} from "./endpoints.ts"
 import {Handlers} from "./transport.ts"
-import {ChunkReassembler, buildOfferSignal, normaliseMessage, parseSignalFromJson, signalUrl, waitForIceGatheringComplete} from "./webrtc-signal.ts"
+import {ChunkReassembler, buildOfferSignal, normaliseMessage, parseSignalFromJson, waitForIceGatheringComplete} from "./webrtc-signal.ts"
 
 import type {ClientTransport} from "./transport.ts"
 
@@ -152,7 +153,7 @@ export class WebRTCTransport implements ClientTransport {
             throw new Error("webrtc: no local description after ICE gathering completed")
         }
 
-        const response = await fetch(signalUrl(url), {
+        const response = await fetch(endpoints(url).rtcOffer, {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify(buildOfferSignal(local)),

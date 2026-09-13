@@ -65,20 +65,9 @@ export function parseSignalFromJson(jsonText: string): Signal | undefined {
     return parseSignal(parseJsonSafely<unknown>(jsonText))
 }
 
-/**
- * The signalling route is not derived from the WebSocket URL's path — it is
- * a fixed, absolute route on the same origin
- * (internal/transport/webrtc/webrtc.go signalPath) — only the scheme
- * changes: ws(s):// becomes http(s)://.
- */
-export function signalUrl(wsUrl: string): string {
-    const u = new URL(wsUrl)
-    u.protocol = u.protocol === "wss:" ? "https:" : "http:"
-    u.pathname = "/rtc/offer"
-    u.search = ""
-    u.hash = ""
-    return u.toString()
-}
+// The signalling route used to be derived here. It now comes from
+// endpoints.ts alongside the SSE and REST routes: three channels deriving
+// their own URLs would eventually disagree about the scheme or the path.
 
 // A chunk frame's first byte. internal/transport/webrtc/conn.go's
 // sendChunked prefixes every chunk with this exact byte, chosen because a
