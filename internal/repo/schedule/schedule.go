@@ -270,13 +270,32 @@ func (s *Store) Schedule(create CreateEntry) (*Entry, error) {
 		return nil, err
 	}
 
+	entry := newEntry(create)
+
+	if _, err := s.collection.Collection().InsertOne(*s.ctx, entry); err != nil {
+		// Lost a race with a concurrent schedule of the same logical event.
+		// Return the winner rather than a raw duplicate-key error.
+		if mongo.IsDuplicateKeyError(err) {
+			return s.findByIdempotencyKey(entry.IdempotencyKey)
+		}
+
+		return nil, fmt.Errorf("scheduling action %q for game %q: %w", create.Action, create.GameID, err)
+	}
+
+	return entry, nil
+}
+
+// newEntry builds the document a new deferred event starts from. Both backends
+// create entries through it, so an entry scheduled against the in-memory store
+// starts life in exactly the shape a stored one does.
+func newEntry(create CreateEntry) *Entry {
 	if create.IdempotencyKey == "" {
 		create.IdempotencyKey = randomID()
 	}
 
 	now := mongoTime(time.Now())
 
-	entry := &Entry{
+	return &Entry{
 		ID:             bson.NewObjectID(),
 		GameID:         create.GameID,
 		Action:         create.Action,
@@ -292,18 +311,6 @@ func (s *Store) Schedule(create CreateEntry) (*Entry, error) {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-
-	if _, err := s.collection.Collection().InsertOne(*s.ctx, entry); err != nil {
-		// Lost a race with a concurrent schedule of the same logical event.
-		// Return the winner rather than a raw duplicate-key error.
-		if mongo.IsDuplicateKeyError(err) {
-			return s.findByIdempotencyKey(create.IdempotencyKey)
-		}
-
-		return nil, fmt.Errorf("scheduling action %q for game %q: %w", create.Action, create.GameID, err)
-	}
-
-	return entry, nil
 }
 
 // Get retrieves a single entry by its ID.
@@ -549,6 +556,17 @@ func (s *Store) leaseFilter(objectID bson.ObjectID) bson.D {
 		{Key: "state", Value: StateLeased},
 		{Key: "claimedBy", Value: s.cfg.InstanceID},
 	}
+}
+
+// heldBy is the Go mirror of leaseFilter: it reports whether owner still holds
+// the entry. Change one and you must change the other;
+// TestHeldBy_MirrorsLeaseFilter fails if they drift.
+func heldBy(e *Entry, owner string) bool {
+	if e == nil {
+		return false
+	}
+
+	return e.State == StateLeased && e.ClaimedBy == owner
 }
 
 // findOneAndUpdate applies update to the one document matching filter and

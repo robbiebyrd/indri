@@ -9,6 +9,24 @@ jobs:
   go:
     name: Go build, vet & test
     runs-on: ubuntu-latest
+
+    # The suite is designed to pass with no database: the game and schedule
+    # stores each have an in-memory backend, and every rule they own is
+    # asserted against it. MongoDB is here for the layer a fake cannot stand
+    # in for — that a conditional UpdateOne really fences on the version, and
+    # that FindOneAndUpdate really leases one entry to one instance. Without
+    # the service those tests skip, and a broken fence would ship unnoticed.
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -20,7 +38,43 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Test
+        env:
+          INDRI_TEST_MONGO_URI: mongodb://localhost:27017/?directConnection=true
         run: go test -race ./...
+
+      # The suite must not depend on the service above. Pointed at a port
+      # nothing listens on, every assertion still has to run: only "/mongodb"
+      # subtests may skip, and a skip anywhere else means a test has gone back
+      # to reporting green without executing.
+      #
+      # This runs over ./... rather than named packages on purpose. Scoping it
+      # to the packages that happen to have fakes today would let the next
+      # package reintroduce the very rot this step exists to catch, silently.
+      # A new skip fails CI and has to be either fixed or added below with a
+      # reason.
+      #
+      # KNOWN_SKIPS is the exception list. Every entry is a debt, not a
+      # decision:
+      #   TestDelete_InvalidatesToken — internal/repo/session has no in-memory
+      #   backend yet, so this is the one rule still proved only where a
+      #   database is reachable.
+      - name: Tests run without a database
+        env:
+          INDRI_TEST_MONGO_URI: mongodb://127.0.0.1:1/
+          KNOWN_SKIPS: TestDelete_InvalidatesToken
+        run: |
+          go test -json ./... > results.json
+          unexpected=$(jq -r 'select(.Action == "skip" and .Test != null) | .Test' results.json \
+            | grep -v '/mongodb$' \
+            | grep -vxF "$KNOWN_SKIPS" || true)
+          if [ -n "$unexpected" ]; then
+            echo "These tests skipped with no database available:"
+            echo "$unexpected"
+            echo
+            echo "A skipped test reports green without running. Give the package"
+            echo "an in-memory backend, or add the test to KNOWN_SKIPS with a reason."
+            exit 1
+          fi
 
   client:
     name: Client typecheck

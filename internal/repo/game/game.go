@@ -3,7 +3,6 @@ package game
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/chenmingyong0423/go-mongox/v2"
@@ -17,21 +16,19 @@ import (
 	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
-	"github.com/robbiebyrd/indri/internal/services/mutation"
 )
 
 var collectionName = "game"
 
+// Store is the MongoDB-backed game store. Everything that is not
+// Mongo-specific — the mutation bracket, the change deltas and every rule
+// built on them — comes from the embedded core; this type supplies only the
+// queries.
 type Store struct {
-	// ctx is the process-lifetime context handed in at boot. It bounds writes
-	// that have no caller to speak of (change-event fan-out) and the convenience
-	// helpers below, which take no context of their own yet. A request-scoped
-	// deadline must never be derived from it — that is what Mutate's ctx is for.
-	ctx        *context.Context
+	core
+
 	collection *mongox.Collection[models.Game]
 	client     *mongodb.Client
-	locks      lock.Manager
-	publisher  events.Publisher
 }
 
 // NewStore creates a new repository for accessing game data. locks provides the
@@ -53,93 +50,63 @@ func NewStore(ctx context.Context, client *mongodb.Client, locks lock.Manager, p
 	}
 
 	return &Store{
-		ctx:        &ctx,
+		core: core{
+			ctx:       ctx,
+			docs:      mongoDocs{collection: gameColl},
+			locks:     locks,
+			publisher: publisher,
+		},
 		client:     client,
 		collection: gameColl,
-		locks:      locks,
-		publisher:  publisher,
 	}, nil
 }
 
-// New creates a new game, given an ID.
-func (s *Store) New(code string, script *models.Script, privateGame bool) (*models.Game, error) {
-	gameDataModel := models.CreateGame{
-		Code:      code,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Private:   privateGame,
-	}
+// mongoDocs is core's persistence port over a MongoDB collection.
+type mongoDocs struct {
+	collection *mongox.Collection[models.Game]
+}
 
-	if script != nil {
-		gameDataModel.Teams = &script.Teams
-		gameDataModel.Stage = &script.Stage
-		gameDataModel.PublicData = script.PublicData
-		gameDataModel.PrivateData = script.PrivateData
-	}
-
-	doc, err := repoUtils.CreateBSONDoc(gameDataModel)
+func (m mongoDocs) insert(ctx context.Context, create models.CreateGame) (string, error) {
+	doc, err := repoUtils.CreateBSONDoc(create)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	result, err := s.collection.Collection().InsertOne(*s.ctx, &doc)
+	result, err := m.collection.Collection().InsertOne(ctx, &doc)
 	if err != nil {
 		// The unique code index rejected a concurrent create with the same
 		// code — surface the friendly error, not a raw duplicate-key.
 		if mongo.IsDuplicateKeyError(err) {
-			return nil, fmt.Errorf("game with code %s already exists", code)
+			return "", fmt.Errorf("game with code %s already exists", create.Code)
 		}
 
-		return nil, err
+		return "", err
 	}
 
-	// Get the newly inserted ID
-	insertedId := result.InsertedID.(bson.ObjectID).Hex()
-
-	// Get the User and return it
-	return s.Get(insertedId)
+	return result.InsertedID.(bson.ObjectID).Hex(), nil
 }
 
-// Get retrieves game data for a specific game ID.
-func (s *Store) Get(id string) (*models.Game, error) {
-	return s.get(*s.ctx, id)
-}
-
-// get is Get under an explicit context, so a mutation can bound its own reads.
-func (s *Store) get(ctx context.Context, id string) (*models.Game, error) {
+// load reads one game under the caller's context, so a mutation can bound its
+// own reads.
+func (m mongoDocs) load(ctx context.Context, id string) (*models.Game, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.collection.Finder().Filter(query.Id(objectId)).FindOne(ctx)
+	return m.collection.Finder().Filter(query.Id(objectId)).FindOne(ctx)
 }
 
-// FindByCode retrieves game data by its game code.
-func (s *Store) FindByCode(gameCode string) (*models.Game, error) {
-	return s.collection.Finder().Filter(query.Eq("code", gameCode)).FindOne(*s.ctx)
+func (m mongoDocs) findByCode(ctx context.Context, gameCode string) (*models.Game, error) {
+	return m.collection.Finder().Filter(query.Eq("code", gameCode)).FindOne(ctx)
 }
 
-// FindOpen retrieves game data by its game code.
-func (s *Store) FindOpen(limit int) ([]*models.Game, error) {
-	return s.collection.Finder().Filter(query.Ne("private", true)).Limit(int64(limit)).Find(*s.ctx)
+func (m mongoDocs) findOpen(ctx context.Context, limit int) ([]*models.Game, error) {
+	return m.collection.Finder().Filter(query.Ne("private", true)).Limit(int64(limit)).Find(ctx)
 }
 
-// GetIDHex returns the game code for a given game id.
-func (s *Store) GetIDHex(gameCode string) (*string, error) {
-	retrievedGame, err := s.FindByCode(gameCode)
-	if err != nil {
-		return nil, err
-	}
-
-	gameId := retrievedGame.ID.Hex()
-
-	return &gameId, nil
-}
-
-// Exists checks to see if a game with the given ID already exists.
-func (s *Store) Exists(id string) (bool, error) {
-	count, err := s.collection.Finder().Filter(query.Eq("code", id)).Count(*s.ctx)
+func (m mongoDocs) existsByCode(ctx context.Context, code string) (bool, error) {
+	count, err := m.collection.Finder().Filter(query.Eq("code", code)).Count(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -147,22 +114,54 @@ func (s *Store) Exists(id string) (bool, error) {
 	return count > 0, nil
 }
 
-// Update saves game data to the repository.
-func (s *Store) Update(id string, game *models.UpdateGame) error {
-	filterDoc, err := s.getBsonDocForID(id)
+// saveVersioned persists the whole game only if its stored version still
+// equals expectedVersion, bumping the version on success. It reports whether
+// the write committed. Callers publish the resulting delta themselves; see
+// core.Mutate.
+func (m mongoDocs) saveVersioned(
+	ctx context.Context,
+	id string,
+	g *models.Game,
+	expectedVersion int64,
+) (bool, error) {
+	objectId, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return false, err
+	}
+
+	g.UpdatedAt = time.Now()
+	g.Version = expectedVersion + 1
+
+	doc, err := repoUtils.CreateBSONDoc(g)
+	if err != nil {
+		return false, err
+	}
+
+	result, err := m.collection.Collection().UpdateOne(
+		ctx,
+		bson.D{{Key: "_id", Value: objectId}, {Key: "version", Value: expectedVersion}},
+		bson.D{{Key: "$set", Value: withoutKey(doc, "_id")}},
+	)
+	if err != nil {
+		return false, err
+	}
+
+	return result.MatchedCount == 1, nil
+}
+
+func (m mongoDocs) replace(ctx context.Context, id string, game *models.UpdateGame) error {
+	filterDoc, err := bsonDocForID(id)
 	if err != nil {
 		return err
 	}
-
-	game.UpdatedAt = time.Now()
 
 	doc, err := repoUtils.CreateBSONDoc(game)
 	if err != nil {
 		return err
 	}
 
-	result, err := s.collection.Collection().UpdateOne(
-		context.TODO(),
+	result, err := m.collection.Collection().UpdateOne(
+		ctx,
 		filterDoc,
 		bson.D{{Key: "$set", Value: doc}},
 	)
@@ -177,15 +176,14 @@ func (s *Store) Update(id string, game *models.UpdateGame) error {
 	return nil
 }
 
-// UpdateField updates a field in the game.
-func (s *Store) UpdateField(id string, key string, value interface{}) error {
-	filterDoc, err := s.getBsonDocForID(id)
+func (m mongoDocs) setField(ctx context.Context, id string, key string, value interface{}) error {
+	filterDoc, err := bsonDocForID(id)
 	if err != nil {
 		return err
 	}
 
-	result, err := s.collection.Collection().UpdateOne(
-		*s.ctx,
+	result, err := m.collection.Collection().UpdateOne(
+		ctx,
 		filterDoc,
 		bson.D{
 			{Key: "$set", Value: bson.D{
@@ -203,20 +201,17 @@ func (s *Store) UpdateField(id string, key string, value interface{}) error {
 		return fmt.Errorf("error updating game field: game with id %v does not exists", id)
 	}
 
-	s.publish(id, events.OpUpdate, map[string]interface{}{key: value}, nil)
-
 	return nil
 }
 
-// DeleteField removes a field from a game.
-func (s *Store) DeleteField(id string, key string) error {
-	filterDoc, err := s.getBsonDocForID(id)
+func (m mongoDocs) unsetField(ctx context.Context, id string, key string) error {
+	filterDoc, err := bsonDocForID(id)
 	if err != nil {
 		return err
 	}
 
-	result, err := s.collection.Collection().UpdateOne(
-		*s.ctx,
+	result, err := m.collection.Collection().UpdateOne(
+		ctx,
 		filterDoc,
 		bson.D{
 			{Key: "$unset", Value: bson.D{
@@ -236,144 +231,43 @@ func (s *Store) DeleteField(id string, key string) error {
 		return fmt.Errorf("field %v does not exists", key)
 	}
 
-	s.publish(id, events.OpUpdate, nil, []string{key})
-
 	return nil
 }
 
-// Mutate applies apply to the game as a conflict-free read-modify-write. The
-// coordination (distributed lock + version fence + retry) lives in the
-// mutation package, above this store; this method only supplies how to load
-// the game and how to save it conditionally on its version. A different
-// backend (SQLite, ...) reuses the same coordinator by implementing just those
-// two operations.
-//
-// ctx is the caller's context, not the store's: it bounds the wait for the
-// game lock and every database round trip this mutation makes, so a caller
-// whose deadline expires (a scripted handler, a disconnecting client) unwinds
-// instead of pinning a goroutine. The change event published after a commit
-// deliberately does not use it — see publish.
-func (s *Store) Mutate(ctx context.Context, id string, apply func(g *models.Game) error) error {
-	var before map[string]interface{}
-
-	return mutation.Run(
-		ctx,
-		s.locks,
-		"game:"+id,
-		func() (*models.Game, int64, error) {
-			g, err := s.get(ctx, id)
-			if err != nil {
-				return nil, 0, err
-			}
-
-			// Snapshot the JSON view before apply mutates the game in place,
-			// so the committed delta can be diffed against it.
-			before, err = events.ToMap(g)
-			if err != nil {
-				return nil, 0, err
-			}
-
-			return g, g.Version, nil
-		},
-		apply,
-		func(g *models.Game, expectedVersion int64) (bool, error) {
-			committed, err := s.saveWithVersion(ctx, id, g, expectedVersion)
-			if err != nil || !committed {
-				return committed, err
-			}
-
-			s.publishDiff(id, before, g)
-
-			return true, nil
-		},
-	)
-}
-
-// publishDiff computes the dotted-path delta between the pre-mutation snapshot
-// and the saved game and publishes it. Errors are logged, not surfaced: the
-// write already committed, so a fan-out hiccup must not fail the mutation.
-func (s *Store) publishDiff(id string, before map[string]interface{}, after *models.Game) {
-	if s.publisher == nil {
-		return
-	}
-
-	afterMap, err := events.ToMap(after)
-	if err != nil {
-		log.Printf("could not snapshot game %v for change event: %v", id, err)
-		return
-	}
-
-	updated, removed := events.Diff(before, afterMap)
-
-	s.publish(id, events.OpUpdate, updated, removed)
-}
-
-// publish emits a change event for the game, if a publisher is configured.
-//
-// It uses the store's own context rather than the caller's on purpose: the
-// write has already committed, so a cancelled request must not stop the players
-// in that game from learning about it. A write that never publishes is
-// invisible.
-func (s *Store) publish(id string, op events.OperationType, updated map[string]interface{}, removed []string) {
-	if s.publisher == nil {
-		return
-	}
-
-	// Strip private data so a broadcast delta never exposes more than a
-	// sanitized keyframe would.
-	updated, removed = events.SanitizeDelta(updated, removed)
-
-	event := events.ChangeEvent{
-		ID:            id,
-		OperationType: op,
-		Timestamp:     time.Now(),
-		Collection:    collectionName,
-		UpdatedFields: updated,
-		RemovedFields: removed,
-	}
-
-	if !event.HasChanges() {
-		return
-	}
-
-	if err := s.publisher.Publish(*s.ctx, event); err != nil {
-		log.Printf("could not publish change event for game %v: %v", id, err)
-	}
-}
-
-// saveWithVersion persists the whole game only if its stored version still
-// equals expectedVersion, bumping the version on success. It reports whether
-// the write committed. Callers publish the resulting delta themselves; see
-// Mutate.
-func (s *Store) saveWithVersion(
-	ctx context.Context,
-	id string,
-	g *models.Game,
-	expectedVersion int64,
-) (bool, error) {
+// setPlayerConnected sets the player's connected status atomically, only if
+// the player still exists, so a concurrent removal cannot recreate a partial
+// player document. The version bump keeps it coherent with Mutate's CAS.
+func (m mongoDocs) setPlayerConnected(ctx context.Context, id string, userId string, connected bool) error {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	g.UpdatedAt = time.Now()
-	g.Version = expectedVersion + 1
+	playerKey := playerConnectedKey(userId)
 
-	doc, err := repoUtils.CreateBSONDoc(g)
-	if err != nil {
-		return false, err
-	}
-
-	result, err := s.collection.Collection().UpdateOne(
+	result, err := m.collection.Collection().UpdateOne(
 		ctx,
-		bson.D{{Key: "_id", Value: objectId}, {Key: "version", Value: expectedVersion}},
-		bson.D{{Key: "$set", Value: withoutKey(doc, "_id")}},
+		bson.D{
+			{Key: "_id", Value: objectId},
+			{Key: "players." + userId, Value: bson.D{{Key: "$exists", Value: true}}},
+		},
+		bson.D{
+			{Key: "$set", Value: bson.D{
+				{Key: playerKey, Value: connected},
+				{Key: "updatedAt", Value: time.Now()},
+			}},
+			{Key: "$inc", Value: bson.D{{Key: "version", Value: 1}}},
+		},
 	)
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	return result.MatchedCount == 1, nil
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("no player %v found in game %v", userId, id)
+	}
+
+	return nil
 }
 
 // withoutKey returns a copy of doc with the given top-level key removed, used
@@ -390,7 +284,7 @@ func withoutKey(doc bson.D, key string) bson.D {
 	return out
 }
 
-func (s *Store) getBsonDocForID(id string) (bson.D, error) {
+func bsonDocForID(id string) (bson.D, error) {
 	objectId, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, err

@@ -22,7 +22,7 @@ func TestMutate_ReturnsWhenTheCallersContextIsCancelled(t *testing.T) {
 	background := context.Background()
 	locks := lock.NewInProcess()
 
-	store := &Store{ctx: &background, locks: locks}
+	store := NewMemoryStore(background, locks, nil)
 
 	// Somebody else is mid-write on this game.
 	holder, err := locks.Acquire(background, "game:the-game")

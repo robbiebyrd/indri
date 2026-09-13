@@ -3,10 +3,8 @@ package game
 import (
 	"fmt"
 	"slices"
-	"time"
 
 	goaway "github.com/TwiN/go-away"
-	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/events"
@@ -14,7 +12,7 @@ import (
 )
 
 // HasPlayer determines if a given userId is in a game.
-func (s *Store) HasPlayer(id string, userId string) bool {
+func (s *core) HasPlayer(id string, userId string) bool {
 	g, err := s.Get(id)
 	if err != nil {
 		return false
@@ -30,7 +28,7 @@ func (s *Store) HasPlayer(id string, userId string) bool {
 }
 
 // PlayerOnATeam determines if a given userId is in a game.
-func (s *Store) PlayerOnATeam(id string, userId string) bool {
+func (s *core) PlayerOnATeam(id string, userId string) bool {
 	if hasPlayer := s.HasPlayer(id, userId); !hasPlayer {
 		return false
 	}
@@ -50,12 +48,12 @@ func (s *Store) PlayerOnATeam(id string, userId string) bool {
 }
 
 // AddPlayer adds a player to the game.
-func (s *Store) AddPlayer(id string, userId string, displayName string) error {
+func (s *core) AddPlayer(id string, userId string, displayName string) error {
 	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
 		return err
 	}
 
-	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
+	return s.Mutate(s.ctx, id, func(g *models.Game) error {
 		if _, ok := g.Players[userId]; ok {
 			return fmt.Errorf("player with id %v already exists in game %v", userId, id)
 		}
@@ -75,12 +73,12 @@ func (s *Store) AddPlayer(id string, userId string, displayName string) error {
 }
 
 // RemovePlayer removes a player from a game and any team it was on, atomically.
-func (s *Store) RemovePlayer(id string, userId string) error {
+func (s *core) RemovePlayer(id string, userId string) error {
 	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
 		return err
 	}
 
-	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
+	return s.Mutate(s.ctx, id, func(g *models.Game) error {
 		removePlayerFromTeams(g, userId)
 		delete(g.Players, userId)
 
@@ -126,20 +124,21 @@ func removePlayerFromTeams(g *models.Game, userId string) bool {
 	return removed
 }
 
-// ConnectPlayer marks the player as offline.
-func (s *Store) ConnectPlayer(id string, userId string) error {
+// ConnectPlayer marks the player as online.
+func (s *core) ConnectPlayer(id string, userId string) error {
 	return s.markPlayerConnected(id, userId, true)
 }
 
 // DisconnectPlayer marks the player as offline.
-func (s *Store) DisconnectPlayer(id string, userId string) error {
+func (s *core) DisconnectPlayer(id string, userId string) error {
 	return s.markPlayerConnected(id, userId, false)
 }
 
-// markPlayerConnected sets the player's connected status atomically, only if
-// the player still exists, so a concurrent removal cannot recreate a partial
-// player document. The version bump keeps it coherent with Mutate's CAS.
-func (s *Store) markPlayerConnected(
+// markPlayerConnected sets the player's connected status through the backend's
+// conditional single-field write and publishes the delta. A write that never
+// publishes is invisible to players, so the publish belongs here rather than
+// in each backend.
+func (s *core) markPlayerConnected(
 	id string,
 	userId string,
 	connected bool,
@@ -148,36 +147,17 @@ func (s *Store) markPlayerConnected(
 		return err
 	}
 
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
+	if err := s.docs.setPlayerConnected(s.ctx, id, userId, connected); err != nil {
 		return err
 	}
 
-	playerKey := "players." + userId
-
-	result, err := s.collection.Collection().UpdateOne(
-		*s.ctx,
-		bson.D{
-			{Key: "_id", Value: objectId},
-			{Key: playerKey, Value: bson.D{{Key: "$exists", Value: true}}},
-		},
-		bson.D{
-			{Key: "$set", Value: bson.D{
-				{Key: playerKey + ".connected", Value: connected},
-				{Key: "updatedAt", Value: time.Now()},
-			}},
-			{Key: "$inc", Value: bson.D{{Key: "version", Value: 1}}},
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("no player %v found in game %v", userId, id)
-	}
-
-	s.publish(id, events.OpUpdate, map[string]interface{}{playerKey + ".connected": connected}, nil)
+	s.publish(id, events.OpUpdate, map[string]interface{}{playerConnectedKey(userId): connected}, nil)
 
 	return nil
+}
+
+// playerConnectedKey is the dotted path of one player's connected flag, shared
+// by the write and the delta so the two can never disagree.
+func playerConnectedKey(userId string) string {
+	return "players." + userId + ".connected"
 }

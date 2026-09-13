@@ -10,7 +10,7 @@ import (
 )
 
 // HasPlayerOnTeam determines if a given userId is in a game and on a given team.
-func (s *Store) HasPlayerOnTeam(id string, teamId string, userId string) bool {
+func (s *core) HasPlayerOnTeam(id string, teamId string, userId string) bool {
 	g, err := s.Get(id)
 	if err != nil {
 		return false
@@ -26,12 +26,12 @@ func (s *Store) HasPlayerOnTeam(id string, teamId string, userId string) bool {
 
 // ChangePlayerTeam moves a player to a different team atomically, so a failure
 // can't leave the player on no team.
-func (s *Store) ChangePlayerTeam(id string, teamId string, userId string) error {
+func (s *core) ChangePlayerTeam(id string, teamId string, userId string) error {
 	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
 		return err
 	}
 
-	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
+	return s.Mutate(s.ctx, id, func(g *models.Game) error {
 		if _, ok := g.Players[userId]; !ok {
 			return fmt.Errorf("player with id %s is not in this game", userId)
 		}
@@ -44,12 +44,12 @@ func (s *Store) ChangePlayerTeam(id string, teamId string, userId string) error 
 }
 
 // AddPlayerToTeam adds a player to a team.
-func (s *Store) AddPlayerToTeam(id string, teamId string, userId string) error {
+func (s *core) AddPlayerToTeam(id string, teamId string, userId string) error {
 	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
 		return err
 	}
 
-	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
+	return s.Mutate(s.ctx, id, func(g *models.Game) error {
 		if _, ok := g.Players[userId]; !ok {
 			return fmt.Errorf("player with id %s is not in this game", userId)
 		}
@@ -67,12 +67,12 @@ func (s *Store) AddPlayerToTeam(id string, teamId string, userId string) error {
 }
 
 // RemovePlayerFromTeam removes a player from any assigned teams in a given game.
-func (s *Store) RemovePlayerFromTeam(id string, userId string) error {
+func (s *core) RemovePlayerFromTeam(id string, userId string) error {
 	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
 		return err
 	}
 
-	return s.Mutate(*s.ctx, id, func(g *models.Game) error {
+	return s.Mutate(s.ctx, id, func(g *models.Game) error {
 		if !removePlayerFromTeams(g, userId) {
 			return mutation.ErrAbort
 		}
@@ -94,7 +94,7 @@ func addPlayerToTeam(g *models.Game, teamId string, userId string) {
 }
 
 // PlayerOnWhichTeam gets the current team a player is on.
-func (s *Store) PlayerOnWhichTeam(id string, userId string) (*string, error) {
+func (s *core) PlayerOnWhichTeam(id string, userId string) (*string, error) {
 	g, err := s.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("failed retrieving game with id %v", id)

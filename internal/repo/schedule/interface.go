@@ -2,10 +2,13 @@ package schedule
 
 import "time"
 
-// Storer is the contract a schedule store must satisfy. The assertion below
-// keeps it in step with *Store: change one without the other and the build
-// fails.
-var _ Storer = (*Store)(nil)
+// Storer is the contract a schedule store must satisfy. The assertions below
+// keep it in step with both backends: change one without the other and the
+// build fails.
+var (
+	_ Storer = (*Store)(nil)
+	_ Storer = (*MemoryStore)(nil)
+)
 
 type Storer interface {
 	InstanceID() string

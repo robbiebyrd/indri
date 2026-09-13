@@ -99,12 +99,69 @@ func TestRun_LockSerializes(t *testing.T) {
 	}
 }
 
+// firstLoadBarrier holds every writer after its first read until all of them
+// have read, then lets them all go. Without it the writers never overlap —
+// each one commits before the next one looks — the fence is never asked to
+// reject anything, and the test passes just as happily with the fence deleted.
+type firstLoadBarrier struct {
+	mu    sync.Mutex
+	seen  int
+	n     int
+	ready chan struct{}
+}
+
+func newFirstLoadBarrier(n int) *firstLoadBarrier {
+	return &firstLoadBarrier{n: n, ready: make(chan struct{})}
+}
+
+// wait blocks until n callers have arrived. A writer retrying after a rejected
+// save passes straight through: it can only be retrying because it already got
+// past its first load, so the barrier has already opened.
+func (b *firstLoadBarrier) wait() {
+	b.mu.Lock()
+
+	select {
+	case <-b.ready:
+		b.mu.Unlock()
+
+		return
+	default:
+	}
+
+	b.seen++
+	if b.seen == b.n {
+		close(b.ready)
+	}
+
+	b.mu.Unlock()
+
+	<-b.ready
+}
+
 // TestRun_FenceRecoversWithoutLock shows the version fence + retry prevents lost
 // updates even when the lock does not serialize.
+//
+// Every writer loads the same version before any of them saves, so exactly one
+// save commits and the rest are rejected and must retry. Drop the retry loop,
+// or stop checking whether the save committed, and the count comes back as 1.
 func TestRun_FenceRecoversWithoutLock(t *testing.T) {
 	store := &fakeStore{}
 
 	const n = 8
+
+	barrier := newFirstLoadBarrier(n)
+
+	// The barrier closes after the read, not before it: holding the writers
+	// before they read only guarantees they arrive together, and the first one
+	// through can still commit before the next one looks. Holding them after
+	// the read is what makes every writer see the same version.
+	load := func() (*int, int64, error) {
+		doc, version, err := store.load()
+
+		barrier.wait()
+
+		return doc, version, err
+	}
 
 	var wg sync.WaitGroup
 
@@ -117,7 +174,7 @@ func TestRun_FenceRecoversWithoutLock(t *testing.T) {
 			defer wg.Done()
 
 			if err := mutation.Run(context.Background(), noopManager{}, "rec",
-				store.load, increment, store.saveConditional); err != nil {
+				load, increment, store.saveConditional); err != nil {
 				errs <- err
 			}
 		}()

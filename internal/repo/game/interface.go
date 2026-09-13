@@ -6,9 +6,13 @@ import (
 	"github.com/robbiebyrd/indri/internal/models"
 )
 
-// Storer is the contract a game store must satisfy. The assertion below keeps
-// it in step with *Store: change one without the other and the build fails.
-var _ Storer = (*Store)(nil)
+// Storer is the contract a game store must satisfy. The assertions below keep
+// it in step with both backends: change one without the other and the build
+// fails.
+var (
+	_ Storer = (*Store)(nil)
+	_ Storer = (*MemoryStore)(nil)
+)
 
 type Storer interface {
 	HasPlayerOnTeam(id string, teamId string, userId string) bool
