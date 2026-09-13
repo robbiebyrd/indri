@@ -230,7 +230,7 @@ func (t *Transport) offer(w http.ResponseWriter, r *http.Request) {
 		case gameChannel:
 			t.attachGame(p, sessionID, dc)
 		case signalChannel:
-			t.attachSignal(dc)
+			t.attachSignal(p, dc)
 		default:
 			log.Printf("webrtc: peer %s opened data channel with unrecognised label %q", id, dc.Label())
 		}
@@ -309,12 +309,17 @@ func (t *Transport) attachGame(p *peer, sessionID string, dc *pion.DataChannel) 
 	})
 }
 
-// attachSignal wires the "signal" DataChannel. It is reserved for
-// renegotiation (story 041): deliberately not connected to Handlers.Message
-// and given no OnMessage handler at all, so nothing it carries can ever reach
-// the action router -- pion simply discards a message with no handler
-// registered.
-func (t *Transport) attachSignal(_ *pion.DataChannel) {}
+// attachSignal wires the "signal" DataChannel to p: renegotiate (story 041,
+// renegotiate.go) sends its offers here and awaits the matching answer.
+// Deliberately not connected to Handlers.Message -- nothing this channel
+// carries may ever reach the action router.
+func (t *Transport) attachSignal(p *peer, dc *pion.DataChannel) {
+	p.setSignal(dc)
+
+	dc.OnMessage(func(msg pion.DataChannelMessage) {
+		p.handleSignalMessage(msg.Data)
+	})
+}
 
 // authenticate resolves the caller's bearer token to a session id. An empty
 // or unrecognised token yields "", matching transport.NewKeys: the resulting

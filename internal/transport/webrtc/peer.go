@@ -157,6 +157,21 @@ type peer struct {
 	// once story 039 introduces one). May be nil for a peer that has not been
 	// registered anywhere yet.
 	onClose func()
+
+	// negotiating serialises renegotiation end to end (AddTrack through the
+	// answer's SetRemoteDescription), not just the network round trip.
+	// Overlapping AddTrack calls on one PeerConnection produce "Failed to
+	// process the bundled m= section" (pion issue #1169). See renegotiate.go.
+	negotiating sync.Mutex
+
+	// signalMu guards signal and pending together: attachSignal sets signal
+	// once, from pion's DataChannel callback goroutine, when the "signal"
+	// channel opens; a renegotiation in progress both reads signal (to send
+	// an offer) and installs pending (to await the matching answer). Both
+	// can race each other without this lock.
+	signalMu sync.Mutex
+	signal   *pion.DataChannel
+	pending  chan Signal // non-nil only while a renegotiation awaits an answer
 }
 
 // setConn attaches the DataChannel-backed conn once the client's "game"

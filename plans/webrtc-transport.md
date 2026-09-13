@@ -131,9 +131,19 @@ being connected.
 ## Open Questions
 
 ### Critical (P1 - Blockers)
-1. Does a DataChannel-only PeerConnection reliably deliver a track added after connect (pion #1073/#2774)?
-   — **Step 8 answers this.** If it fails, media later needs a second PeerConnection; nothing in Steps
-   1–7 depends on the answer, which is why the spike is cheap.
+1. **RESOLVED — yes**, for this configuration. `internal/transport/webrtc/renegotiate.go` implements
+   `AddTrack` → `CreateOffer` → `SetLocalDescription` → offer over the `signal` DataChannel → await the
+   answer → `SetRemoteDescription`, serialised per peer with a mutex (pion issue #1169). An in-process
+   pion client (`internal/transport/webrtc/renegotiation_test.go`,
+   `TestRenegotiate_TrackAddedAfterDataChannelOnly`) added an Opus `TrackLocalStaticSample` to an
+   already-connected, DataChannel-only server `PeerConnection` and observed `OnTrack` fire on the client
+   on every one of 10 repeated runs under `-race` (pion/webrtc v4.2.20, the API built in `peer.go`'s
+   `newAPI` — a custom `MediaEngine`/`SettingEngine` with default interceptors auto-registered because
+   none were supplied explicitly). Issues #1073/#2774 did not reproduce under this configuration.
+   **Consequence:** phase-two video may reuse this same PeerConnection; this question alone does not
+   force a second PeerConnection or an SFU. (LiveKit may still be the right call once mesh sizing at
+   4–8 participants is considered — see Research Findings — but that is a separate, scaling-driven
+   decision, not a renegotiation-capability one.)
 2. Does `react-native-webrtc` work under Expo SDK 53 New Architecture with React 19? — **Step 9 answers
    this.** If not: disable New Arch in `app.json`, or defer the client half and keep Steps 1–8.
 
@@ -142,8 +152,10 @@ being connected.
    that oversized payloads are detected and logged rather than silently truncated.
 
 ### Unresolved / waiting on signal
-- Whether phase-two media reuses this PeerConnection or adds a second — waiting on: Step 8's result;
-  revisit when video work starts. Do not bake either assumption into Steps 1–7.
+- ~~Whether phase-two media reuses this PeerConnection or adds a second~~ — **resolved by Step 8: yes,
+  it can reuse this connection** (see Q1 above). Steps 1–7 needed no change either way. Revisit only if
+  mesh sizing at 4–8 participants pushes phase two toward an SFU (LiveKit) for reasons unrelated to
+  renegotiation capability.
 
 ## Steps
 
