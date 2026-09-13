@@ -64,7 +64,10 @@ export function placementBox(placement: Placement, grid: GridSize): AbsoluteBox 
  * invent a layering feature the schema does not have.
  */
 export function placementZIndex(placement: Placement): number | undefined {
-    return placement.kind === "absolute" ? placement.z : undefined
+    // Read from either kind: a grid widget that allows overlap needs a z just
+    // as much as an absolute one. Absent means fall back to the widget map's
+    // insertion order, which is what React already does with sibling order.
+    return placement.z
 }
 
 /**

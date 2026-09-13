@@ -71,6 +71,8 @@ const (
 	fieldScript  = "script"
 	fieldType    = "type"
 	fieldKind    = "kind"
+	fieldOverlap = "overlap"
+	fieldZ       = "z"
 	fieldCols    = "cols"
 	fieldRows    = "rows"
 )
@@ -258,12 +260,17 @@ func validateWidgets(
 			return err
 		}
 
-		// Absolute placements never enter the overlap set, as subject OR
-		// obstacle. That exemption belongs to the caller rather than to
-		// overlaps() — see client/layout/grid/collision.ts, which explains why
-		// a kind check inside the collision test would be a second, divergent
-		// source of truth for the same rule.
-		if kind == kindGrid {
+		// A widget that allows overlap never enters the set, as subject OR
+		// obstacle — absolute placement always, a grid widget when it opts in.
+		// That exemption belongs to the caller rather than to overlaps() — see
+		// client/layout/grid/collision.ts, which explains why a check inside
+		// the collision test would be a second, divergent source of truth.
+		exempt := false
+		if placement, ok := widget[fieldPlacement].(map[string]interface{}); ok {
+			exempt = allowsOverlap(placement)
+		}
+
+		if kind == kindGrid && !exempt {
 			siblings = append(siblings, placed{id: id, rect: r})
 		}
 
@@ -320,6 +327,20 @@ func validateWidget(widget map[string]interface{}, grid gridSize, path string) (
 	default:
 		return "", rect{}, fmt.Errorf("%w %q in %q", errPlacementKind, kind, placementPath)
 	}
+}
+
+// allowsOverlap reports whether a placement is exempt from collision, as both
+// subject and obstacle. Mirrors allowsOverlap in
+// client/layout/schema/placement.ts: absolute placement is exempt by
+// definition, a grid widget only when it says so.
+func allowsOverlap(placement map[string]interface{}) bool {
+	if kind, _ := placement[fieldKind].(string); kind == kindAbsolute {
+		return true
+	}
+
+	exempt, _ := placement[fieldOverlap].(bool)
+
+	return exempt
 }
 
 // validateSubGrid recurses into a sub-grid widget's nested coordinate space.
@@ -385,7 +406,7 @@ func checkOverlaps(siblings []placed, path string) error {
 // clamps because it has already decided to keep the widget, while the server
 // is deciding whether to store it at all.
 func readRect(placement map[string]interface{}, grid gridSize, path string) (rect, error) {
-	if err := checkKeys(path, placement, fieldKind, "col", "row", "w", "h"); err != nil {
+	if err := checkKeys(path, placement, fieldKind, "col", "row", "w", "h", fieldOverlap, fieldZ); err != nil {
 		return rect{}, err
 	}
 
@@ -430,7 +451,7 @@ func readRect(placement map[string]interface{}, grid gridSize, path string) (rec
 // string; the optional z is a whole number. Mirrors the absolute branch of
 // Placement in client/layout/schema/placement.ts.
 func checkAbsolute(placement map[string]interface{}, path string) error {
-	if err := checkKeys(path, placement, fieldKind, "left", "top", "width", "height", "z"); err != nil {
+	if err := checkKeys(path, placement, fieldKind, "left", "top", "width", "height", fieldOverlap, fieldZ); err != nil {
 		return err
 	}
 

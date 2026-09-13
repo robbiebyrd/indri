@@ -68,9 +68,13 @@ export function setPlacement(
     ws: LayoutSocket,
     ctx: EditContext,
     widgetId: string,
-    next: GridRect,
+    // The rect, plus the two decisions that travel with it. A widget that
+    // allows overlap is exempt from the check below, as both subject and
+    // obstacle — which is what makes "turn the flag on and the resize goes
+    // through" true rather than aspirational.
+    next: GridRect & {overlap?: boolean; z?: number},
 ): boolean {
-    if (!canPlace(next, widgetId, ctx.siblings, ctx.grid)) return false
+    if (next.overlap !== true && !canPlace(next, widgetId, ctx.siblings, ctx.grid)) return false
 
     const placement: Placement = {kind: "grid", ...next}
     send(ws, ctx.gameCode, "setPlacement", {sceneId: ctx.sceneId, widgetId, placement})

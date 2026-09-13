@@ -596,9 +596,13 @@ func TestValidateLayout_Rejects(t *testing.T) {
 			wantErr: errUnknownField, names: "scenes.board.widgets.a.colour",
 		},
 		{
-			name:    "unknown key on a grid placement",
-			layout:  layoutWith(map[string]interface{}{"a": widgetAt(withZ(gridPlacement(0, 0, 1, 1), 2))}),
-			wantErr: errUnknownField, names: "a.placement.z",
+			// `z` and `overlap` are legal on a grid placement now, so the
+			// strictness guarantee is pinned with a key that is genuinely not
+			// part of the vocabulary.
+			name: "unknown key on a grid placement",
+			layout: layoutWith(map[string]interface{}{"a": widgetAt(
+				withKey(gridPlacement(0, 0, 1, 1), "layer", 2))}),
+			wantErr: errUnknownField, names: "a.placement.layer",
 		},
 	}
 
@@ -706,5 +710,52 @@ func TestValidateLayout_NoPanicOnMalformedInput(t *testing.T) {
 				t.Fatalf("validateLayout: expected an error for %v", layout)
 			}
 		})
+	}
+}
+
+// withKey returns a copy of a placement carrying one extra key.
+func withKey(placement map[string]interface{}, key string, value interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(placement)+1)
+	for k, v := range placement {
+		out[k] = v
+	}
+
+	out[key] = value
+
+	return out
+}
+
+// Positioning, overlap permission and z-order are three independent decisions.
+// A grid widget may now carry both flags, and opting into overlap exempts it
+// from collision as BOTH subject and obstacle.
+func TestValidateLayout_OverlapAndZAreIndependentOfPlacementKind(t *testing.T) {
+	overlapping := func(aOverlap, bOverlap bool) map[string]interface{} {
+		a := withKey(gridPlacement(0, 0, 3, 3), fieldOverlap, aOverlap)
+		b := withKey(gridPlacement(1, 1, 3, 3), fieldOverlap, bOverlap)
+
+		return layoutWith(map[string]interface{}{"a": widgetAt(a), "b": widgetAt(b)})
+	}
+
+	if err := validateLayout(overlapping(false, false)); err == nil {
+		t.Error("two overlapping widgets that both refuse overlap must be rejected")
+	}
+
+	// Exempt as SUBJECT: the one that opted in is simply not in the set.
+	if err := validateLayout(overlapping(true, false)); err != nil {
+		t.Errorf("a widget that allows overlap must not be blocked: %v", err)
+	}
+
+	// Exempt as OBSTACLE too — the asymmetric case, and the one that makes
+	// "turn the flag on and the resize goes through" actually true.
+	if err := validateLayout(overlapping(false, true)); err != nil {
+		t.Errorf("a widget that allows overlap must not block others: %v", err)
+	}
+
+	// z is legal on a grid placement, and on an absolute one.
+	zGrid := layoutWith(map[string]interface{}{
+		"a": widgetAt(withKey(gridPlacement(0, 0, 1, 1), fieldZ, 5)),
+	})
+	if err := validateLayout(zGrid); err != nil {
+		t.Errorf("z on a grid placement must be accepted: %v", err)
 	}
 }

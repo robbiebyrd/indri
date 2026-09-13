@@ -5,6 +5,7 @@ import {getWidget} from "@/layout/registry/registry"
 import {ConfigPanel} from "./config-panel"
 import {useEditorScene} from "./drag-resize"
 import {Palette} from "./palette"
+import {PlacementPanel} from "./placement-panel"
 
 import type {LayoutSocket} from "@/layout/edit/ops"
 
@@ -64,6 +65,15 @@ export function EditorDock({ws, layout, sceneId, gameCode, selectedId, onSelect}
                 onAdd={onSelect}
                 onRemove={() => onSelect(undefined)}
             />
+            {selected !== undefined && selectedId !== undefined && (
+                <PlacementPanel
+                    ws={ws}
+                    ctx={ctx}
+                    widgetId={selectedId}
+                    placement={selected.placement}
+                    grid={ctx.grid}
+                />
+            )}
             {selected !== undefined && selectedId !== undefined && (
                 selectedDef === undefined
                     ? <Text style={styles.empty}>{`No editor for "${selected.type}".`}</Text>

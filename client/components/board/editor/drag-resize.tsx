@@ -36,6 +36,7 @@ import Animated, {
 import {setPlacement} from "@/layout/edit/ops"
 import {knownWidgetTypes} from "@/layout/registry/registry"
 import {parseLayout} from "@/layout/schema/layout"
+import {allowsOverlap} from "@/layout/schema/placement"
 import {cellSize, lineIndexes, rectToPixels, showGridLines, snapMove, snapResize} from "./snap"
 
 import type {LayoutChangeEvent} from "react-native"
@@ -162,7 +163,9 @@ function gridSiblings(scene: SceneLayout | undefined): PlacedWidget[] {
 
     const placed: PlacedWidget[] = []
     for (const [id, widget] of Object.entries(scene.widgets)) {
-        if (widget.placement.kind !== "grid") continue
+        // Exempt as both subject and obstacle: a widget that allows overlap is
+        // simply absent from the set, so it neither blocks nor is blocked.
+        if (widget.placement.kind !== "grid" || allowsOverlap(widget.placement)) continue
         const {col, row, w, h} = widget.placement
         placed.push({id, rect: {col, row, w, h}})
     }

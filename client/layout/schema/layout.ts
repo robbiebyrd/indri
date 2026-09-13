@@ -2,7 +2,7 @@ import {z} from "zod"
 
 import {clampRect, isValidRect, isWithinBounds} from "../grid/coords.ts"
 import {collides} from "../grid/collision.ts"
-import {GridSizeSchema} from "./placement.ts"
+import {allowsOverlap, GridSizeSchema} from "./placement.ts"
 import {StyleSchema} from "./style.ts"
 import {MAX_SUBGRID_DEPTH, SUBGRID_TYPE, SubGridConfigSchema, WidgetSchema} from "./widget.ts"
 
@@ -230,7 +230,7 @@ function reportOverlaps(
     issues: LayoutIssue[],
 ): void {
     const placed = Object.entries(widgets)
-        .filter(([, w]) => w.placement.kind === "grid")
+        .filter(([, w]) => w.placement.kind === "grid" && !allowsOverlap(w.placement))
         .map(([id, w]) => ({id, rect: w.placement as GridRect}))
 
     for (let i = 0; i < placed.length; i++) {

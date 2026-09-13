@@ -180,3 +180,32 @@ test("a generated id is short and safe for a delta path", () => {
     assert.match(id, /^[a-z0-9]+$/);
     assert.ok(id.length <= 12, `id ${id} is too long for a readable delta path`);
 });
+
+// Positioning, overlap permission and z-order are independent decisions. A
+// widget that allows overlap is exempt as BOTH subject and obstacle — the
+// asymmetric case is what makes "turn the flag on and the resize goes through"
+// actually true.
+test("a widget that allows overlap is not blocked by the local check", () => {
+    const ws = fakeSocket();
+    // Would collide with "taken" at (0,0,3,3).
+    const sent = setPlacement(ws, ctx(), "mover", {col: 1, row: 1, w: 3, h: 3, overlap: true});
+    assert.equal(sent, true, "the flag must let the move through");
+    assert.deepStrictEqual((ws.sent[0] as {placement: unknown}).placement, {
+        kind: "grid", col: 1, row: 1, w: 3, h: 3, overlap: true,
+    });
+});
+
+test("a widget that allows overlap does not block another", () => {
+    const ws = fakeSocket();
+    // The exemption is expressed by the caller leaving it out of `siblings`,
+    // so an overlapping neighbour simply is not there to collide with.
+    assert.equal(setPlacement(ws, ctx([]), "mover", {col: 0, row: 0, w: 3, h: 3}), true);
+});
+
+test("z rides along with a grid placement", () => {
+    const ws = fakeSocket();
+    setPlacement(ws, ctx(), "mover", {col: 6, row: 6, w: 1, h: 1, z: 5});
+    assert.deepStrictEqual((ws.sent[0] as {placement: unknown}).placement, {
+        kind: "grid", col: 6, row: 6, w: 1, h: 1, z: 5,
+    });
+});

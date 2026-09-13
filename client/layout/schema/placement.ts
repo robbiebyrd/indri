@@ -25,13 +25,27 @@ export const GridSizeSchema = z.object({
 }).strict()
 
 /**
- * Where a widget sits.
+ * Where a widget sits, and how it shares space.
  *
- * `grid` placement is integer cells in the parent's coordinate space and
- * participates in collision. `absolute` placement is percentage-based, may
- * overlap freely, and is exempt from collision as both subject and obstacle —
- * an exemption expressed by never handing absolute widgets to the collision
- * module in the first place.
+ * THREE INDEPENDENT DECISIONS, deliberately not welded together:
+ *
+ *   kind     — grid cells, or percentages of the viewport.
+ *   overlap  — whether this widget may share space with another.
+ *   z        — who draws on top when two do overlap.
+ *
+ * They used to be one: `grid` meant "collides, no z" and `absolute` meant
+ * "exempt, has z". That made "let this one widget sit on top of another" and
+ * "position this widget in percentages" the same switch, which they are not.
+ *
+ * `overlap: true` exempts a widget from collision as BOTH subject and obstacle:
+ * it neither blocks others nor is blocked. That is what absolute placement has
+ * always done, and it is the only reading under which turning the flag on
+ * actually lets you resize a widget over its neighbour — under a mutual rule
+ * the neighbour would still refuse. Absolute placement implies it, so an
+ * absolute widget needs no flag.
+ *
+ * `z` is absent by default, in which case the renderer falls back to the widget
+ * map's insertion order. Existing layouts therefore render identically.
  */
 export const Placement = z.discriminatedUnion("kind", [
     z.object({
@@ -45,6 +59,8 @@ export const Placement = z.discriminatedUnion("kind", [
         row: z.number(),
         w: z.number(),
         h: z.number(),
+        overlap: z.boolean().optional(),
+        z: z.int().optional(),
     }).strict(),
     z.object({
         kind: z.literal("absolute"),
@@ -52,9 +68,22 @@ export const Placement = z.discriminatedUnion("kind", [
         top: Percent,
         width: Percent,
         height: Percent,
+        // Accepted but redundant: absolute placement is always exempt. Allowed
+        // so that toggling a widget between kinds does not have to strip it.
+        overlap: z.boolean().optional(),
         z: z.int().optional(),
     }).strict(),
 ])
+
+/**
+ * Whether this widget is exempt from collision, as both subject and obstacle.
+ *
+ * The single place that rule is expressed. Absolute placement is exempt by
+ * definition; a grid widget is exempt only if it says so.
+ */
+export function allowsOverlap(placement: z.infer<typeof Placement>): boolean {
+    return placement.kind === "absolute" || placement.overlap === true
+}
 
 export type Placement = z.infer<typeof Placement>
 export type GridPlacement = Extract<Placement, {kind: "grid"}>
