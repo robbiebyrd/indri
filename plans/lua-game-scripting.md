@@ -39,7 +39,7 @@ the same granularity as today. Multi-game hosting in one process is explicitly o
   authoritative. `layout.OpSetScript.Source` belongs to the client layer — do not overload it.
 - Gap: nothing schedules deferred work anywhere in the repo; no Lua dependency exists in `go.mod`.
 
-ADR: Lua edits state only inside `indri.mutate(gameId, fn)`, which is `Store.Mutate`'s `apply`
+ADR: Lua edits state only inside `indri.mutate(fn)`, which is `Store.Mutate`'s `apply`
 closure — it inherits the existing lock + version fence instead of adding a second concurrency
 model. Alternative rejected: script returns an op/command list (cheaper diff, far worse authoring
 ergonomics, and `events.Diff` already infers the ops).
@@ -621,7 +621,7 @@ indri.cancel(id)                                              -- e.g. player mov
 
 - **Contract gap (P1):** a timer fires with **no session**, so the payload must be fully
   self-contained. The step's own examples violate this — `indri.after(30, "turn_timeout", {player=pid})`
-  carries no game id, yet Step 15's handlers reach state via `indri.mutate(req.session.gameId, ...)`.
+  carries no game id, yet Step 15's handlers reach state via `indri.mutate(...)`.
   Fix: `indri.after` implicitly stamps the current game id onto the entry, and the fired request
   exposes it as `req.gameId` (always present, session or not). Document that `req.session` is nil for
   timer-fired actions and that every built-in Go handler rejects a nil session, so a scheduled action
@@ -706,7 +706,7 @@ body := io.LimitReader(resp.Body, cfg.MaxBytes+1)
 ```lua
 local game = require("indri.game")
 indri.on("move", function(req)
-  indri.mutate(req.session.gameId, function(state)
+  indri.mutate(function(state)
     local _, team = game.team_of(state, req.session.userId)
     if not team or not team.data.turn then return nil end -- nil = no-op
     local id, scene = game.current_scene(state)
@@ -734,7 +734,7 @@ indri.before("join", function(req)
   if req.payload.team == "spectators" then return indri.reject("spectators are closed") end
 end)
 indri.after_action("join", function(req)
-  indri.mutate(req.session.gameId, function(state) state.data.lastJoin = req.session.userId; return state end)
+  indri.mutate(function(state) state.data.lastJoin = req.session.userId; return state end)
 end)
 ```
 - **Constraint:** correctness — `router.Dispatch` runs `received` for *every* message, so the hook
