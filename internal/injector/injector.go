@@ -15,6 +15,7 @@ import (
 	"github.com/robbiebyrd/indri/internal/services/events"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	"github.com/robbiebyrd/indri/internal/services/lock"
+	luaService "github.com/robbiebyrd/indri/internal/services/lua"
 	sessionService "github.com/robbiebyrd/indri/internal/services/session"
 	userService "github.com/robbiebyrd/indri/internal/services/user"
 	"github.com/robbiebyrd/indri/internal/transport"
@@ -41,6 +42,11 @@ type ServicesInjector struct {
 	UserService      *userService.Service
 	AuthService      *authSevice.Service
 	SessionService   *sessionService.Service
+
+	// LuaEngine holds the game scripts named by the script file. It is never
+	// nil once GetServices has run — a config declaring no scripts yields an
+	// engine with no actions — and the process owns it until Close.
+	LuaEngine *luaService.Engine
 }
 
 type Injector struct {

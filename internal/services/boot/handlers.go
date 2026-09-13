@@ -16,6 +16,7 @@ import (
 	"github.com/robbiebyrd/indri/internal/handlers/actions/reconnect"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/refresh"
 	"github.com/robbiebyrd/indri/internal/handlers/actions/register"
+	"github.com/robbiebyrd/indri/internal/handlers/actions/script"
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -98,6 +99,30 @@ func registerHandlers(i *injector.Injector) {
 	}
 
 	router.RegisterHandlers(actionToHandlerMap)
+
+	registerScriptHandlers(i)
+}
+
+// registerScriptHandlers gives every action a game script declared its own
+// router registration, after the built-ins.
+//
+// One Handler per action rather than one dispatcher for all of them: the
+// registry matches on the action name, so an action with no entry here is
+// silently unreachable no matter what the script declared. That is what
+// TestRegisterHandlers_CoversEveryScriptAction exists to catch.
+//
+// The name is prefixed to keep a script's "move" distinct from a game's own Go
+// "move" — registration is additive, and both are meant to be able to run.
+func registerScriptHandlers(i *injector.Injector) {
+	// A server always has an engine, even with no scripts to load. The registry
+	// coverage tests build a partial injector on purpose, and have no engine.
+	if i.ServicesInjector == nil || i.LuaEngine == nil {
+		return
+	}
+
+	for _, action := range i.LuaEngine.Actions() {
+		router.RegisterHandler("lua_"+action, action, script.New(i, action))
+	}
 }
 
 // handleClientMessage bridges a message-oriented transport (WebSocket) to the

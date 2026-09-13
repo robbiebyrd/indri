@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"context"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -18,6 +19,7 @@ import (
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
+	luaService "github.com/robbiebyrd/indri/internal/services/lua"
 	"github.com/robbiebyrd/indri/internal/transport"
 	graphqlTransport "github.com/robbiebyrd/indri/internal/transport/graphql"
 	"github.com/robbiebyrd/indri/internal/transport/graphql/generated"
@@ -30,6 +32,14 @@ import (
 const actionsDir = "../../handlers/actions"
 
 const resolversFile = "../../transport/graphql/resolvers/schema.resolvers.go"
+
+// scriptDispatcherPkg is the one directory under handlers/actions that is not
+// an action of its own: it holds the handler registerHandlers instantiates once
+// per action a *game script* declared. The tests below skip it because it can
+// never be registered under its own name;
+// TestRegisterHandlers_CoversEveryScriptAction is what holds it to the same
+// standard — that nothing it is responsible for is silently unreachable.
+const scriptDispatcherPkg = "script"
 
 // registeredActions runs the real registration against an injector carrying
 // only a melody hub. Handler constructors just store the injector, and
@@ -74,7 +84,7 @@ func TestRegisterHandlers_CoversEveryActionPackage(t *testing.T) {
 	found := 0
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || entry.Name() == scriptDispatcherPkg {
 			continue
 		}
 
@@ -91,6 +101,86 @@ func TestRegisterHandlers_CoversEveryActionPackage(t *testing.T) {
 
 	if found == 0 {
 		t.Fatalf("found no action packages under %v; the test is not checking anything", actionsDir)
+	}
+}
+
+// scriptEngine builds an engine over one script written into the test's own
+// directory. Scripts are files rather than strings because that is what the
+// engine loads, and their paths are what a script author reads in an error.
+func scriptEngine(t *testing.T, src string) *luaService.Engine {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "game.lua")
+
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatalf("writing %v: %v", path, err)
+	}
+
+	engine, err := luaService.NewEngine([]string{path})
+	if err != nil {
+		t.Fatalf("building an engine from %v: %v", path, err)
+	}
+
+	t.Cleanup(engine.Close)
+
+	return engine
+}
+
+// TestRegisterHandlers_CoversEveryScriptAction is the script-side twin of
+// TestRegisterHandlers_CoversEveryActionPackage: an action a game script
+// declared but registerHandlers never registered is silently unreachable, and
+// the script author has no way to tell the difference from a broken client.
+//
+// Each handler below reports itself by raising, because raising is the only
+// thing a script can do that reaches the dispatcher today. That is what makes
+// the check honest: Dispatch answers an unregistered action with no error at
+// all, so an assertion that dispatch merely *succeeded* would pass with nothing
+// wired up whatsoever.
+func TestRegisterHandlers_CoversEveryScriptAction(t *testing.T) {
+	engine := scriptEngine(t, `
+indri.on("move", function(req) error("ran:" .. req.action, 0) end)
+indri.on("pass", function(req) error("ran:" .. req.action, 0) end)
+`)
+
+	router.Reset()
+	t.Cleanup(router.Reset)
+
+	registerHandlers(&injector.Injector{
+		ClientsInjector:  &injector.ClientsInjector{Transport: ws.New()},
+		ServicesInjector: &injector.ServicesInjector{LuaEngine: engine},
+	})
+
+	declared := engine.Actions()
+	if len(declared) == 0 {
+		t.Fatal("the test script declared no actions; the test is not checking anything")
+	}
+
+	for _, action := range declared {
+		_, err := router.Dispatch(context.Background(), nil, action, map[string]interface{}{})
+		if err == nil {
+			t.Errorf(
+				"the script declared the action %q but dispatching it ran nothing, so clients cannot reach it",
+				action,
+			)
+
+			continue
+		}
+
+		if want := "ran:" + action; !strings.Contains(err.Error(), want) {
+			t.Errorf("dispatching %q ran something that did not report %q: %v", action, want, err)
+		}
+	}
+}
+
+// TestRegisterHandlers_WithoutAnEngineRegistersNoScriptActions covers the other
+// half of the wiring: a partial injector (the one every registry test above
+// builds) has no engine, and registration must skip the script actions rather
+// than dereference it.
+func TestRegisterHandlers_WithoutAnEngineRegistersNoScriptActions(t *testing.T) {
+	for action, handlerPkg := range registeredActions(t) {
+		if handlerPkg == scriptDispatcherPkg {
+			t.Errorf("action %q is bound to the script dispatcher, but no script engine was loaded", action)
+		}
 	}
 }
 

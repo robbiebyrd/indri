@@ -315,6 +315,12 @@ func TestNewEngine_RefusesAnEmptyAction(t *testing.T) {
 	}
 }
 
+// scriptDispatcherPkg is the one directory under handlers/actions that is not a
+// built-in action: it holds the handler that runs a *script's* actions, one
+// instance per entry in Engine.Actions(). Reserving its name would stop a
+// script declaring an action called "script" for no reason at all.
+const scriptDispatcherPkg = "script"
+
 // TestBuiltinActions_CoversEveryActionPackage keeps the reserved list honest.
 // The list cannot be read from boot.registerHandlers — boot depends on this
 // package — so it is checked against the same directory that
@@ -332,7 +338,7 @@ func TestBuiltinActions_CoversEveryActionPackage(t *testing.T) {
 	found := 0
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || entry.Name() == scriptDispatcherPkg {
 			continue
 		}
 

@@ -38,6 +38,12 @@ func closeResources(i *injector.Injector) {
 		}
 	}
 
+	// Every pooled Lua state holds its own compiled scripts and globals, and
+	// only Close releases them.
+	if i.ServicesInjector != nil && i.LuaEngine != nil {
+		i.LuaEngine.Close()
+	}
+
 	if i.MongoDBClient != nil && i.MongoDBClient.MongoClient != nil {
 		if err := i.MongoDBClient.MongoClient.Disconnect(context.Background()); err != nil {
 			log.Printf("error disconnecting from MongoDB: %v", err)

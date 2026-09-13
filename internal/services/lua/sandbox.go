@@ -6,6 +6,8 @@ import (
 	"strconv"
 
 	lua "github.com/yuin/gopher-lua"
+
+	"github.com/robbiebyrd/indri/internal/services/lua/lib"
 )
 
 // defaultMaxStringBytes bounds the output of the two string functions a script
@@ -127,6 +129,15 @@ func newState(maxStringBytes int) (*lua.LState, error) {
 	}
 
 	if err := capStringLib(L, maxStringBytes); err != nil {
+		L.Close()
+
+		return nil, err
+	}
+
+	// Last, so the shipped modules are compiled against the finished sandbox --
+	// and long before the state is frozen, which is the deadline require has to
+	// meet. See lib.Install.
+	if err := lib.Install(L); err != nil {
 		L.Close()
 
 		return nil, err

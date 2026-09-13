@@ -3,6 +3,7 @@ package injector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	authSevice "github.com/robbiebyrd/indri/internal/services/authentication"
 	broadcastService "github.com/robbiebyrd/indri/internal/services/broadcast"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
+	luaService "github.com/robbiebyrd/indri/internal/services/lua"
 	sessionService "github.com/robbiebyrd/indri/internal/services/session"
 	userService "github.com/robbiebyrd/indri/internal/services/user"
 	"github.com/robbiebyrd/indri/internal/transport"
@@ -88,12 +90,21 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 
 	ss := sessionService.NewService(repos.SessionRepo)
 
+	// Built last, and nothing may fail after it: compiling the scripts also
+	// builds the first pooled Lua state, and an error returned past this point
+	// would drop the engine without closing it.
+	le, err := luaService.NewEngine(repos.ScriptRepo.Get().Scripts)
+	if err != nil {
+		return nil, fmt.Errorf("loading the game scripts: %w", err)
+	}
+
 	return &ServicesInjector{
 		GameService:      gs,
 		BroadcastService: bs,
 		AuthService:      as,
 		UserService:      us,
 		SessionService:   ss,
+		LuaEngine:        le,
 	}, nil
 }
 
