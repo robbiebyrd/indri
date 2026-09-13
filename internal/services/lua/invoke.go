@@ -71,13 +71,15 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 	// Installed before the call and cleared after it, so indri.mutate can find
 	// this caller's game, deadline and store, and so the next invocation on this
 	// pooled state cannot find them. The game id comes from the session the
-	// transport authenticated; a script never names the game it edits.
+	// transport authenticated, or — for a timer, which has no session — from the
+	// entry the scheduler stamped it on; a script never names the game it edits.
 	inv := &invocation{
 		ctx:      ctx,
-		gameID:   gameIDOf(req),
+		gameID:   req.GameID(),
 		games:    e.games,
 		session:  req.Session,
 		dispatch: e.Dispatch,
+		timers:   e.Timers,
 	}
 
 	setInvocation(s.L, inv)
@@ -166,21 +168,6 @@ func correlationID() string {
 	return hex.EncodeToString(buf)
 }
 
-// gameIDOf is the game a script's edits land on: the one the caller's own
-// session says they are in.
-//
-// Taken from the authenticated session and never from the payload, for the same
-// reason kick resolves its caller that way — a client-supplied game id would let
-// any player's script edit any game. An unauthenticated caller, or one who has
-// not joined, yields "" and indri.mutate refuses.
-func gameIDOf(req actions.Request) string {
-	if req.Session == nil || req.Session.GameID == nil {
-		return ""
-	}
-
-	return *req.Session.GameID
-}
-
 // requestToLua renders one dispatched request as the table a handler receives.
 //
 // It is built field by field rather than marshalled from the whole
@@ -196,6 +183,14 @@ func requestToLua(L *lua.LState, action string, req actions.Request) (lua.LValue
 	tbl := L.NewTable()
 	tbl.RawSetString("action", lua.LString(action))
 	tbl.RawSetString("payload", payload)
+
+	// req.gameId is the one field a handler can rely on whether or not anybody
+	// is connected. A timer fires with no session, so a script reading
+	// req.session.gameId would fault on exactly the dispatches that most need to
+	// find their game; this is the field to read instead. See actions.Request.
+	if gameID := req.GameID(); gameID != "" {
+		tbl.RawSetString("gameId", lua.LString(gameID))
+	}
 
 	// Absent rather than empty when the caller is unauthenticated, so a script
 	// asking who called has to say what it means to have no answer.

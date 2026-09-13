@@ -7,6 +7,7 @@ import (
 	"github.com/robbiebyrd/indri/internal/models"
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
+	scheduleRepo "github.com/robbiebyrd/indri/internal/repo/schedule"
 	scriptRepo "github.com/robbiebyrd/indri/internal/repo/script"
 	sessionRepo "github.com/robbiebyrd/indri/internal/repo/session"
 	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
@@ -16,17 +17,19 @@ import (
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 	luaService "github.com/robbiebyrd/indri/internal/services/lua"
+	schedulerService "github.com/robbiebyrd/indri/internal/services/scheduler"
 	sessionService "github.com/robbiebyrd/indri/internal/services/session"
 	userService "github.com/robbiebyrd/indri/internal/services/user"
 	"github.com/robbiebyrd/indri/internal/transport"
 )
 
 type ReposInjector struct {
-	EnvVars     *envVars.Vars
-	GameRepo    *gameRepo.Store
-	UserRepo    *userRepo.Store
-	SessionRepo *sessionRepo.Store
-	ScriptRepo  *scriptRepo.Store
+	EnvVars      *envVars.Vars
+	GameRepo     *gameRepo.Store
+	UserRepo     *userRepo.Store
+	SessionRepo  *sessionRepo.Store
+	ScriptRepo   *scriptRepo.Store
+	ScheduleRepo *scheduleRepo.Store
 }
 
 type ClientsInjector struct {
@@ -47,6 +50,11 @@ type ServicesInjector struct {
 	// nil once GetServices has run — a config declaring no scripts yields an
 	// engine with no actions — and the process owns it until Close.
 	LuaEngine *luaService.Engine
+
+	// Scheduler fires the deferred actions scripts asked for. boot.Serve runs it
+	// as a goroutine of its own; without that goroutine every indri.after in
+	// every script is written and never dispatched.
+	Scheduler *schedulerService.Scheduler
 }
 
 type Injector struct {

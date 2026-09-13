@@ -67,6 +67,12 @@ var (
 	// ErrAlreadyClaimed means a cancel lost the race with a claim. The action
 	// is already being dispatched and can no longer be called off.
 	ErrAlreadyClaimed = errors.New("schedule entry already claimed")
+
+	// ErrNotFound means no entry is stored under this id. Both backends wrap it
+	// so a caller can tell "there is nothing here" — which is the ordinary
+	// outcome of cancelling a timer that already fired — apart from "the store
+	// could not answer", which is not.
+	ErrNotFound = errors.New("schedule entry not found")
 )
 
 // Defaults applied to a zero Config.
@@ -119,6 +125,16 @@ type Entry struct {
 // CreateEntry is the caller-supplied half of a new schedule entry; the store
 // owns everything else on the document.
 type CreateEntry struct {
+	// ID, when set, is the identity the entry is stored under; the store mints
+	// one when it is empty.
+	//
+	// It exists because a caller can need the id before the write happens.
+	// indri.after hands a script its timer's id the moment it is called, while
+	// the entry itself is only written when the effect ledger flushes — so a
+	// script can store the id in the very game state whose commit releases the
+	// write. See NewEntryID.
+	ID string
+
 	GameID        string
 	Action        string
 	Payload       map[string]interface{}
@@ -141,6 +157,15 @@ func (c CreateEntry) validate() error {
 		return fmt.Errorf("schedule entry must have an action")
 	case c.FireAt.IsZero():
 		return fmt.Errorf("schedule entry must have a fire time")
+	}
+
+	// Rejected here rather than silently replaced with a fresh id: the caller
+	// supplying one is already holding it, and quietly storing the entry
+	// somewhere else would leave them with a handle that cancels nothing.
+	if c.ID != "" {
+		if _, err := bson.ObjectIDFromHex(c.ID); err != nil {
+			return fmt.Errorf("parsing the supplied schedule entry id %q: %w", c.ID, err)
+		}
 	}
 
 	return nil
@@ -295,8 +320,19 @@ func newEntry(create CreateEntry) *Entry {
 
 	now := mongoTime(time.Now())
 
+	// validate has already refused an unparseable id, so the error here can
+	// only mean the caller skipped validation; a minted id is still better than
+	// a zero one, which every later lookup would collide on.
+	id := bson.NewObjectID()
+
+	if create.ID != "" {
+		if parsed, err := bson.ObjectIDFromHex(create.ID); err == nil {
+			id = parsed
+		}
+	}
+
 	return &Entry{
-		ID:             bson.NewObjectID(),
+		ID:             id,
 		GameID:         create.GameID,
 		Action:         create.Action,
 		Payload:        create.Payload,
@@ -322,6 +358,10 @@ func (s *Store) Get(id string) (*Entry, error) {
 
 	entry, err := s.collection.Finder().Filter(query.Id(objectID)).FindOne(*s.ctx)
 	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("fetching schedule entry %q: %w", id, ErrNotFound)
+		}
+
 		return nil, fmt.Errorf("fetching schedule entry %q: %w", id, err)
 	}
 
@@ -700,6 +740,16 @@ func retryDelay(attempts int, cfg Config) time.Duration {
 // compares equal to the value written.
 func mongoTime(t time.Time) time.Time {
 	return t.UTC().Truncate(time.Millisecond)
+}
+
+// NewEntryID mints an identity a schedule entry can be stored under later.
+//
+// It is exported so a caller that must hand the id out before the entry exists
+// does not have to know that an entry is keyed by a MongoDB ObjectID. Ids are
+// globally unique by construction, so two callers minting at the same moment
+// cannot collide.
+func NewEntryID() string {
+	return bson.NewObjectID().Hex()
 }
 
 // randomID returns an unguessable identifier, used for instance identity and

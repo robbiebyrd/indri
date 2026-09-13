@@ -13,6 +13,7 @@ import (
 	broadcastService "github.com/robbiebyrd/indri/internal/services/broadcast"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 	luaService "github.com/robbiebyrd/indri/internal/services/lua"
+	schedulerService "github.com/robbiebyrd/indri/internal/services/scheduler"
 	sessionService "github.com/robbiebyrd/indri/internal/services/session"
 	userService "github.com/robbiebyrd/indri/internal/services/user"
 	"github.com/robbiebyrd/indri/internal/transport"
@@ -104,6 +105,24 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 	// script's events silently stop working on a server that loaded fine.
 	le.Dispatch = router.Dispatch
 
+	// Both halves of the timer feature, wired to the same store. The assignment
+	// is also the compile-time check that the adapter still satisfies what the
+	// lua package asks for.
+	timers, err := schedulerService.NewTimers(repos.ScheduleRepo)
+	if err != nil {
+		return nil, closeEngine(le, err)
+	}
+
+	le.Timers = timers
+
+	// Built from the engine's manifest, which is frozen by now: a timer may only
+	// fire an action a game script registered, because every built-in refuses the
+	// nil session a timer fires with.
+	sched, err := schedulerService.New(repos.ScheduleRepo, router.Dispatch, le.Actions(), schedulerService.Config{})
+	if err != nil {
+		return nil, closeEngine(le, err)
+	}
+
 	return &ServicesInjector{
 		GameService:      gs,
 		BroadcastService: bs,
@@ -111,7 +130,20 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 		UserService:      us,
 		SessionService:   ss,
 		LuaEngine:        le,
+		Scheduler:        sched,
 	}, nil
+}
+
+// closeEngine releases the engine on a failure after it was built.
+//
+// Nothing used to be allowed to fail past NewEngineWithGrants, because an error
+// returned there would drop every pooled Lua state without closing it. Two
+// things now do have to happen afterwards — both need the engine's manifest —
+// so the rule becomes "release it on the way out" instead.
+func closeEngine(le *luaService.Engine, err error) error {
+	le.Close()
+
+	return err
 }
 
 // rtcNAT1To1IPs splits the comma-separated INDRI_RTC_NAT_1TO1_IPS value into

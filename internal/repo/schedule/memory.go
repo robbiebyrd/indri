@@ -77,6 +77,13 @@ func (s *MemoryStore) Schedule(create CreateEntry) (*Entry, error) {
 		if stored.IdempotencyKey == entry.IdempotencyKey {
 			return copyEntry(stored), nil
 		}
+
+		// MongoDB refuses a second document under the same _id, and a caller
+		// that supplied an id it was already holding needs to hear so rather
+		// than end up with two entries one cancel can never reach.
+		if stored.ID == entry.ID {
+			return nil, fmt.Errorf("scheduling action %q: the entry id %q is already in use", create.Action, entry.ID.Hex())
+		}
 	}
 
 	s.entries.list = append(s.entries.list, entry)
@@ -96,7 +103,7 @@ func (s *MemoryStore) Get(id string) (*Entry, error) {
 
 	stored := s.entries.find(objectID)
 	if stored == nil {
-		return nil, fmt.Errorf("fetching schedule entry %q: no documents in result", id)
+		return nil, fmt.Errorf("fetching schedule entry %q: %w", id, ErrNotFound)
 	}
 
 	return copyEntry(stored), nil

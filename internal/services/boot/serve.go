@@ -16,6 +16,12 @@ func Serve(i *injector.Injector) error {
 	g.Go(func() error { return http.Serve(ctx, i) })
 	g.Go(func() error { return monitorGameChanges(ctx, i) })
 
+	// The third goroutine, and the one nothing else covers for: a script's
+	// indri.after writes an entry to the schedule store and this is what ever
+	// reads it back. Without it every timer in every game is stored and never
+	// fires. It stops on the same root-context cancellation as the other two.
+	g.Go(func() error { return i.Scheduler.Run(ctx) })
+
 	err := g.Wait()
 
 	closeResources(i)

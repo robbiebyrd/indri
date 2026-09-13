@@ -572,12 +572,81 @@ func TestSchedule_RejectsAnEntryThatCouldNeverFire(t *testing.T) {
 			"missing game id":   {Action: "turn_timeout", FireAt: time.Now()},
 			"missing action":    {GameID: "game-1", FireAt: time.Now()},
 			"missing fire time": {GameID: "game-1", Action: "turn_timeout"},
+			"unparseable id":    {ID: "not-an-id", GameID: "game-1", Action: "turn_timeout", FireAt: time.Now()},
 		}
 
 		for name, create := range incomplete {
 			if _, err := store.Schedule(create); err == nil {
 				t.Errorf("%s was accepted", name)
 			}
+		}
+	})
+}
+
+// A caller that has to hand the id out before the entry exists — indri.after
+// returns its timer's id synchronously, while the write waits for the effect
+// ledger to flush — must get the entry stored under exactly that id. Storing it
+// anywhere else leaves the caller holding a handle that cancels nothing.
+func TestSchedule_StoresUnderACallerSuppliedId(t *testing.T) {
+	forEachScheduleBackend(t, func(t *testing.T, newStore storeFactory) {
+		store := newStore(t, Config{InstanceID: "instance-a"})
+
+		id := NewEntryID()
+
+		stored, err := store.Schedule(CreateEntry{
+			ID:     id,
+			GameID: "game-supplied-id",
+			Action: "turn_timeout",
+			FireAt: time.Now().Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("scheduling under a supplied id: %v", err)
+		}
+
+		if stored.ID.Hex() != id {
+			t.Fatalf("the entry was stored under %q, not the supplied %q", stored.ID.Hex(), id)
+		}
+
+		found, err := store.Get(id)
+		if err != nil {
+			t.Fatalf("fetching the entry by its supplied id: %v", err)
+		}
+
+		if found.GameID != "game-supplied-id" {
+			t.Errorf("fetched entry = %+v", found)
+		}
+
+		// The same id twice is refused rather than silently stored beside the
+		// first, which would leave one entry no cancel could ever reach.
+		if _, err := store.Schedule(CreateEntry{
+			ID:     id,
+			GameID: "game-supplied-id",
+			Action: "turn_timeout",
+			FireAt: time.Now().Add(time.Hour),
+		}); err == nil {
+			t.Error("the same entry id was accepted twice")
+		}
+	})
+}
+
+// "There is nothing here" and "the store could not answer" are different
+// answers, and cancelling a timer that already fired depends on telling them
+// apart: the first is the ordinary case and must not be reported as a failure.
+func TestGet_ReportsAMissingEntryAsNotFound(t *testing.T) {
+	forEachScheduleBackend(t, func(t *testing.T, newStore storeFactory) {
+		store := newStore(t, Config{InstanceID: "instance-a"})
+
+		_, err := store.Get(NewEntryID())
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("fetching an id that names nothing returned %v, want %v", err, ErrNotFound)
+		}
+
+		// The control: a stored entry is found, so the error above is about the
+		// entry being absent and not about Get being broken.
+		stored := mustScheduleOn(t, store, "game-found", time.Now().Add(time.Hour))
+
+		if _, err := store.Get(stored.ID.Hex()); err != nil {
+			t.Fatalf("fetching a stored entry: %v", err)
 		}
 	})
 }

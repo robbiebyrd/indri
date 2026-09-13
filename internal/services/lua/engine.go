@@ -93,6 +93,14 @@ type Engine struct {
 	// into it would invert the dependency. It must be set before the engine
 	// serves anything; a nil one makes indri.send refuse rather than drop.
 	Dispatch Dispatcher
+
+	// Timers is where indri.after, indri.at and indri.cancel write. Exported and
+	// set at boot for the same reason Dispatch is: the schedule store is a repo,
+	// and the interface here is deliberately narrow enough that an adapter over
+	// it satisfies this without the lua package importing one. A nil one makes
+	// all three refuse rather than silently lose a timer, which would hang a
+	// game with nothing in the log.
+	Timers GameScheduler
 }
 
 // scriptChunk is one script file's bytecode, under the path it was read from.
@@ -285,6 +293,13 @@ func installHostAPI(L *lua.LState, h *stateHandlers) error {
 	// to has committed. See host_io.go.
 	indri.RawSetString("reply", L.NewFunction(hostReply))
 	indri.RawSetString("send", L.NewFunction(hostSend))
+
+	// The deferred half of the same idea: an action dispatched at a time rather
+	// than now. These queue too, so a timer set inside a mutate that lost its
+	// version fence is discarded with the attempt. See host_timer.go.
+	indri.RawSetString("after", L.NewFunction(hostAfter))
+	indri.RawSetString("at", L.NewFunction(hostAt))
+	indri.RawSetString("cancel", L.NewFunction(hostCancel))
 
 	return nil
 }

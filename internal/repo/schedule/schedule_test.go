@@ -308,12 +308,15 @@ func TestConfig_WithDefaults(t *testing.T) {
 }
 
 func TestCreateEntry_Validate(t *testing.T) {
-	valid := CreateEntry{GameID: "game-1", Action: "turn_timeout", FireAt: time.Now()}
+	valid := CreateEntry{ID: NewEntryID(), GameID: "game-1", Action: "turn_timeout", FireAt: time.Now()}
 
 	tests := map[string]CreateEntry{
 		"missing game id":   {Action: valid.Action, FireAt: valid.FireAt},
 		"missing action":    {GameID: valid.GameID, FireAt: valid.FireAt},
 		"missing fire time": {GameID: valid.GameID, Action: valid.Action},
+		// A supplied id the store cannot parse is refused rather than replaced
+		// with a fresh one: the caller is already holding it.
+		"unparseable id": {ID: "not-an-object-id", GameID: valid.GameID, Action: valid.Action, FireAt: valid.FireAt},
 	}
 
 	for name, create := range tests {

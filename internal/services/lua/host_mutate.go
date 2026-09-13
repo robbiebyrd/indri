@@ -55,6 +55,11 @@ type invocation struct {
 	// indri.send refuses rather than dropping the event.
 	dispatch Dispatcher
 
+	// timers is where a deferred action is stored. Nil on an engine built
+	// without a scheduler, and indri.after, indri.at and indri.cancel all
+	// refuse.
+	timers GameScheduler
+
 	// effects is everything this call asked the host to do outside the game
 	// document, held until it is known whether the write it belonged to
 	// happened. See effects.go for why nothing is performed inline.
