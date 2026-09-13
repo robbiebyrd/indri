@@ -1,15 +1,16 @@
 ---
 id: 054-5cca
 title: indri.reply and indri.send with depth and fan-out budgets
-status: pending
+status: in_progress
 priority: P2
 type: feature
 created: "2026-09-12T01:28:12.569Z"
-updated: "2026-09-12T01:29:07.796Z"
+updated: "2026-09-13T18:49:46.440Z"
 dependencies: ["053"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 9
 depends_on: ["stories/053-7102-pending-P1-two-level-effect-ledger-for-script-side-effects.md"]
+started_at: "2026-09-13T18:49:46.439Z"
 ---
 
 # indri.reply and indri.send with depth and fan-out budgets
