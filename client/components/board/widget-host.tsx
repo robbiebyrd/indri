@@ -75,6 +75,17 @@ function WidgetHostView({id, widget, grid}: WidgetHostProps) {
  * also report a press on the sub-grid that contains it, and the script would
  * see an id it never placed. A container that swallowed or duplicated its
  * children's presses is the bug this rule exists to prevent.
+ *
+ * THE BRANCH IS ON `type` ALONE, AND THAT IS LOAD-BEARING. `type` cannot change
+ * for a mounted widget, so the element type at this position is fixed for the
+ * life of the subtree. An absent handler is handled by calling nothing —
+ * `onPress?.(id)` — rather than by returning a Fragment, because `onPress`
+ * comes from a context that starts undefined: `useLuaBridge` builds the bridge
+ * in an effect, so the very first render of every board has no handler and the
+ * next one does. Branching on it would flip Fragment -> Pressable at the same
+ * position, and React would unmount and remount EVERY widget subtree on the
+ * board. Today's widgets are stateless and would not notice; the first one with
+ * focus, an animation or an uncontrolled input would lose it on connect.
  */
 function PressTarget(
     {id, type, onPress, children}: {
@@ -84,10 +95,10 @@ function PressTarget(
         children: ReactNode
     },
 ) {
-    if (onPress === undefined || type === SUBGRID_TYPE) return <>{children}</>
+    if (type === SUBGRID_TYPE) return <>{children}</>
 
     return (
-        <Pressable style={styles.press} onPress={() => onPress(id)}>
+        <Pressable style={styles.press} onPress={() => onPress?.(id)}>
             {children}
         </Pressable>
     )

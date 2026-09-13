@@ -106,8 +106,11 @@ func (g originGuard) Accept(
 // resolvers), not as opaque messages.
 func (t *Transport) Handle(_ transport.Handlers) {}
 
+// Register mounts the GraphQL endpoint. The body limit is outermost so an
+// oversized operation is refused before anything reads or authenticates it; it
+// leaves the subscription upgrade, which has no body, alone.
 func (t *Transport) Register(mux *http.ServeMux) {
-	mux.Handle(path, authMiddleware(t.srv))
+	mux.Handle(path, transport.LimitBody(authMiddleware(t.srv)))
 }
 
 // authMiddleware copies the HTTP Authorization header onto the request context

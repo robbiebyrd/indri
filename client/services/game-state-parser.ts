@@ -13,6 +13,42 @@ function deepClone<T>(value: T): T {
     return JSON.parse(JSON.stringify(value))
 }
 
+// Decodes a delta path into the document keys it addresses. Document keys are
+// arbitrary (player ids, team ids, script table keys), so the server escapes a
+// "." or a "\" inside a key with a backslash before joining — see joinPath in
+// internal/services/events/delta.go. Splitting on a raw "." would let a key
+// named "foo.bar" impersonate a nested node. A path with no backslash splits
+// exactly as "path".split(".") would.
+export function splitDeltaPath(path: string): string[] {
+    const parts: string[] = []
+    let part = ""
+    let escaped = false
+
+    for (const char of path) {
+        if (escaped) {
+            part += char
+            escaped = false
+        } else if (char === "\\") {
+            escaped = true
+        } else if (char === ".") {
+            parts.push(part)
+            part = ""
+        } else {
+            part += char
+        }
+    }
+
+    // A trailing lone backslash cannot come from the server's encoder; keep it
+    // literal rather than dropping a character from the key.
+    if (escaped) {
+        part += "\\"
+    }
+
+    parts.push(part)
+
+    return parts
+}
+
 export class GameStateParser<T> {
     private deltas: Delta[] = []
     private cutoff: number = new Date(0).getTime()
@@ -84,7 +120,7 @@ export class GameStateParser<T> {
     }
 
     private updateJSONKeyByDotPath<S>(obj: S, path: string, value: any): S {
-        const parts = path.split('.');
+        const parts = splitDeltaPath(path);
         let current: any = obj;
 
         for (let i = 0; i < parts.length - 1; i++) {
@@ -108,7 +144,7 @@ export class GameStateParser<T> {
     }
 
     private deleteJSONKeyByDotPath<S>(obj: S, path: string): S {
-        const parts = path.split('.');
+        const parts = splitDeltaPath(path);
         let current: any = obj;
 
         for (let i = 0; i < parts.length - 1; i++) {

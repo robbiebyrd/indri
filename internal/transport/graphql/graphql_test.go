@@ -2,10 +2,14 @@ package graphql
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	coderws "github.com/coder/websocket"
 
@@ -86,4 +90,170 @@ func TestRegister_SubscriptionUpgradeUsesTheOriginPolicy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A GraphQL operation is an HTTP body like any other, and until it was capped
+// this was the one inbound surface with no limit: REST wraps its bodies in a
+// MaxBytesReader and the WebSocket transport sets MaxMessageSize, so an
+// oversized layout op — a script source, an opaque config — had exactly one way
+// in. The cap has to refuse it before the executor parses or resolves anything,
+// and has to leave an ordinary operation untouched.
+func TestRegister_BodyLimit(t *testing.T) {
+	// pad makes a valid { ping } operation of roughly the requested size by
+	// padding an unused variable. It stays valid GraphQL, so "pong" in the
+	// response means the resolver ran and the cap failed to stop it.
+	pad := func(size int) string {
+		body, err := json.Marshal(map[string]interface{}{
+			"query":     "{ ping }",
+			"variables": map[string]string{"pad": strings.Repeat("a", size)},
+		})
+		if err != nil {
+			t.Fatalf("Marshal() = %v", err)
+		}
+
+		return string(body)
+	}
+
+	cases := map[string]struct {
+		body string
+		// chunked sends the body without a Content-Length, so the limit can
+		// only be enforced as the handler reads.
+		chunked bool
+		// wantStatus of 0 is not asserted: gqlgen answers a body it could not
+		// read with its own error document, and the status it picks for that is
+		// its business. What matters there is that no resolver ran.
+		wantStatus int
+		wantPong   bool
+	}{
+		"ordinary operation": {
+			body:       pad(64),
+			wantStatus: http.StatusOK,
+			wantPong:   true,
+		},
+		"just inside the limit": {
+			body:       pad(transport.MaxBodyBytes - 512),
+			wantStatus: http.StatusOK,
+			wantPong:   true,
+		},
+		"over the limit": {
+			body:       pad(transport.MaxBodyBytes),
+			wantStatus: http.StatusRequestEntityTooLarge,
+		},
+		"over the limit without a declared length": {
+			body:    pad(transport.MaxBodyBytes),
+			chunked: true,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tr := New(nil)
+
+			mux := http.NewServeMux()
+			tr.Register(mux)
+
+			server := httptest.NewServer(mux)
+			defer server.Close()
+
+			req, err := http.NewRequest(http.MethodPost, server.URL+path, strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatalf("NewRequest() = %v", err)
+			}
+
+			req.Header.Set("Content-Type", "application/json")
+
+			if tc.chunked {
+				// A negative length is what net/http reads as "unknown", which
+				// makes it send the body chunked.
+				req.ContentLength = -1
+			}
+
+			resp, err := server.Client().Do(req)
+			if err != nil {
+				t.Fatalf("Do() = %v", err)
+			}
+			defer resp.Body.Close()
+
+			document, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("ReadAll() = %v", err)
+			}
+
+			if tc.wantStatus != 0 && resp.StatusCode != tc.wantStatus {
+				t.Errorf("status = %d, want %d (body %q)", resp.StatusCode, tc.wantStatus, document)
+			}
+
+			// The resolver returns "pong" and nothing else in this schema does,
+			// so its absence is proof the operation never executed.
+			if gotPong := strings.Contains(string(document), "pong"); gotPong != tc.wantPong {
+				t.Errorf("response %q contains pong = %v, want %v", document, gotPong, tc.wantPong)
+			}
+		})
+	}
+}
+
+// The subscription shares the endpoint with the mutations, so the body cap sits
+// in front of its upgrade too. An upgrade carries no body, but it does need the
+// ResponseWriter to stay hijackable — wrapping it would break every push client
+// while leaving the mutations looking healthy.
+func TestRegister_BodyLimitLeavesTheSubscriptionUpgradeAlone(t *testing.T) {
+	tr := New(nil)
+	tr.origins = transport.NewOriginPolicy("")
+
+	mux := http.NewServeMux()
+	tr.Register(mux)
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, resp, err := coderws.Dial(
+		ctx,
+		"ws"+strings.TrimPrefix(server.URL, "http")+path,
+		&coderws.DialOptions{Subprotocols: []string{"graphql-transport-ws"}},
+	)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+
+	if err != nil {
+		t.Fatalf("Dial() = %v, want the upgrade to succeed", err)
+	}
+
+	defer conn.CloseNow()
+
+	// The handshake alone only proves the hijack worked. Completing
+	// connection_init proves the socket carries traffic in both directions.
+	if err := conn.Write(ctx, coderws.MessageText, []byte(`{"type":"connection_init"}`)); err != nil {
+		t.Fatalf("Write(connection_init) = %v", err)
+	}
+
+	ack, err := readMessageType(ctx, conn)
+	if err != nil {
+		t.Fatalf("reading the reply to connection_init: %v", err)
+	}
+
+	if ack != "connection_ack" {
+		t.Errorf("reply to connection_init = %q, want %q", ack, "connection_ack")
+	}
+}
+
+// readMessageType reads one graphql-transport-ws frame and returns its type.
+func readMessageType(ctx context.Context, conn *coderws.Conn) (string, error) {
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		return "", fmt.Errorf("reading a frame: %w", err)
+	}
+
+	var message struct {
+		Type string `json:"type"`
+	}
+
+	if err := json.Unmarshal(data, &message); err != nil {
+		return "", fmt.Errorf("decoding %q: %w", data, err)
+	}
+
+	return message.Type, nil
 }

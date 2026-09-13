@@ -22,6 +22,10 @@ const (
 // ChangeEvent is the delta broadcast to clients. Its JSON shape matches what
 // the client reducer consumes: dotted-path "updated" fields and "removed"
 // paths.
+//
+// A path separates document keys with "."; a key that contains a "." or a "\"
+// has those characters escaped with a backslash, so one key is always one
+// segment. client/services/game-state-parser.ts decodes the paths the same way.
 type ChangeEvent struct {
 	ID            string                 `json:"id"`
 	OperationType OperationType          `json:"op"`

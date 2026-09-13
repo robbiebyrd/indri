@@ -40,6 +40,7 @@ import {OverrideLayer} from "./overrides.ts"
 import {LuaScriptError} from "./runtime.ts"
 
 import type {LuaCFunction, lua_State} from "fengari"
+import type {ReadonlyDeep} from "type-fest"
 import type {Game} from "../../models/models.ts"
 import type {Style} from "../schema/style.ts"
 import type {DispatchResult, Invoke, LuaEvent, Scope} from "./events.ts"
@@ -70,8 +71,14 @@ export interface WidgetTarget extends StyleTarget {
  */
 export interface HostApi {
     send(action: string, payload: Record<string, unknown>): void
-    /** A deep-frozen snapshot. Never the live game object. */
-    state(): Readonly<Game>
+    /**
+     * A deep-frozen snapshot. Never the live game object.
+     *
+     * `ReadonlyDeep`, NOT `Readonly`: the runtime `deepFreeze` below protects
+     * every level, and a shallow type would promise less than it delivers —
+     * `state().stage.currentScene = "x"` would type-check and then throw.
+     */
+    state(): ReadonlyDeep<Game>
     readonly board: StyleTarget
     readonly scene: StyleTarget
     widget(id: string): WidgetTarget
@@ -158,7 +165,7 @@ export class LuaHost {
      */
     private readonly scopes: Scope[] = []
 
-    private snapshot: Readonly<Game> = Object.freeze({})
+    private snapshot: ReadonlyDeep<Game> = Object.freeze({})
     /** Registry key of the Lua view of `snapshot`, built on demand and cached. */
     private stateRef: number | null = null
     private installed = false

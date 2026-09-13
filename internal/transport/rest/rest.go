@@ -27,10 +27,6 @@ import (
 // prefix is the path every action route is mounted under.
 const prefix = "/api/"
 
-// maxBodyBytes caps a request body. Action arguments are a handful of short
-// strings; anything larger is a mistake or an attack.
-const maxBodyBytes = 64 << 10
-
 // SessionLookup resolves a session from its bearer token (the same opaque token
 // login and reconnect issue). Satisfied by the session store.
 type SessionLookup interface {
@@ -132,7 +128,7 @@ func (t *Transport) handle(w http.ResponseWriter, r *http.Request) {
 // decodeBody reads the request body as a JSON object. An empty body is an empty
 // object, so argument-less actions can be POSTed with nothing at all.
 func decodeBody(r *http.Request, into *map[string]interface{}) error {
-	r.Body = http.MaxBytesReader(nil, r.Body, maxBodyBytes)
+	r.Body = http.MaxBytesReader(nil, r.Body, transport.MaxBodyBytes)
 
 	dec := json.NewDecoder(r.Body)
 

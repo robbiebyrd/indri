@@ -282,9 +282,16 @@ Keys in `updated` are dotted paths into the game's **JSON** representation — t
 keyframe uses. Nested objects are walked (`players.<userId>.host`); arrays and scalars are replaced
 whole. Apply them onto the last keyframe.
 
-Deltas are sanitized on the same terms as keyframes: paths containing a `privateData` segment are
-dropped, and `privateData` is stripped out of whole-object update values. A client never sees private
-data on either path.
+A path segment is one document key, and a key is arbitrary — a user id, a team id, a widget id, a
+script table key. A key holding a `.` or a `\` therefore has those characters escaped with a
+backslash, so `widgets.foo\.privateData.label` addresses the `label` of the widget whose id is
+literally `foo.privateData`. **Split a path on unescaped dots only** and unescape each segment; a path
+with no backslash splits exactly as a plain split on `.` would.
+
+Deltas are sanitized on the same terms as keyframes: paths with a segment that *decodes to*
+`privateData` are dropped, and `privateData` is stripped out of whole-object update values. A client
+never sees private data on either path. Because the comparison is on decoded segments, a key merely
+named `foo.privateData` is an ordinary key and is broadcast normally.
 
 ### Error
 

@@ -336,6 +336,35 @@ test("state() is a deep-frozen clone, and a Lua write attempt fails", () => {
     h.dispose();
 });
 
+/**
+ * The TYPE side of the same rule, and it only means anything under `tsc`.
+ *
+ * `@ts-expect-error` FAILS THE TYPECHECK IF THE LINE COMPILES, so this is a
+ * real assertion rather than a comment: with the old shallow `Readonly<Game>`,
+ * `stage` narrowed to a mutable `Stage` and the write below type-checked,
+ * leaving a script author to discover the freeze as a runtime TypeError. The
+ * `assert.throws` keeps the two halves honest — the type must refuse it and the
+ * runtime must too.
+ */
+test("a nested write to state() is a type error, not just a runtime one", () => {
+    const h = harness();
+    h.host.applyGameState(game(), "keyframe");
+
+    const stage = h.host.api.state().stage;
+    assert.ok(stage !== undefined);
+
+    assert.throws(
+        () => {
+            // @ts-expect-error state() is deeply readonly
+            stage.currentScene = "results";
+        },
+        TypeError,
+    );
+
+    assert.equal(h.host.api.state().stage?.currentScene, "board");
+    h.dispose();
+});
+
 test("a script can read every corner of the state it cannot write", () => {
     const h = harness();
     h.host.applyGameState(game(), "keyframe");

@@ -3,12 +3,18 @@ package events
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 )
 
 // Diff computes the dotted-path change between two documents (previously
 // supplied by MongoDB's updateDescription). Nested objects are walked so paths
 // look like "players.<id>.host"; arrays and scalars are treated as whole
 // values. before/after are the JSON representations of the document.
+//
+// Document keys are arbitrary (player ids, team ids, script table keys), so a
+// key may itself contain the separator. Keys are therefore escaped as they are
+// joined — see escapeSegment — and every reader of a path must split it with
+// splitPath rather than on a raw ".".
 func Diff(before, after map[string]interface{}) (updated map[string]interface{}, removed []string) {
 	updated = make(map[string]interface{})
 	diffInto("", before, after, updated, &removed)
@@ -51,6 +57,10 @@ const privateDataKey = "privateData"
 // privateData field is dropped, and privateData is stripped recursively from
 // the values of the remaining updates (e.g. a whole-object update for a newly
 // added player).
+//
+// Paths are decoded with splitPath, so the segment must be a real document key:
+// a key merely named "x.privateData" is one segment, is not a privateData
+// field, and is broadcast like any other key.
 func SanitizeDelta(updated map[string]interface{}, removed []string) (map[string]interface{}, []string) {
 	cleanUpdated := make(map[string]interface{}, len(updated))
 
@@ -76,19 +86,50 @@ func SanitizeDelta(updated map[string]interface{}, removed []string) (map[string
 }
 
 func pathHasSegment(path, segment string) bool {
-	start := 0
-
-	for i := 0; i <= len(path); i++ {
-		if i == len(path) || path[i] == '.' {
-			if path[start:i] == segment {
-				return true
-			}
-
-			start = i + 1
+	for _, candidate := range splitPath(path) {
+		if candidate == segment {
+			return true
 		}
 	}
 
 	return false
+}
+
+// splitPath decodes a dotted path back into its original keys. It is the
+// inverse of joinPath: a backslash escapes the character after it, so only an
+// unescaped "." separates segments. A path built without escaping (a key the
+// caller wrote by hand, such as "stage.currentScene") contains no backslash and
+// splits exactly as a plain strings.Split would, so both producers agree.
+func splitPath(path string) []string {
+	var (
+		segments []string
+		segment  strings.Builder
+		escaped  bool
+	)
+
+	for i := 0; i < len(path); i++ {
+		switch c := path[i]; {
+		case escaped:
+			segment.WriteByte(c)
+
+			escaped = false
+		case c == escapeChar:
+			escaped = true
+		case c == pathSeparator:
+			segments = append(segments, segment.String())
+			segment.Reset()
+		default:
+			segment.WriteByte(c)
+		}
+	}
+
+	// A trailing lone backslash cannot have been produced by escapeSegment;
+	// keep it literal rather than dropping a character from the key.
+	if escaped {
+		segment.WriteByte(escapeChar)
+	}
+
+	return append(segments, segment.String())
 }
 
 // stripKey recursively removes the given key from any nested object.
@@ -118,12 +159,49 @@ func stripKey(value interface{}, key string) interface{} {
 	}
 }
 
+const (
+	pathSeparator = '.'
+	escapeChar    = '\\'
+)
+
+// joinPath appends one document key to an already-encoded path.
+//
+// The key is escaped first. Without that, a key holding a "." would forge a
+// path segment: a widget id of "foo.privateData" would end a path in a segment
+// literally equal to "privateData", so SanitizeDelta would drop every update to
+// that widget, and the client would apply the update to a nested "privateData"
+// child instead of to the key it was sent. Escaping keeps one key one segment
+// whatever it contains.
 func joinPath(prefix, key string) string {
 	if prefix == "" {
+		return escapeSegment(key)
+	}
+
+	return prefix + string(pathSeparator) + escapeSegment(key)
+}
+
+// escapeSegment encodes a single document key so it survives a round trip
+// through a dotted path: a backslash escapes itself and the separator. Keys
+// without either character — every id and json tag name the server generates —
+// are returned unchanged, so the encoding is invisible in practice.
+func escapeSegment(key string) string {
+	if !strings.ContainsRune(key, pathSeparator) && !strings.ContainsRune(key, escapeChar) {
 		return key
 	}
 
-	return prefix + "." + key
+	var escaped strings.Builder
+
+	escaped.Grow(len(key) + 2)
+
+	for i := 0; i < len(key); i++ {
+		if c := key[i]; c == pathSeparator || c == escapeChar {
+			escaped.WriteByte(escapeChar)
+		}
+
+		escaped.WriteByte(key[i])
+	}
+
+	return escaped.String()
 }
 
 // ToMap renders a value as its generic JSON object representation so Diff can

@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {GameStateParser} from "./game-state-parser.ts";
+import {GameStateParser, splitDeltaPath} from "./game-state-parser.ts";
 
 function delta(ts: number, updated?: Record<string, unknown>, removed?: string[]): any {
     return {op: "update", ts: new Date(ts).toISOString(), updated, removed};
@@ -55,4 +55,45 @@ test("removed deletes a key", () => {
     p.update(delta(2000, undefined, ["b"]));
     assert.equal(p.current().b, undefined, "removed key deleted");
     assert.equal(p.current().a, 1, "sibling key retained");
+});
+
+// The server escapes a "." or a "\" inside a document key before joining it
+// into a path (internal/services/events/delta.go). The two encoders have to
+// agree exactly, or an update lands on the wrong node.
+test("delta paths decode escaped key characters", () => {
+    const cases: [string, string[]][] = [
+        ["stage.currentScene", ["stage", "currentScene"]],
+        ["players", ["players"]],
+        ["", [""]],
+        ["board.0.1", ["board", "0", "1"]],
+        ["data.foo\\.privateData", ["data", "foo.privateData"]],
+        ["data.a\\\\b", ["data", "a\\b"]],
+        ["data.\\privateData", ["data", "privateData"]],
+        ["data.a\\", ["data", "a\\"]],
+        ["a..b", ["a", "", "b"]],
+    ];
+
+    for (const [path, want] of cases) {
+        assert.deepEqual(splitDeltaPath(path), want, `decoding ${JSON.stringify(path)}`);
+    }
+});
+
+test("a widget id containing a dot updates that key, not a nested node", () => {
+    const p = new GameStateParser<any>();
+    p.set({widgets: {"foo.privateData": {label: "a"}}}, new Date(1000));
+    p.update(delta(2000, {"widgets.foo\\.privateData.label": "b"}));
+
+    const widgets = p.current().widgets;
+    assert.equal(widgets["foo.privateData"].label, "b", "escaped key updated in place");
+    assert.equal(widgets.foo, undefined, "no nested node forged from the dotted id");
+});
+
+test("a widget id containing a dot is removed as one key", () => {
+    const p = new GameStateParser<any>();
+    p.set({widgets: {"foo.privateData": 1, keep: 2}}, new Date(1000));
+    p.update(delta(2000, undefined, ["widgets.foo\\.privateData"]));
+
+    const widgets = p.current().widgets;
+    assert.equal("foo.privateData" in widgets, false, "escaped key deleted");
+    assert.equal(widgets.keep, 2, "sibling key retained");
 });
