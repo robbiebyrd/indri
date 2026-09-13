@@ -1,10 +1,11 @@
-// The two value imports are RELATIVE, not `@/`-aliased, and the rest are
+// The value imports are RELATIVE, not `@/`-aliased, and the rest are
 // `import type`. That is what lets this module load under bare
 // `node --experimental-strip-types`, which resolves neither tsconfig paths nor
 // the React/Expo modules the aliased provider files pull in. See
 // `layout/lua/bridge.node-test.ts`, which drives the real handler.
 import {GameStateParser} from "./game-state-parser.ts";
 import {parseJsonSafely} from "./json.ts";
+import {WebSocketTransport} from "./transport.ts";
 
 import type {Game, UpdateMessage, User} from "@/models/models";
 import type {GameDispatchMessage} from "@/providers/game-state/game-state-actions";
@@ -13,6 +14,7 @@ import type {Dispatch} from "react";
 import type {GameListDispatchMessage} from "@/providers/game-list/game-list-actions";
 import type {GameInfo} from "@/providers/game-list/game-list-context";
 import type {JsonObject} from "type-fest";
+import type {ClientTransport} from "./transport.ts";
 
 type actionHandler = {
     name: string
@@ -31,7 +33,7 @@ type actionHandler = {
 export type GameStateObserver = (game: Game, kind: "keyframe" | "delta") => void
 
 export class MessageHandler {
-    private ws?: WebSocket = undefined
+    private readonly transport: ClientTransport
     private stateList: GameStateParser<Game> = new GameStateParser<Game>()
     private readonly setGameState: Dispatch<GameDispatchMessage>
     private readonly setPlayerState: Dispatch<UserDispatchMessage>
@@ -46,11 +48,13 @@ export class MessageHandler {
         setPlayerState: Dispatch<UserDispatchMessage>,
         setGameState: Dispatch<GameDispatchMessage>,
         setGameList: Dispatch<GameListDispatchMessage>,
-        parsers: actionHandler[] = []
+        parsers: actionHandler[] = [],
+        transport: ClientTransport = new WebSocketTransport()
     ) {
         this.setPlayerState = setPlayerState
         this.setGameState = setGameState
         this.setGameList = setGameList
+        this.transport = transport
 
         this.parsers = [
             {
@@ -77,9 +81,9 @@ export class MessageHandler {
             ...parsers
         ]
 
-        this.ws = new WebSocket(url)
+        this.transport.connect(url)
 
-        this.ws.onopen = () => {
+        this.transport.onOpen(() => {
             this.opened = true
             for (const observer of this.openObservers) {
                 try {
@@ -88,21 +92,11 @@ export class MessageHandler {
                     console.warn("a socket-open observer threw", err)
                 }
             }
-        }
+        })
 
-        this.ws.onmessage = (e: MessageEvent) => {
-            this.routeIncomingMessage(e)
-        }
-
-        //TODO: Handle errors appropriately.
-        this.ws.onerror = (e: Event) => {
-            console.log(e)
-        }
-
-        //TODO: Handle reconnects
-        this.ws.onclose = (e: CloseEvent) => {
-            console.log(e.code, e.reason)
-        }
+        this.transport.onMessage((data: string) => {
+            this.routeIncomingMessage({data} as MessageEvent)
+        })
 
         return this
     }
@@ -131,16 +125,7 @@ export class MessageHandler {
     }
 
     close() {
-        if (this.ws) {
-            // Drop handlers before closing so a teardown doesn't fire onclose
-            // logic (e.g. future reconnect) during unmount.
-            this.ws.onopen = null
-            this.ws.onmessage = null
-            this.ws.onerror = null
-            this.ws.onclose = null
-            this.ws.close()
-            this.ws = undefined
-        }
+        this.transport.close()
     }
 
     /**
@@ -167,11 +152,7 @@ export class MessageHandler {
     }
 
     send(message: object) {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            console.warn("dropping message sent before the socket was open")
-            return
-        }
-        this.ws.send(JSON.stringify(message))
+        this.transport.send(message)
     }
 
     /**
