@@ -278,6 +278,16 @@ func (ss *Service) SetSceneOrder(gameId string, sceneOrder []string) error {
 }
 
 // UpdateScene saves a field (or all fields if the path is nil) into one of the data stores for a given scene.
+//
+// The data store segment comes from dataType, so with models.DataStorePrivate
+// this writes "stage.scenes.<id>.privateData" — a field models.Scene does not
+// declare, because it tags its private store "private_data". The data is stored
+// and no read gives it back. Composing that segment from the bson tag instead
+// would be worse, not better: the same string is published as the delta path,
+// and events.SanitizeDelta only recognises "privateData" as private, so the
+// scene's private data would go out to every player. The tag is the side that
+// has to change, and that is blocked on a migration decision recorded on
+// models.Scene.
 func (ss *Service) UpdateScene(
 	gameId string,
 	sceneId string,

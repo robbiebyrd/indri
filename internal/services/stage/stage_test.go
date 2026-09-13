@@ -345,9 +345,18 @@ func applyUpdate(t *testing.T, path string, value interface{}) *models.Game {
 // fail a test that only compared strings, so the rule is checked against the
 // models themselves.
 //
-// The scenes' private data store is not exercised: models.Scene tags it
+// The scenes' private data store is still not exercised: models.Scene tags it
 // "private_data" while models.DataStoreType spells it "privateData", a third
-// instance of this same defect that is outside this change and filed on its own.
+// instance of this same defect. It stays excluded because the fix is not a
+// one-character edit — it changes a persisted format that live documents
+// already use — and that decision is recorded, with the evidence behind it, on
+// models.Scene. Delete this paragraph and add the private store to the calls
+// below when the tag is fixed.
+//
+// The exclusion is not a blind spot in the meantime: models has its own guard,
+// TestBsonAndJsonNamesAgreeAcrossTheGameDocument, which reports every field in
+// the game document whose bson and json names disagree and fails if this one is
+// fixed without the exception being removed.
 func TestEveryPathThisPackageWritesNamesAFieldTheModelsDeclare(t *testing.T) {
 	public := models.DataStorePublic
 	widgetPath := "widgets.score"
