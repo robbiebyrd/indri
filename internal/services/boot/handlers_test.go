@@ -1,21 +1,29 @@
 package boot
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/injector"
+	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/transport"
+	graphqlTransport "github.com/robbiebyrd/indri/internal/transport/graphql"
 	"github.com/robbiebyrd/indri/internal/transport/graphql/generated"
 	"github.com/robbiebyrd/indri/internal/transport/rest"
+	sseTransport "github.com/robbiebyrd/indri/internal/transport/sse"
+	webrtcTransport "github.com/robbiebyrd/indri/internal/transport/webrtc"
 	"github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
@@ -275,4 +283,121 @@ func dispatchedAction(t *testing.T, fn *ast.FuncDecl) (string, bool) {
 	})
 
 	return action, action != ""
+}
+
+// noSessions never authenticates anyone. Every transport built below only
+// needs a SessionLookup to construct; this test never drives a real
+// handshake for any of them, so nothing ever calls GetByToken.
+type noSessions struct{}
+
+func (noSessions) GetByToken(string) (*models.Session, error) {
+	return nil, errors.New("no such session")
+}
+
+// fakeConn is a minimal transport.Conn double carrying a session key, so a
+// conn can be registered on a transport directly (via AddSink) without going
+// through that transport's own handshake.
+type fakeConn struct {
+	*transport.Keys
+
+	mu     sync.Mutex
+	writes [][]byte
+}
+
+func newFakeConn(sessionID string) *fakeConn {
+	return &fakeConn{Keys: transport.NewKeys(sessionID)}
+}
+
+func (c *fakeConn) Write(msg []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.writes = append(c.writes, append([]byte(nil), msg...))
+
+	return nil
+}
+
+func (c *fakeConn) Close() error {
+	c.MarkClosed()
+
+	return nil
+}
+
+func (c *fakeConn) written() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return append([][]byte(nil), c.writes...)
+}
+
+// bareTransport is a Registry promoted to a full Transport, standing in for
+// WebSocket -- mirrors the fakeTransport pattern in
+// internal/transport/registry_test.go and internal/transport/webrtc/webrtc_test.go.
+// WebSocket's melody-backed session cannot be faked this way (there is no
+// AddSink seam without a real upgrade), so it is the one leg stood in for
+// rather than built for real; GraphQL, SSE and WebRTC below are the real
+// transports services.go builds, registering a conn through the exact same
+// Registry.AddSink seam a real handshake on each would use.
+type bareTransport struct{ *transport.Registry }
+
+func (bareTransport) Handle(transport.Handlers) {}
+func (bareTransport) Register(*http.ServeMux)   {}
+
+// TestBroadcastReachesEveryAggregatedTransport proves criterion 5 of story
+// 040-9cec at the layer that is honestly testable without a database or a
+// four-protocol integration harness: a delta broadcast through the same
+// transport.Multi aggregation internal/injector/services.go builds reaches a
+// conn registered on each aggregated transport identically, filtered by the
+// one session key every transport shares.
+func TestBroadcastReachesEveryAggregatedTransport(t *testing.T) {
+	sessions := noSessions{}
+
+	wsStandIn := bareTransport{&transport.Registry{}}
+	gql := graphqlTransport.New(sessions)
+	sse := sseTransport.New(sessions)
+
+	rtc, err := webrtcTransport.New(sessions, webrtcTransport.Config{UDPPort: 0})
+	if err != nil {
+		t.Fatalf("webrtcTransport.New: %v", err)
+	}
+
+	t.Cleanup(func() { _ = rtc.Close() })
+
+	multi := transport.NewMulti(wsStandIn, gql, sse, rtc)
+
+	// Mirrors services.go: everything but the WebSocket leg needs the
+	// aggregate wired back in via SetPeer.
+	for _, p := range []interface{ SetPeer(transport.Transport) }{gql, sse, rtc} {
+		p.SetPeer(multi)
+	}
+
+	const sessionID = "player-1"
+
+	conns := map[string]*fakeConn{
+		"ws":      newFakeConn(sessionID),
+		"graphql": newFakeConn(sessionID),
+		"sse":     newFakeConn(sessionID),
+		"webrtc":  newFakeConn(sessionID),
+	}
+
+	wsStandIn.AddSink(conns["ws"])
+	gql.AddSink(conns["graphql"])
+	sse.AddSink(conns["sse"])
+	rtc.AddSink(conns["webrtc"])
+
+	err = multi.BroadcastFilter([]byte("delta"), func(c transport.Conn) bool {
+		id, _ := c.Get(transport.SessionIDKey)
+
+		return id == sessionID
+	})
+	if err != nil {
+		t.Fatalf("BroadcastFilter: %v", err)
+	}
+
+	for name, c := range conns {
+		got := c.written()
+		if len(got) != 1 || string(got[0]) != "delta" {
+			t.Errorf("%s conn received %q, want exactly one %q", name, got, "delta")
+		}
+	}
 }

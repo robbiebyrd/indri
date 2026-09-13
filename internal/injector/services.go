@@ -3,7 +3,10 @@ package injector
 import (
 	"context"
 	"errors"
+	"strings"
+	"time"
 
+	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	authSevice "github.com/robbiebyrd/indri/internal/services/authentication"
 	broadcastService "github.com/robbiebyrd/indri/internal/services/broadcast"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
@@ -13,6 +16,7 @@ import (
 	graphqlTransport "github.com/robbiebyrd/indri/internal/transport/graphql"
 	restTransport "github.com/robbiebyrd/indri/internal/transport/rest"
 	sseTransport "github.com/robbiebyrd/indri/internal/transport/sse"
+	webrtcTransport "github.com/robbiebyrd/indri/internal/transport/webrtc"
 )
 
 func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInjector) (*ServicesInjector, error) {
@@ -30,16 +34,33 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 	// aggregate.
 	//
 	// sse is push-only and rest is request-only: together they are the third
-	// way to play, alongside WebSocket and GraphQL.
+	// way to play, alongside WebSocket and GraphQL. webrtc is bidirectional
+	// over a DataChannel, shaped like ws, and is the fourth.
 	gql := graphqlTransport.New(repos.SessionRepo)
 	events := sseTransport.New(repos.SessionRepo)
 	api := restTransport.New(repos.SessionRepo)
 
-	multi := transport.NewMulti(clients.Transport, gql, events, api)
+	vars := envVars.GetEnv()
+
+	// Unlike the other three, New builds a pion API and a shared UDP mux, so
+	// it can fail (e.g. the configured port is unavailable) and must be
+	// handled rather than panicked through.
+	rtc, err := webrtcTransport.New(repos.SessionRepo, webrtcTransport.Config{
+		UDPPort:    vars.RTCUDPPort,
+		NAT1To1IPs: rtcNAT1To1IPs(vars.RTCNAT1To1IPs),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	rtc.MaxPeers = vars.RTCMaxPeers
+	rtc.PendingTTL = time.Duration(vars.RTCPendingTTLSeconds) * time.Second
+
+	multi := transport.NewMulti(clients.Transport, gql, events, api, rtc)
 
 	// Each needs the aggregate so a kick closes the target's connections on
 	// every transport, not just its own.
-	for _, t := range []interface{ SetPeer(transport.Transport) }{gql, events, api} {
+	for _, t := range []interface{ SetPeer(transport.Transport) }{gql, events, api, rtc} {
 		t.SetPeer(multi)
 	}
 
@@ -74,4 +95,23 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 		UserService:      us,
 		SessionService:   ss,
 	}, nil
+}
+
+// rtcNAT1To1IPs splits the comma-separated INDRI_RTC_NAT_1TO1_IPS value into
+// the slice webrtcTransport.Config expects. An empty string yields no IPs,
+// matching envconfig's own empty-string default.
+func rtcNAT1To1IPs(csv string) []string {
+	if csv == "" {
+		return nil
+	}
+
+	var ips []string
+
+	for _, ip := range strings.Split(csv, ",") {
+		if trimmed := strings.TrimSpace(ip); trimmed != "" {
+			ips = append(ips, trimmed)
+		}
+	}
+
+	return ips
 }

@@ -1,6 +1,11 @@
 package webrtc
 
 import (
+	"bytes"
+	"log"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -323,5 +328,50 @@ func TestRTCConn_HighBufferedAmountParksDrain(t *testing.T) {
 	got := sink.sentMessages()
 	if string(got[0]) != "blocked" {
 		t.Fatalf("sent %q, want %q", got[0], "blocked")
+	}
+}
+
+// Criterion 7 (story 040-9cec): a payload over the practical cross-browser
+// DataChannel ceiling is reported and logged, never silently truncated (which
+// pion would otherwise hand to the sink, risking corruption) and never
+// silently dropped with no trace (which would leave a player's client simply
+// frozen with nothing anywhere to explain why).
+func TestRTCConn_OversizedPayloadReportedNotSent(t *testing.T) {
+	var logBuf bytes.Buffer
+
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	sink := newFakeSink()
+	conn := newConn("session-1", sink)
+	defer conn.Close()
+
+	oversized := make([]byte, maxMessageSize+1)
+
+	if err := conn.Write(oversized); err != nil {
+		t.Fatalf("Write(oversized) returned error: %v", err)
+	}
+
+	// Follow the oversized payload with a normal one so we can prove the
+	// drain goroutine kept going instead of stalling on it.
+	if err := conn.Write([]byte("ok")); err != nil {
+		t.Fatalf("Write(ok) returned error: %v", err)
+	}
+
+	waitForSentCount(t, sink, 1)
+
+	// Give the drain goroutine a moment to see if it (incorrectly) also
+	// forwards the oversized payload.
+	time.Sleep(50 * time.Millisecond)
+
+	got := sink.sentMessages()
+	if len(got) != 1 || string(got[0]) != "ok" {
+		t.Fatalf("sink received %q, want exactly one message %q -- the oversized payload must never reach the sink", got, "ok")
+	}
+
+	logged := logBuf.String()
+	if !strings.Contains(logged, strconv.Itoa(len(oversized))) || !strings.Contains(logged, strconv.Itoa(maxMessageSize)) {
+		t.Errorf("log output = %q, want it to report both the oversized payload's size (%d) and the ceiling (%d)",
+			logged, len(oversized), maxMessageSize)
 	}
 }

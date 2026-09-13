@@ -18,6 +18,16 @@ const queueSize = 16
 // to SetBufferedAmountLowThreshold.
 const backpressureThreshold = 1 << 20 // 1 MiB
 
+// maxMessageSize is the practical cross-browser DataChannel ceiling, not the
+// RTCDataChannel spec's 256 KiB. Firefox and Chromium fragment a message
+// above this size incompatibly with each other, so handing one to the sink
+// risks it arriving corrupted or not at all -- with nothing wrong at this
+// layer to explain why a player's game just stopped updating. A keyframe can
+// exceed it; chunking is deferred (plan Open Question 3), so for now an
+// oversized payload is refused outright rather than truncated or dropped
+// with no trace.
+const maxMessageSize = 16 * 1024
+
 // dataSink is the half of pion's DataChannel this conn uses, so tests need no
 // real PeerConnection.
 type dataSink interface {
@@ -116,6 +126,18 @@ func (c *rtcConn) drain() {
 // backpressure threshold, then writes msg. Waiting on low instead of polling
 // BufferedAmount is what keeps this from busy-looping while a peer is slow.
 func (c *rtcConn) send(msg []byte) bool {
+	if len(msg) > maxMessageSize {
+		// Report and log, then move on to the next queued message: dropping
+		// silently here would mean a player's client simply stops receiving
+		// updates with nothing anywhere to say why.
+		log.Printf(
+			"webrtc: dropping %d byte payload, exceeds the %d byte cross-browser DataChannel ceiling",
+			len(msg), maxMessageSize,
+		)
+
+		return true
+	}
+
 	for c.sink.BufferedAmount() >= backpressureThreshold {
 		select {
 		case <-c.low:

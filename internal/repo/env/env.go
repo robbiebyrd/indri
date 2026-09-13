@@ -24,6 +24,10 @@ type Vars struct {
 	WSPongTimeoutSeconds  int    `default:"60"        envconfig:"WS_PONG_TIMEOUT"`
 	WSMaxMessageSizeBytes int    `default:"32768"     envconfig:"WS_MAX_MESSAGE_SIZE"`
 	WSMessageBufferSize   int    `default:"1024"      envconfig:"WS_MESSAGE_BUFFER_SIZE"`
+	RTCUDPPort            int    `default:"8443"      envconfig:"RTC_UDP_PORT"`
+	RTCNAT1To1IPs         string `default:""          envconfig:"RTC_NAT_1TO1_IPS"`
+	RTCMaxPeers           int    `default:"1000"      envconfig:"RTC_MAX_PEERS"`
+	RTCPendingTTLSeconds  int    `default:"30"        envconfig:"RTC_PENDING_TTL"`
 }
 
 var globalClient *Vars

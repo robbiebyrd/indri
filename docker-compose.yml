@@ -1,4 +1,35 @@
 services:
+  # Opt-in, and deliberately not part of `docker compose up -d`: that is
+  # documented as starting MongoDB and Redis only, and the server is normally
+  # run on the host with `go run ./cmd/server` or `air`. Starting both would
+  # bind INDRI_LISTEN_PORT twice and the host process would fail to listen.
+  #
+  # Run this one with: docker compose --profile server up -d
+  server:
+    profiles: ["server"]
+    build: .
+    env_file:
+      - .env
+    environment:
+      # Force this regardless of .env: the Dockerfile's own ENV sets the same
+      # override, but env_file above is applied after the image's ENV and
+      # would otherwise silently win, leaving the server bound to loopback
+      # and unreachable through the port mapping below.
+      - INDRI_LISTEN_ADDRESS=0.0.0.0
+    ports:
+      - "${INDRI_LISTEN_PORT:-5002}:${INDRI_LISTEN_PORT:-5002}"
+      # The WebRTC UDP mux binds one fixed port and advertises it verbatim in
+      # ICE candidates, so host and container port MUST be identical here --
+      # a remapped port (e.g. "9000:8443") would advertise 8443 to clients
+      # while only 9000 is reachable. Without this mapping at all, ICE
+      # gathering just produces unreachable candidates: the signalling POST
+      # still returns 200 with a normal-looking SDP answer, and nothing at
+      # the HTTP layer indicates the DataChannel will never open.
+      - "${INDRI_RTC_UDP_PORT:-8443}:${INDRI_RTC_UDP_PORT:-8443}/udp"
+    depends_on:
+      - mongodb
+      - redis
+
   mongodb:
     image: mongo:latest
     env_file:
