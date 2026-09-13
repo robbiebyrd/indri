@@ -1,7 +1,9 @@
 package game
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -487,6 +489,87 @@ func TestUpdateField_PublishesTheFieldItWrote(t *testing.T) {
 
 		if fmt.Sprint(after.PublicData["round"]) != "2" {
 			t.Errorf("stored public data is %v, want round 2", after.PublicData)
+		}
+	})
+}
+
+// TestUpdateField_PublishesAStructWithoutItsPrivateData is the other half of
+// TestMutate_PrivateDataNeverReachesTheDelta, for the write path that does not
+// go through Diff. UpdateField hands one Go value to two places — the store
+// keeps it, the delta broadcasts it — and internal/services/stage already
+// hands it a whole models.Stage, which carries a private store on the stage
+// and another on every scene inside it. What is stored must keep them; what
+// every player receives must not.
+func TestUpdateField_PublishesAStructWithoutItsPrivateData(t *testing.T) {
+	const (
+		stageSecret = "stage-answer-must-not-leak"
+		sceneSecret = "scene-answer-must-not-leak"
+		scenePrompt = "the prompt every player may see"
+	)
+
+	forEachBackend(t, func(t *testing.T, b backend) {
+		gameId := newGame(t, b.store, &models.Script{}).ID.Hex()
+
+		b.events.drain()
+
+		scenePrivate := map[string]interface{}{"answer": sceneSecret}
+		sceneData := map[string]interface{}{"prompt": scenePrompt}
+		stage := models.Stage{
+			CurrentScene: "board",
+			SceneOrder:   []string{"board"},
+			Scenes: map[string]models.Scene{
+				"board": {PublicData: &sceneData, PrivateData: &scenePrivate},
+			},
+			PrivateData: map[string]interface{}{"answer": stageSecret},
+		}
+
+		// The call stage.Service.LoadFromScript makes, with the script stage
+		// this game would have been stamped from.
+		if err := b.store.UpdateField(gameId, "stage", stage); err != nil {
+			t.Fatalf("updating the stage: %v", err)
+		}
+
+		// Asserted on the JSON form because that is what a player receives:
+		// the scene stores are pointers, and printing the value would show
+		// their addresses rather than the secrets they hold.
+		published, err := json.Marshal(b.events.updated())
+		if err != nil {
+			t.Fatalf("marshalling the published delta: %v", err)
+		}
+
+		for _, secret := range []string{stageSecret, sceneSecret} {
+			if bytes.Contains(published, []byte(secret)) {
+				t.Errorf("the broadcast delta leaked private data: %s", published)
+			}
+		}
+
+		if !bytes.Contains(published, []byte(scenePrompt)) {
+			t.Errorf("the delta lost the public data along with the private: %s", published)
+		}
+
+		// Only the published copy may differ. The stored game is the one the
+		// game logic reads, so it has to keep everything it was given.
+		stored, err := b.store.Get(gameId)
+		if err != nil {
+			t.Fatalf("reloading game: %v", err)
+		}
+
+		if fmt.Sprint(stored.Stage.PrivateData["answer"]) != stageSecret {
+			t.Errorf("stage private data was not stored, got %v", stored.Stage.PrivateData)
+		}
+
+		scene, ok := stored.Stage.Scenes["board"]
+		if !ok {
+			t.Fatalf("the scene was not stored at all, got %v", stored.Stage.Scenes)
+		}
+
+		if scene.PrivateData == nil || fmt.Sprint((*scene.PrivateData)["answer"]) != sceneSecret {
+			t.Errorf("scene private data was not stored, got %v", scene.PrivateData)
+		}
+
+		// Sanitizing must copy, not edit: the caller still holds this stage.
+		if stage.PrivateData["answer"] != stageSecret {
+			t.Errorf("publishing emptied the caller's own stage, got %v", stage.PrivateData)
 		}
 	})
 }

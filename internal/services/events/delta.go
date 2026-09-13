@@ -1,7 +1,9 @@
 package events
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"reflect"
 	"strings"
 )
@@ -55,8 +57,13 @@ const privateDataKey = "privateData"
 // SanitizeDelta removes private data from a change delta so a broadcast delta
 // has the same visibility as a sanitized keyframe. Any path that refers to a
 // privateData field is dropped, and privateData is stripped recursively from
-// the values of the remaining updates (e.g. a whole-object update for a newly
-// added player).
+// the values of the remaining updates — a whole-object update for a newly
+// added player, or the whole models.Stage that UpdateField publishes.
+//
+// The two halves need different work because they carry different things. A
+// removed entry is a path and nothing else, so dropping private paths is the
+// whole of its sanitization; an update carries a value as well, and a value has
+// to be walked.
 //
 // Paths are decoded with splitPath, so the segment must be a real document key:
 // a key merely named "x.privateData" is one segment, is not a privateData
@@ -69,7 +76,20 @@ func SanitizeDelta(updated map[string]interface{}, removed []string) (map[string
 			continue
 		}
 
-		cleanUpdated[path] = stripKey(value, privateDataKey)
+		stripped, err := stripKey(value, privateDataKey)
+		if err != nil {
+			// Fail closed. A value that cannot be rendered as JSON cannot be
+			// shown to hold no private data, so it is dropped rather than
+			// broadcast unexamined. Nothing is lost by doing so: the delta is
+			// marshalled again on its way to the client, so a value that
+			// fails here would have failed there, and no client would have
+			// received this update anyway.
+			log.Printf("dropping update to %q from the change delta: %v", path, err)
+
+			continue
+		}
+
+		cleanUpdated[path] = stripped
 	}
 
 	var cleanRemoved []string
@@ -132,8 +152,34 @@ func splitPath(path string) []string {
 	return append(segments, segment.String())
 }
 
-// stripKey recursively removes the given key from any nested object.
-func stripKey(value interface{}, key string) interface{} {
+// stripKey recursively removes the given key from any nested object, returning
+// a new value: the caller's value is never modified, because the same value has
+// already been stored and only the published copy may differ from it.
+//
+// Nearly every value arriving here is already the generic JSON view of a
+// document — Diff walks ToMap's output, so its values are maps, slices and
+// scalars keyed by json tag names, the same vocabulary the client holds.
+// core.UpdateField is the exception: it publishes the raw Go value its caller
+// handed it, and that value may be a struct, a pointer to one, or a map or
+// slice of them. A struct is exactly where private data lives (models.Stage
+// carries a PrivateData store, and so does every models.Scene inside it), so
+// returning one untouched broadcast it to every player in the game.
+//
+// Such a value is therefore normalized through the JSON round trip this package
+// already uses, and then stripped by the map and slice cases above. The
+// alternative — walking the struct with reflection — would mean a second
+// implementation of encoding/json's naming rules (json tags, omitempty,
+// embedded and unexported fields, and types that marshal themselves, such as
+// time.Time). A delta is *defined* by what json produces, so a second
+// implementation that drifted from it by one field would be a leak. Normalizing
+// keeps one definition of what the client sees, and leaves the published value
+// in the same vocabulary as every value Diff produces.
+//
+// Normalizing changes the Go type of the published value, never its bytes on
+// the wire: numbers keep their literal spelling (see toJSONValue), so an int64
+// too large for a float64 still survives, and only the order of object keys can
+// differ, which JSON does not define.
+func stripKey(value interface{}, key string) (interface{}, error) {
 	switch v := value.(type) {
 	case map[string]interface{}:
 		out := make(map[string]interface{}, len(v))
@@ -143,20 +189,93 @@ func stripKey(value interface{}, key string) interface{} {
 				continue
 			}
 
-			out[k] = stripKey(val, key)
+			stripped, err := stripKey(val, key)
+			if err != nil {
+				return nil, err
+			}
+
+			out[k] = stripped
 		}
 
-		return out
+		return out, nil
 	case []interface{}:
 		out := make([]interface{}, len(v))
+
 		for i, item := range v {
-			out[i] = stripKey(item, key)
+			stripped, err := stripKey(item, key)
+			if err != nil {
+				return nil, err
+			}
+
+			out[i] = stripped
 		}
 
-		return out
+		return out, nil
 	default:
-		return value
+		// A scalar holds no fields to strip, so the common case costs no
+		// marshalling.
+		if !isComposite(value) {
+			return value, nil
+		}
+
+		normalized, err := toJSONValue(value)
+		if err != nil {
+			return nil, err
+		}
+
+		// The recursion terminates: toJSONValue yields only maps, slices and
+		// scalars, and a scalar is not composite.
+		return stripKey(normalized, key)
 	}
+}
+
+// isComposite reports whether a value may hold named fields that the map and
+// slice cases of stripKey cannot reach on their own — a struct, or a map, slice
+// or array that may contain one, through any number of pointers. A nil pointer
+// holds nothing.
+func isComposite(value interface{}) bool {
+	v := reflect.ValueOf(value)
+	for v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return false
+		}
+
+		v = v.Elem()
+	}
+
+	switch v.Kind() {
+	case reflect.Struct, reflect.Map, reflect.Slice, reflect.Array:
+		return true
+	default:
+		return false
+	}
+}
+
+// toJSONValue renders any value as its generic JSON representation. It is ToMap
+// for a value that need not be an object: a struct becomes a
+// map[string]interface{} keyed by json tag names, and a type that marshals
+// itself (time.Time, primitive.ObjectID) becomes whatever it marshals to.
+//
+// Numbers are decoded as json.Number rather than float64, so re-marshalling the
+// result reproduces the literal it was parsed from. Without that, normalizing a
+// struct holding a large int64 — a nanosecond timestamp, a snowflake id — would
+// silently round it, and the published value would no longer match the stored
+// one.
+func toJSONValue(value interface{}) (interface{}, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+
+	var decoded interface{}
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
 }
 
 const (
