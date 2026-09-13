@@ -46,8 +46,8 @@ func (f fakeSessions) GetByToken(token string) (*models.Session, error) {
 // internal/transport/registry_test.go's own fakeTransport.
 type fakeTransport struct{ *transport.Registry }
 
-func (fakeTransport) Handle(transport.Handlers)  {}
-func (fakeTransport) Register(*http.ServeMux)    {}
+func (fakeTransport) Handle(transport.Handlers) {}
+func (fakeTransport) Register(*http.ServeMux)   {}
 
 func newTestTransport(t *testing.T, sessions SessionLookup) *Transport {
 	t.Helper()
