@@ -19,6 +19,7 @@
  */
 
 import type {GridRect, GridSize} from "../../../layout/grid/coords.ts"
+import type {AbsolutePlacement} from "../../../layout/schema/placement.ts"
 
 /** Pixel size of the board, as reported by `onLayout`. */
 export interface BoardSize {
@@ -149,4 +150,67 @@ function clampOrigin(v: number, max: number): number {
 
 function clampSpan(v: number, max: number): number {
     return Math.min(Math.max(1, v), Math.max(1, max))
+}
+
+/** Smallest absolute span, as a percentage of the board. */
+export const MIN_ABSOLUTE_SPAN = 2
+
+/** A percentage string, rounded so a drag does not produce 17 decimal places. */
+function pct(value: number): `${number}%` {
+    return `${Math.round(value * 100) / 100}%`
+}
+
+function pctValue(v: string): number {
+    return Number.parseFloat(v)
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+    return Math.min(hi, Math.max(lo, v))
+}
+
+/**
+ * Move an absolute placement by a pixel delta.
+ *
+ * Absolute widgets are positioned as percentages OF THE BOARD, so a gesture in
+ * pixels only means something once divided by the board's measured size. The
+ * result is clamped so a widget cannot be dragged entirely off the canvas and
+ * become unreachable — the same reason grid moves clamp to the grid.
+ */
+export function moveAbsolute(
+    placement: AbsolutePlacement,
+    dx: number,
+    dy: number,
+    board: BoardSize,
+): AbsolutePlacement {
+    const w = pctValue(placement.width)
+    const h = pctValue(placement.height)
+
+    const left = clamp(pctValue(placement.left) + (dx / board.width) * 100, 0, 100 - w)
+    const top = clamp(pctValue(placement.top) + (dy / board.height) * 100, 0, 100 - h)
+
+    return {...placement, left: pct(left), top: pct(top)}
+}
+
+/** Resize an absolute placement by a pixel delta, floored and kept on the board. */
+export function resizeAbsolute(
+    placement: AbsolutePlacement,
+    dx: number,
+    dy: number,
+    board: BoardSize,
+): AbsolutePlacement {
+    const left = pctValue(placement.left)
+    const top = pctValue(placement.top)
+
+    const width = clamp(
+        pctValue(placement.width) + (dx / board.width) * 100,
+        MIN_ABSOLUTE_SPAN,
+        100 - left,
+    )
+    const height = clamp(
+        pctValue(placement.height) + (dy / board.height) * 100,
+        MIN_ABSOLUTE_SPAN,
+        100 - top,
+    )
+
+    return {...placement, width: pct(width), height: pct(height)}
 }

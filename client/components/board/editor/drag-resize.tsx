@@ -33,16 +33,17 @@ import Animated, {
     withTiming,
 } from "react-native-reanimated"
 
-import {setPlacement} from "@/layout/edit/ops"
+import {setAbsolutePlacement, setPlacement} from "@/layout/edit/ops"
 import {knownWidgetTypes} from "@/layout/registry/registry"
 import {parseLayout} from "@/layout/schema/layout"
 import {allowsOverlap} from "@/layout/schema/placement"
-import {cellSize, lineIndexes, rectToPixels, showGridLines, snapMove, snapResize} from "./snap"
+import {cellSize, lineIndexes, moveAbsolute, rectToPixels, resizeAbsolute, showGridLines, snapMove, snapResize} from "./snap"
 
 import type {LayoutChangeEvent} from "react-native"
 import type {EditContext, LayoutSocket} from "@/layout/edit/ops"
 import type {PlacedWidget} from "@/layout/grid/collision"
 import type {GridRect, GridSize} from "@/layout/grid/coords"
+import type {AbsolutePlacement} from "@/layout/schema/placement"
 import type {SceneLayout} from "@/layout/schema/layout"
 import type {BoardSize, CellSize} from "./snap"
 
@@ -54,6 +55,9 @@ const HANDLE_SIZE = 44
 
 const FRAME_COLOR = "#2563eb"
 const REJECT_COLOR = "#dc2626"
+
+/** Viewport-placed frames read differently: they never snap and never reject. */
+const ABSOLUTE_COLOR = "#7c3aed"
 
 export interface EditorOverlayProps {
     /** Where ops go. `MessageHandler` satisfies this. */
@@ -153,7 +157,139 @@ export function EditorOverlay(
                     ws={ws}
                 />
             ))}
+            {/*
+              Grid-placed widgets that allow overlap are absent from `siblings`
+              — that is how the exemption is expressed — and viewport-placed
+              ones never were. Both still need a frame, or toggling a widget
+              out of the collision set would take away the only thing you can
+              tap to select it.
+            */}
+            {cell !== undefined && Object.entries(scene.widgets)
+                .filter(([, w]) => w.placement.kind === "grid" && allowsOverlap(w.placement))
+                .map(([id, w]) => (
+                    <EditableFrame
+                        key={id}
+                        id={id}
+                        selected={id === selectedId}
+                        onSelect={onSelect}
+                        rect={w.placement as GridRect}
+                        cell={cell}
+                        grid={grid}
+                        ctx={ctx}
+                        ws={ws}
+                    />
+                ))}
+            {board !== undefined && Object.entries(scene.widgets)
+                .filter(([, w]) => w.placement.kind === "absolute")
+                .map(([id, w]) => (
+                    <AbsoluteFrame
+                        key={id}
+                        id={id}
+                        selected={id === selectedId}
+                        onSelect={onSelect}
+                        placement={w.placement as AbsolutePlacement}
+                        board={board}
+                        ctx={ctx}
+                        ws={ws}
+                    />
+                ))}
         </View>
+    )
+}
+
+interface AbsoluteFrameProps {
+    id: string
+    selected: boolean
+    onSelect: (id: string) => void
+    /** Where the SERVER says this widget is, in percentages of the board. */
+    placement: AbsolutePlacement
+    /** Needed to turn a gesture in pixels into a percentage of the canvas. */
+    board: BoardSize
+    ctx: EditContext
+    ws: LayoutSocket
+}
+
+/**
+ * A viewport-placed widget's drag surface and resize handle.
+ *
+ * Separate from `EditableFrame` because the two are genuinely different
+ * operations, not one with a flag. This one has no cells to snap to, is exempt
+ * from collision so a move is never rejected, and writes percentages through
+ * `setAbsolutePlacement`. Sharing a component would have meant a component that
+ * is half grid and half not, with a branch in every callback.
+ */
+function AbsoluteFrame({id, selected, onSelect, placement, board, ctx, ws}: AbsoluteFrameProps) {
+    const tx = useSharedValue(0)
+    const ty = useSharedValue(0)
+    const dw = useSharedValue(0)
+    const dh = useSharedValue(0)
+
+    function commitMove(dx: number, dy: number) {
+        setAbsolutePlacement(ws, ctx, id, moveAbsolute(placement, dx, dy, board))
+        // Dropped, not animated: the frame returns to the server's position and
+        // jumps to the new one when the delta lands. Animating would race it.
+        tx.value = 0
+        ty.value = 0
+    }
+
+    function commitResize(dx: number, dy: number) {
+        setAbsolutePlacement(ws, ctx, id, resizeAbsolute(placement, dx, dy, board))
+        dw.value = 0
+        dh.value = 0
+    }
+
+    const drag = Gesture.Pan()
+        .onChange((e) => {
+            tx.value += e.changeX
+            ty.value += e.changeY
+        })
+        .onEnd(() => {
+            runOnJS(commitMove)(tx.value, ty.value)
+        })
+
+    const select = Gesture.Tap().onEnd(() => {
+        runOnJS(onSelect)(id)
+    })
+
+    const resize = Gesture.Pan()
+        .onChange((e) => {
+            dw.value += e.changeX
+            dh.value += e.changeY
+        })
+        .onEnd(() => {
+            runOnJS(commitResize)(dw.value, dh.value)
+        })
+
+    // Percentages of the board, converted once here: an animated style cannot
+    // mix a percentage base with a pixel offset, so the base is resolved to
+    // pixels and the gesture offset added to it.
+    const baseLeft = (Number.parseFloat(placement.left) / 100) * board.width
+    const baseTop = (Number.parseFloat(placement.top) / 100) * board.height
+    const baseWidth = (Number.parseFloat(placement.width) / 100) * board.width
+    const baseHeight = (Number.parseFloat(placement.height) / 100) * board.height
+
+    const frameStyle = useAnimatedStyle(() => ({
+        left: baseLeft,
+        top: baseTop,
+        width: Math.max(8, baseWidth + dw.value),
+        height: Math.max(8, baseHeight + dh.value),
+        transform: [{translateX: tx.value}, {translateY: ty.value}],
+        borderColor: ABSOLUTE_COLOR,
+        borderWidth: selected ? 2 : 1,
+    }))
+
+    return (
+        <Animated.View style={[styles.frame, frameStyle]}>
+            <Text style={styles.frameLabel} numberOfLines={1}>{id}</Text>
+            <GestureDetector gesture={Gesture.Race(drag, select)}>
+                <Animated.View style={styles.dragSurface}/>
+            </GestureDetector>
+            <GestureDetector gesture={resize}>
+                <Animated.View style={styles.handle}>
+                    <View style={styles.handleGrip}/>
+                </Animated.View>
+            </GestureDetector>
+        </Animated.View>
     )
 }
 

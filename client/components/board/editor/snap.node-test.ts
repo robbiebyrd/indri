@@ -3,9 +3,12 @@ import test from "node:test";
 
 import {
     MAX_GRID_LINE_CELLS,
+    MIN_ABSOLUTE_SPAN,
     cellSize,
     lineIndexes,
+    moveAbsolute,
     rectToPixels,
+    resizeAbsolute,
     showGridLines,
     snapMove,
     snapResize,
@@ -108,4 +111,60 @@ test("the grid-line overlay is drawn up to the cell ceiling and suppressed past 
 test("only interior lines are drawn — the outer edges are the board's own border", () => {
     assert.deepEqual(lineIndexes(4), [1, 2, 3]);
     assert.deepEqual(lineIndexes(1), []);
+});
+
+// --- viewport-placed widgets ------------------------------------------------
+
+const BOARD = {width: 400, height: 200};
+const ABS = {
+    kind: "absolute",
+    left: "10%", top: "20%", width: "30%", height: "40%",
+} as const;
+
+test("moveAbsolute converts a pixel delta into a percentage of the board", () => {
+    // 40px of 400 is 10%; 20px of 200 is 10%.
+    const moved = moveAbsolute(ABS, 40, 20, BOARD);
+    assert.equal(moved.left, "20%");
+    assert.equal(moved.top, "30%");
+    assert.equal(moved.width, "30%", "a move must not resize");
+    assert.equal(moved.height, "40%");
+});
+
+test("moveAbsolute keeps a widget on the canvas", () => {
+    // Dragged far right: clamped so its right edge stays at 100%, which is
+    // what stops a widget being dragged out of reach entirely.
+    const moved = moveAbsolute(ABS, 10_000, 10_000, BOARD);
+    assert.equal(moved.left, "70%", "100% less its 30% width");
+    assert.equal(moved.top, "60%", "100% less its 40% height");
+
+    const back = moveAbsolute(ABS, -10_000, -10_000, BOARD);
+    assert.equal(back.left, "0%");
+    assert.equal(back.top, "0%");
+});
+
+test("resizeAbsolute floors the span and keeps it inside the board", () => {
+    const grown = resizeAbsolute(ABS, 40, 0, BOARD);
+    assert.equal(grown.width, "40%");
+    assert.equal(grown.left, "10%", "a resize must not move the origin");
+
+    const shrunk = resizeAbsolute(ABS, -10_000, -10_000, BOARD);
+    assert.equal(shrunk.width, `${MIN_ABSOLUTE_SPAN}%`);
+    assert.equal(shrunk.height, `${MIN_ABSOLUTE_SPAN}%`);
+
+    const huge = resizeAbsolute(ABS, 10_000, 10_000, BOARD);
+    assert.equal(huge.width, "90%", "100% less its 10% left offset");
+    assert.equal(huge.height, "80%", "100% less its 20% top offset");
+});
+
+test("percentages are rounded, so a drag does not emit 17 decimal places", () => {
+    const moved = moveAbsolute(ABS, 1, 1, BOARD);
+    assert.match(moved.left, /^\d+(\.\d{1,2})?%$/);
+    assert.match(moved.top, /^\d+(\.\d{1,2})?%$/);
+});
+
+test("overlap and z survive a move, because a drag must not silently reset them", () => {
+    const withFlags = {...ABS, overlap: true, z: 3} as const;
+    const moved = moveAbsolute(withFlags, 40, 0, BOARD);
+    assert.equal(moved.overlap, true);
+    assert.equal(moved.z, 3);
 });
