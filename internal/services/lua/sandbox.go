@@ -191,7 +191,7 @@ func capStringLib(L *lua.LState, maxBytes int) error {
 			L.RaiseError("string.rep would produce %d x %d bytes, over the %d byte cap", n, len(s), maxBytes)
 		}
 
-		return delegate(L, rep)
+		return delegate(L, rep, 1)
 	}))
 
 	strlib.RawSetString("format", L.NewFunction(func(L *lua.LState) int {
@@ -199,19 +199,19 @@ func capStringLib(L *lua.LState, maxBytes int) error {
 			L.RaiseError("string.format: %s", err.Error())
 		}
 
-		return delegate(L, format)
+		return delegate(L, format, 1)
 	}))
 
 	return nil
 }
 
-// delegate calls fn with the arguments the wrapper was given and yields its
-// single result.
+// delegate calls fn with the arguments the wrapper was given and yields nret
+// results.
 //
 // L.Call is unprotected on purpose: an error raised inside the real function
 // must reach the script's own pcall, exactly as it would have without the
 // wrapper.
-func delegate(L *lua.LState, fn lua.LValue) int {
+func delegate(L *lua.LState, fn lua.LValue, nret int) int {
 	top := L.GetTop()
 
 	L.Push(fn)
@@ -220,9 +220,9 @@ func delegate(L *lua.LState, fn lua.LValue) int {
 		L.Push(L.Get(i))
 	}
 
-	L.Call(top, 1)
+	L.Call(top, nret)
 
-	return 1
+	return nret
 }
 
 // checkFormat rejects a format string whose declared field widths alone would
