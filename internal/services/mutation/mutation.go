@@ -33,6 +33,10 @@ const defaultRetries = 10
 //
 // The distributed lock makes a losing race rare; the version fence makes it
 // safe when the lock's lease expires mid-mutation.
+//
+// A nil error means "nothing went wrong", which covers both a committed write
+// and an aborted attempt. Callers that must tell those apart — anything with a
+// side effect to release only when the state actually changed — want RunResult.
 func Run[T any](
 	ctx context.Context,
 	mgr lock.Manager,
@@ -41,9 +45,32 @@ func Run[T any](
 	apply func(*T) error,
 	save func(doc *T, expectedVersion int64) (committed bool, err error),
 ) error {
+	_, err := RunResult(ctx, mgr, key, load, apply, save)
+
+	return err
+}
+
+// RunResult is Run, reporting whether the write committed.
+//
+// It exists because an aborted attempt and a committed write are different
+// outcomes that Run cannot distinguish: both return nil. A caller that buffers
+// side effects during apply — a script's queued replies and broadcasts — has to
+// know which one happened, because apply may run up to defaultRetries times and
+// every attempt but the committing one must be discarded.
+//
+// committed is false for an abort, false alongside ErrConflict or any error
+// from load/apply/save, and true only when save reported a write.
+func RunResult[T any](
+	ctx context.Context,
+	mgr lock.Manager,
+	key string,
+	load func() (*T, int64, error),
+	apply func(*T) error,
+	save func(doc *T, expectedVersion int64) (committed bool, err error),
+) (bool, error) {
 	handle, err := mgr.Acquire(ctx, key)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	defer func() { _ = handle.Release(ctx) }()
@@ -51,26 +78,26 @@ func Run[T any](
 	for attempt := 0; attempt < defaultRetries; attempt++ {
 		doc, version, err := load()
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		if err := apply(doc); err != nil {
 			if errors.Is(err, ErrAbort) {
-				return nil
+				return false, nil
 			}
 
-			return err
+			return false, err
 		}
 
 		committed, err := save(doc, version)
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		if committed {
-			return nil
+			return true, nil
 		}
 	}
 
-	return ErrConflict
+	return false, ErrConflict
 }

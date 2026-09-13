@@ -93,7 +93,7 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 	// Built last, and nothing may fail after it: compiling the scripts also
 	// builds the first pooled Lua state, and an error returned past this point
 	// would drop the engine without closing it.
-	le, err := luaService.NewEngine(repos.ScriptRepo.Get().Scripts)
+	le, err := luaService.NewEngineWithGrants(repos.ScriptRepo.Get().Scripts, repos.GameRepo)
 	if err != nil {
 		return nil, fmt.Errorf("loading the game scripts: %w", err)
 	}

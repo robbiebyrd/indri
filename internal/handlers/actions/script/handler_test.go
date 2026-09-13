@@ -46,7 +46,7 @@ type dispatching struct {
 }
 
 func (d dispatching) Handle(req actions.Request) (actions.Result, error) {
-	return invoke(req, d.e, d.action, defaultTimeout)
+	return invoke(req, d.e, d.action, InvocationTimeout)
 }
 
 // TestInvoke_BoundsEveryInvocation is the per-invocation timeout: a script gets
@@ -57,8 +57,8 @@ func TestInvoke_BoundsEveryInvocation(t *testing.T) {
 		ctx     context.Context
 		timeout time.Duration
 	}{
-		"a caller with no deadline of its own": {ctx: context.Background(), timeout: defaultTimeout},
-		"a request built without a context":    {ctx: nil, timeout: defaultTimeout},
+		"a caller with no deadline of its own": {ctx: context.Background(), timeout: InvocationTimeout},
+		"a request built without a context":    {ctx: nil, timeout: InvocationTimeout},
 		"a short timeout":                      {ctx: context.Background(), timeout: time.Millisecond},
 	}
 
@@ -101,7 +101,7 @@ func TestInvoke_InheritsTheCallersCancellation(t *testing.T) {
 
 	recorder := &recordingEngine{}
 
-	if _, err := invoke(actions.Request{Context: ctx}, recorder, "move", defaultTimeout); err != nil {
+	if _, err := invoke(actions.Request{Context: ctx}, recorder, "move", InvocationTimeout); err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
 
@@ -117,7 +117,7 @@ func TestInvoke_PassesTheRegisteredActionThrough(t *testing.T) {
 	recorder := &recordingEngine{}
 	req := actions.Request{Action: "move", Payload: map[string]interface{}{"cell": "1,1"}}
 
-	if _, err := invoke(req, recorder, "pass", defaultTimeout); err != nil {
+	if _, err := invoke(req, recorder, "pass", InvocationTimeout); err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
 

@@ -16,13 +16,13 @@ import (
 	"github.com/robbiebyrd/indri/internal/injector"
 )
 
-// defaultTimeout bounds one script invocation.
+// InvocationTimeout bounds one script invocation.
 //
 // It is deliberately far below the 10s lease a Redis lock holds: a script that
 // outlived its game's lock could run beside another instance's attempt on the
 // same game, and while the version fence would still keep the write safe, both
 // scripts would have run. The margin is what keeps that from happening at all.
-const defaultTimeout = 100 * time.Millisecond
+const InvocationTimeout = 100 * time.Millisecond
 
 // engine is the only capability this handler needs: run the script registered
 // for an action, under a deadline. Narrow on purpose, and satisfied by
@@ -56,7 +56,7 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		return actions.Result{}, fmt.Errorf("the action %q is handled by a game script, but no script engine is loaded", h.action)
 	}
 
-	return invoke(req, h.i.LuaEngine, h.action, defaultTimeout)
+	return invoke(req, h.i.LuaEngine, h.action, InvocationTimeout)
 }
 
 // invoke bounds one call to the engine.

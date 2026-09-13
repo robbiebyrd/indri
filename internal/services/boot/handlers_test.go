@@ -116,7 +116,7 @@ func scriptEngine(t *testing.T, src string) *luaService.Engine {
 		t.Fatalf("writing %v: %v", path, err)
 	}
 
-	engine, err := luaService.NewEngine([]string{path})
+	engine, err := luaService.NewEngine([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("building an engine from %v: %v", path, err)
 	}

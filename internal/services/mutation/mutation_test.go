@@ -2,6 +2,7 @@ package mutation_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -206,5 +207,80 @@ func TestRun_Abort(t *testing.T) {
 
 	if store.value != 7 || store.version != 3 {
 		t.Fatalf("abort should not write, got value=%d version=%d", store.value, store.version)
+	}
+}
+
+// TestRunResult_DistinguishesAbortFromCommit is the whole reason RunResult
+// exists. Run returns nil for both outcomes, so a caller with a side effect to
+// release — a script's queued replies — cannot tell whether the state it was
+// reacting to was actually stored.
+func TestRunResult_DistinguishesAbortFromCommit(t *testing.T) {
+	tests := map[string]struct {
+		apply func(*int) error
+		want  bool
+	}{
+		"a write commits":   {apply: increment, want: true},
+		"an abort does not": {apply: func(*int) error { return mutation.ErrAbort }, want: false},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			store := &fakeStore{}
+
+			committed, err := mutation.RunResult(
+				context.Background(), lock.NewInProcess(), "k",
+				store.load, test.apply, store.saveConditional,
+			)
+			if err != nil {
+				t.Fatalf("RunResult: %v", err)
+			}
+
+			if committed != test.want {
+				t.Fatalf("committed = %t, want %t", committed, test.want)
+			}
+		})
+	}
+}
+
+// Exhausting the retry budget is not a commit. A caller that released its
+// effects on anything other than a true here would release them for a write
+// that never landed.
+func TestRunResult_ReportsNoCommitOnConflict(t *testing.T) {
+	store := &fakeStore{}
+
+	// Never commits: the fence always sees a version that has moved on.
+	neverCommits := func(*int, int64) (bool, error) { return false, nil }
+
+	committed, err := mutation.RunResult(
+		context.Background(), lock.NewInProcess(), "k",
+		store.load, increment, neverCommits,
+	)
+
+	if !errors.Is(err, mutation.ErrConflict) {
+		t.Fatalf("err = %v, want ErrConflict", err)
+	}
+
+	if committed {
+		t.Fatal("committed = true alongside ErrConflict")
+	}
+}
+
+// An error from apply is not a commit either, and must surface rather than
+// being flattened into "nothing happened".
+func TestRunResult_ReportsNoCommitOnApplyError(t *testing.T) {
+	store := &fakeStore{}
+	boom := errors.New("boom")
+
+	committed, err := mutation.RunResult(
+		context.Background(), lock.NewInProcess(), "k",
+		store.load, func(*int) error { return boom }, store.saveConditional,
+	)
+
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want boom", err)
+	}
+
+	if committed {
+		t.Fatal("committed = true alongside an apply error")
 	}
 }

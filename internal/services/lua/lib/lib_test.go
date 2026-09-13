@@ -513,7 +513,7 @@ func loadScript(t *testing.T, src string) *luasvc.Engine {
 		t.Fatalf("writing the test script: %v", err)
 	}
 
-	engine, err := luasvc.NewEngine([]string{path})
+	engine, err := luasvc.NewEngine([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("loading the test script: %v", err)
 	}

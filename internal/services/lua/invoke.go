@@ -49,6 +49,13 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 		return actions.Result{}, fmt.Errorf("preparing the %q request for lua: %w", action, err)
 	}
 
+	// Installed before the call and cleared after it, so indri.mutate can find
+	// this caller's game, deadline and store, and so the next invocation on this
+	// pooled state cannot find them. The game id comes from the session the
+	// transport authenticated; a script never names the game it edits.
+	setInvocation(s.L, &invocation{ctx: ctx, gameID: gameIDOf(req), games: e.games})
+	defer clearInvocation(s.L)
+
 	// call installs the per-invocation environment, applies ctx and marks the
 	// state spoiled if the interpreter was interrupted rather than unwound.
 	if _, err := s.call(ctx, fn, arg); err != nil {
@@ -59,6 +66,21 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 	// rather than a return value, so the handler's result is deliberately
 	// ignored here and the dispatcher is told nothing happened.
 	return actions.Result{}, nil
+}
+
+// gameIDOf is the game a script's edits land on: the one the caller's own
+// session says they are in.
+//
+// Taken from the authenticated session and never from the payload, for the same
+// reason kick resolves its caller that way — a client-supplied game id would let
+// any player's script edit any game. An unauthenticated caller, or one who has
+// not joined, yields "" and indri.mutate refuses.
+func gameIDOf(req actions.Request) string {
+	if req.Session == nil || req.Session.GameID == nil {
+		return ""
+	}
+
+	return *req.Session.GameID
 }
 
 // requestToLua renders one dispatched request as the table a handler receives.

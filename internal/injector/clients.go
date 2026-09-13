@@ -2,7 +2,6 @@ package injector
 
 import (
 	"context"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -52,7 +51,7 @@ func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, clientTr
 
 	if lockManager == nil {
 		if multiInstance {
-			lockManager = lock.NewRedis(sharedRedis, 10*time.Second)
+			lockManager = lock.NewRedis(sharedRedis, lock.DefaultRedisLeaseTTL)
 		} else {
 			lockManager = lock.NewInProcess()
 		}

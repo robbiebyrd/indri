@@ -20,6 +20,15 @@ end
 return 0
 `)
 
+// DefaultRedisLeaseTTL is the lease every multi-instance deployment runs with.
+//
+// It is a named constant rather than a literal at the construction site because
+// it is half of a relationship that has to hold: any work done while the lock is
+// held must finish well inside it. A scripted mutation is the work that could
+// plausibly outlive it, so the script deadline is checked against this at boot.
+// See boot.checkScriptDeadline.
+const DefaultRedisLeaseTTL = 10 * time.Second
+
 // Redis is a distributed Manager backed by Redis SET NX with a per-holder
 // token. The lease TTL bounds how long a crashed holder can block others;
 // callers must pair it with a version fence at the store so a lease that

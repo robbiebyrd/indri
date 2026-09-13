@@ -78,7 +78,12 @@ var builtinActions = []string{
 type Engine struct {
 	chunks  []scriptChunk
 	actions []string
-	pool    *statePool
+
+	// games is what indri.mutate edits through. It is held here rather than
+	// passed to Invoke because it is a property of the server, not of a
+	// request: every invocation on every state edits the same store.
+	games GameMutator
+	pool  *statePool
 }
 
 // scriptChunk is one script file's bytecode, under the path it was read from.
@@ -87,42 +92,28 @@ type Engine struct {
 type scriptChunk struct {
 	name  string
 	proto *lua.FunctionProto
+
+	// caps is what this script's config entry granted it, resolved at boot. It
+	// travels with the bytecode because every pooled state re-runs every chunk
+	// and each one has to be handed the same capabilities. See capability.go.
+	caps []grantedCapability
 }
 
 // NewEngine compiles the scripts at paths and returns an engine whose every
-// state has run them.
-//
-// Order matters. The scripts are compiled first, so a syntax error is reported
-// before anything runs; the manifest is then collected on a throwaway state, so
-// the set of actions is fixed before a single pooled state exists; only then is
-// the pool built, and its first state is the first one measured against that
-// manifest.
+// state has run them, granting none of them a capability. A boot driven by
+// config.json wants NewEngineWithGrants.
 //
 // An empty paths list is not an error. It yields an engine that declares no
 // actions.
 //
+// games is what indri.mutate writes through. A nil games is allowed and yields
+// an engine whose scripts load and run but whose indri.mutate raises — which is
+// what a test that only exercises registration or marshalling wants, and is a
+// clear error rather than a nil dereference if it ever reaches production.
+//
 // The caller owns the engine and must Close it.
-func NewEngine(paths []string) (*Engine, error) {
-	chunks, err := compileScripts(paths)
-	if err != nil {
-		return nil, err
-	}
-
-	actions, err := collectActions(chunks)
-	if err != nil {
-		return nil, err
-	}
-
-	e := &Engine{chunks: chunks, actions: actions}
-
-	pool, err := newPool(defaultMaxIdleStates, e.prepare)
-	if err != nil {
-		return nil, err
-	}
-
-	e.pool = pool
-
-	return e, nil
+func NewEngine(paths []string, games GameMutator) (*Engine, error) {
+	return NewEngineWithGrants(ungranted(paths), games)
 }
 
 // Actions returns the declared action names, sorted. The caller gets a copy:
@@ -232,11 +223,16 @@ func installScripts(L *lua.LState, chunks []scriptChunk) (*stateHandlers, error)
 	L.SetContext(ctx)
 	defer L.RemoveContext()
 
-	for _, chunk := range chunks {
-		L.Push(L.NewFunctionFromProto(chunk.proto))
+	shared, err := hostTable(L)
+	if err != nil {
+		return nil, err
+	}
 
-		if err := L.PCall(0, 0, nil); err != nil {
-			return nil, fmt.Errorf("loading lua script %s: %w", chunk.name, err)
+	// Each chunk runs under its own view of the host table, so a capability one
+	// script was granted is not on the table the next one sees. See loadChunk.
+	for _, chunk := range chunks {
+		if err := loadChunk(L, h, shared, chunk); err != nil {
+			return nil, err
 		}
 	}
 
@@ -268,6 +264,11 @@ func installHostAPI(L *lua.LState, h *stateHandlers) error {
 	}
 
 	indri.RawSetString("on", L.NewFunction(h.register))
+
+	// Installed once per state and shared by every invocation that runs on it.
+	// It reads the caller's game, deadline and store from the state's
+	// invocation registry rather than capturing them here — see invocation.
+	indri.RawSetString("mutate", L.NewFunction(hostMutate))
 
 	return nil
 }

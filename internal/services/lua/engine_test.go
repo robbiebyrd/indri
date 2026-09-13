@@ -46,11 +46,21 @@ func writeScripts(t *testing.T, sources map[string]string, order ...string) []st
 	return paths
 }
 
-// newTestEngine builds an engine and closes it when the test ends.
+// newTestEngine builds an engine with no game store and closes it when the test
+// ends. Its scripts load and run; indri.mutate raises. Tests that need a real
+// store want newTestEngineWithGames.
 func newTestEngine(t *testing.T, paths ...string) *Engine {
 	t.Helper()
 
-	e, err := NewEngine(paths)
+	return newTestEngineWithGames(t, nil, paths...)
+}
+
+// newTestEngineWithGames builds an engine over games and closes it when the
+// test ends.
+func newTestEngineWithGames(t *testing.T, games GameMutator, paths ...string) *Engine {
+	t.Helper()
+
+	e, err := NewEngine(paths, games)
 	if err != nil {
 		t.Fatalf("building an engine from %v: %v", paths, err)
 	}
@@ -210,7 +220,7 @@ indri.on("move", function() end)
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := NewEngine(writeScripts(t, test.sources, test.order...))
+			_, err := NewEngine(writeScripts(t, test.sources, test.order...), nil)
 			requireErrorMentions(t, err, test.wants...)
 		})
 	}
@@ -227,7 +237,7 @@ local 1 = 2
 return ok
 `)
 
-	_, err := NewEngine([]string{path})
+	_, err := NewEngine([]string{path}, nil)
 	requireErrorMentions(t, err, path, ":3")
 }
 
@@ -241,7 +251,7 @@ indri.on("move", function() end)
 error("no")
 `)
 
-	_, err := NewEngine([]string{path})
+	_, err := NewEngine([]string{path}, nil)
 	requireErrorMentions(t, err, path, ":3", "no")
 }
 
@@ -252,7 +262,7 @@ func TestNewEngine_ReportsAMissingFile(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "absent.lua")
 
-	_, err := NewEngine([]string{path})
+	_, err := NewEngine([]string{path}, nil)
 	requireErrorMentions(t, err, path, "reading lua script")
 }
 
@@ -264,7 +274,7 @@ func TestNewEngine_RefusesTheSameFileTwice(t *testing.T) {
 
 	path := writeScript(t, "game.lua", `indri.on("move", function() end)`)
 
-	_, err := NewEngine([]string{path, path})
+	_, err := NewEngine([]string{path, path}, nil)
 	requireErrorMentions(t, err, path, "listed more than once")
 }
 
@@ -284,7 +294,7 @@ func TestNewEngine_RefusesAReservedAction(t *testing.T) {
 
 			path := writeScript(t, "game.lua", `indri.on("`+action+`", function() end)`)
 
-			_, err := NewEngine([]string{path})
+			_, err := NewEngine([]string{path}, nil)
 			requireErrorMentions(t, err, "game.lua:1", `"`+action+`"`, "reserved")
 		})
 	}
@@ -309,7 +319,7 @@ func TestNewEngine_RefusesAnEmptyAction(t *testing.T) {
 
 			path := writeScript(t, "game.lua", `indri.on("`+test.action+`", function() end)`)
 
-			_, err := NewEngine([]string{path})
+			_, err := NewEngine([]string{path}, nil)
 			requireErrorMentions(t, err, "game.lua:1", "cannot be empty")
 		})
 	}
@@ -371,7 +381,7 @@ func TestNewEngine_FailsWhenStatesDisagreeAboutTheirActions(t *testing.T) {
 indri.on("move_" .. tostring(math.random()), function() end)
 `)
 
-	_, err := NewEngine([]string{path})
+	_, err := NewEngine([]string{path}, nil)
 	requireErrorMentions(t, err, "not deterministic", "move_")
 }
 

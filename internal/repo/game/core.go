@@ -156,9 +156,27 @@ func (s *core) DeleteField(id string, key string) error {
 // instead of pinning a goroutine. The change event published after a commit
 // deliberately does not use it — see publish.
 func (s *core) Mutate(ctx context.Context, id string, apply func(g *models.Game) error) error {
+	_, err := s.MutateResult(ctx, id, apply)
+
+	return err
+}
+
+// MutateResult is Mutate, reporting whether the write committed.
+//
+// Mutate returns nil both when apply aborted and when it wrote, which is enough
+// for a caller whose only side effect is the write itself. It is not enough for
+// a scripted mutation: apply is re-run on every version-fence miss, so a script
+// that queues a reply or a broadcast has queued it once per attempt and only the
+// committing attempt's effects may be released. That signal is the whole reason
+// this variant exists.
+func (s *core) MutateResult(
+	ctx context.Context,
+	id string,
+	apply func(g *models.Game) error,
+) (bool, error) {
 	var before map[string]interface{}
 
-	return mutation.Run(
+	return mutation.RunResult(
 		ctx,
 		s.locks,
 		"game:"+id,

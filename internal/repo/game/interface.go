@@ -30,6 +30,7 @@ type Storer interface {
 	UpdateField(id string, key string, value interface{}) error
 	DeleteField(id string, key string) error
 	Mutate(ctx context.Context, id string, apply func(g *models.Game) error) error
+	MutateResult(ctx context.Context, id string, apply func(g *models.Game) error) (committed bool, err error)
 	HasPlayer(id string, userId string) bool
 	PlayerOnATeam(id string, userId string) bool
 	AddPlayer(id string, userId string, displayName string) error
