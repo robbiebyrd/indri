@@ -38,6 +38,8 @@ export class MessageHandler {
     private readonly setGameList: Dispatch<GameListDispatchMessage>
     private parsers: actionHandler[]
     private readonly observers = new Set<GameStateObserver>()
+    private readonly openObservers = new Set<() => void>()
+    private opened = false
 
     constructor(
         url: string,
@@ -76,6 +78,17 @@ export class MessageHandler {
         ]
 
         this.ws = new WebSocket(url)
+
+        this.ws.onopen = () => {
+            this.opened = true
+            for (const observer of this.openObservers) {
+                try {
+                    observer()
+                } catch (err) {
+                    console.warn("a socket-open observer threw", err)
+                }
+            }
+        }
 
         this.ws.onmessage = (e: MessageEvent) => {
             this.routeIncomingMessage(e)
@@ -121,11 +134,35 @@ export class MessageHandler {
         if (this.ws) {
             // Drop handlers before closing so a teardown doesn't fire onclose
             // logic (e.g. future reconnect) during unmount.
+            this.ws.onopen = null
             this.ws.onmessage = null
             this.ws.onerror = null
             this.ws.onclose = null
             this.ws.close()
             this.ws = undefined
+        }
+    }
+
+    /**
+     * Run `observer` once the socket is open, or immediately if it already is.
+     *
+     * `send` drops anything written before the handshake completes, so anything
+     * that must be the FIRST thing on the wire — restoring a session, say — has
+     * to wait for this rather than firing on mount.
+     *
+     * Returns an unsubscribe so a caller that unmounts first does not fire.
+     */
+    onOpen(observer: () => void): () => void {
+        if (this.opened) {
+            observer()
+
+            return () => undefined
+        }
+
+        this.openObservers.add(observer)
+
+        return () => {
+            this.openObservers.delete(observer)
         }
     }
 

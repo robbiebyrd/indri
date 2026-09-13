@@ -1,4 +1,5 @@
 import React, {createContext, useEffect, useRef} from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 
 import {MessageHandler} from "@/services/message-handler";
 import {useGameList} from "@/providers/game-list/use-game-list";
@@ -48,6 +49,45 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({children}) => {
         wsRef.current = new MessageHandler(apiUrl ?? "", userDispatch, gameDispatch, gameListDispatch)
     }
     const ws: MessageHandler = wsRef.current
+
+    // Restore the session the moment the socket is up.
+    //
+    // The server's session is per CONNECTION, so a full page load — a refresh,
+    // or a typed route URL — arrives with a brand new socket and no identity,
+    // and without this the player is silently dropped back to the login screen
+    // with their game gone. `reconnect` re-binds the stored token and the
+    // server follows with a full keyframe if that session was in a game, so
+    // game state comes back through the normal path with no special casing.
+    //
+    // It has to wait for `onOpen`: `send` drops anything written before the
+    // handshake finishes, so firing this on mount would restore nothing.
+    useEffect(() => {
+        const handler = wsRef.current
+        if (handler === undefined) return
+
+        let cancelled = false
+
+        const unsubscribe = handler.onOpen(() => {
+            AsyncStorage.getItem('sessionId')
+                .then((token) => {
+                    // No token is the normal first-visit case, not an error.
+                    if (cancelled || token === null || token === '') return
+
+                    handler.send({action: 'reconnect', sessionId: token})
+                })
+                .catch((err: unknown) => {
+                    // A failed restore leaves the app unauthenticated, which is
+                    // the login screen — a correct state, just not the wanted
+                    // one. Swallowing it silently would hide a broken store.
+                    console.warn('could not restore the stored session', err)
+                })
+        })
+
+        return () => {
+            cancelled = true
+            unsubscribe()
+        }
+    }, [])
 
     useEffect(() => {
         // Captured here rather than read in the cleanup: the ref is stable, but
