@@ -1,15 +1,16 @@
 ---
 id: 053-7102
 title: Two-level effect ledger for script side effects
-status: pending
+status: in_progress
 priority: P1
 type: feature
 created: "2026-09-12T01:28:12.567Z"
-updated: "2026-09-12T01:29:07.724Z"
+updated: "2026-09-13T18:34:10.965Z"
 dependencies: ["052"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 8
 depends_on: ["stories/052-f8ac-pending-P1-indri-mutate-as-the-transaction-bracket.md"]
+started_at: "2026-09-13T18:34:10.964Z"
 ---
 
 # Two-level effect ledger for script side effects
