@@ -7,9 +7,9 @@ package models
 // than two: a caller composes it into a dotted path that is used both as a
 // MongoDB update path (resolved by bson tag) and as the path of the published
 // delta (read by json tag), so it is only usable while a store's bson and json
-// names agree. They agree everywhere except Scene.PrivateData, which is tagged
-// bson "private_data" — see models.Scene for the defect, the direction chosen,
-// and the persisted data that blocks it.
+// names agree. They now agree on every store of every type in the game
+// document; Scene.PrivateData was the last that did not, and models.Scene
+// records what flipping it cost.
 type DataStoreType string
 
 const (

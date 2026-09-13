@@ -17,9 +17,6 @@ import (
 var knownDivergences = map[string]string{
 	"Game.ID": "MongoDB owns the name \"_id\", and the id is never addressed by a" +
 		" dotted path: repo/game strips _id out of every update it sends.",
-	"Scene.PrivateData": "The defect this list exists to make visible. Fixing it orphans" +
-		" scene private data that is already stored under \"private_data\", so it needs a" +
-		" migration decision — see the record on models.Scene. Delete this entry with the fix.",
 }
 
 // A dotted path into the game document is used twice, unchanged: repo/game
@@ -156,13 +153,14 @@ func tagName(field reflect.StructField, codec string) string {
 }
 
 // The name a scene stores its private data under is a persisted format, not an
-// implementation detail: documents written by every release so far hold it, and
-// saveVersioned $sets the whole "stage" subtree, so the first save after a
-// rename drops the old field rather than leaving it to be migrated later.
+// implementation detail: saveVersioned $sets the whole "stage" subtree, so the
+// first save after a rename drops the old field rather than leaving it to be
+// migrated later. Renaming it once already cost the scene private data of every
+// document written before it — see the record on models.Scene.
 //
-// This pins the spelling so the rename cannot happen as an incidental edit. If
-// this test fails, the change is a migration — read the record on models.Scene
-// before changing the expectation.
+// This pins the spelling so it cannot move again as an incidental edit, and it
+// must be the one DataStorePrivate composes into an update path, or a write
+// through that path lands on a field this struct cannot read back.
 func TestScenePrivateDataPersistsUnderItsRecordedName(t *testing.T) {
 	raw, err := bson.Marshal(models.Scene{
 		PrivateData: &map[string]interface{}{"solution": "the host"},
@@ -176,12 +174,13 @@ func TestScenePrivateDataPersistsUnderItsRecordedName(t *testing.T) {
 		t.Fatalf("unmarshalling a scene: %v", err)
 	}
 
-	const persistedName = "private_data"
+	persistedName := models.DataStorePrivate.String()
 
 	if _, ok := stored[persistedName]; !ok {
-		t.Fatalf("a scene stored its private data under %v, not %q; stored documents use %q,"+
-			" and changing it orphans them — see the record on models.Scene",
-			keysOf(stored), persistedName, persistedName)
+		t.Fatalf("a scene stored its private data under %v, not %q; that is the name"+
+			" internal/services/stage composes from DataStorePrivate, so anything written"+
+			" through it would be unreadable — see the record on models.Scene",
+			keysOf(stored), persistedName)
 	}
 
 	// The same value must come back, or the field is write-only.

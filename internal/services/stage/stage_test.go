@@ -249,20 +249,41 @@ func TestValidIdsComposeTheSamePathsAsBefore(t *testing.T) {
 // models.Game is what tells the two apart.
 func TestASceneLoadedFromTheScriptIsReadableBackThroughTheModel(t *testing.T) {
 	public := models.DataStorePublic
+	private := models.DataStorePrivate
 
 	tests := []struct {
 		name     string
 		dataType *models.DataStoreType
 		wantPath string
+		check    func(t *testing.T, scene models.Scene)
 	}{
 		{
 			name:     "the whole scene",
 			wantPath: "stage.scenes.round1",
+			check: func(t *testing.T, scene models.Scene) {
+				readsBack(t, "public", scene.PublicData, scriptScene.PublicData)
+				readsBack(t, "private", scene.PrivateData, scriptScene.PrivateData)
+			},
 		},
 		{
 			name:     "only the public data store",
 			dataType: &public,
 			wantPath: "stage.scenes.round1.data",
+			check: func(t *testing.T, scene models.Scene) {
+				readsBack(t, "public", scene.PublicData, scriptScene.PublicData)
+			},
+		},
+		{
+			// The path here is composed from DataStorePrivate, so this is the
+			// case that models.Scene's bson tag had to be flipped for: while it
+			// read "private_data" the write landed on a field the struct does
+			// not declare, and this store came back nil.
+			name:     "only the private data store",
+			dataType: &private,
+			wantPath: "stage.scenes.round1.privateData",
+			check: func(t *testing.T, scene models.Scene) {
+				readsBack(t, "private", scene.PrivateData, scriptScene.PrivateData)
+			},
 		},
 	}
 
@@ -292,14 +313,26 @@ func TestASceneLoadedFromTheScriptIsReadableBackThroughTheModel(t *testing.T) {
 					store.written[0], g.Stage.Scenes)
 			}
 
-			if scene.PublicData == nil {
-				t.Fatalf("scene %q read back without its public data", sceneId)
-			}
-
-			if got := (*scene.PublicData)["prompt"]; got != (*scriptScene.PublicData)["prompt"] {
-				t.Errorf("read back public data %v, want %v", *scene.PublicData, *scriptScene.PublicData)
-			}
+			tt.check(t, scene)
 		})
+	}
+}
+
+// readsBack asserts a data store survived the round trip into models.Scene
+// still holding what the script declared. A store that comes back nil is the
+// symptom that matters: the write landed on a bson field the struct does not
+// declare, so MongoDB stored it and no read will ever return it.
+func readsBack(t *testing.T, label string, got, want *map[string]interface{}) {
+	t.Helper()
+
+	if got == nil {
+		t.Fatalf("scene %q read back without its %s data; the path names a field"+
+			" models.Scene does not declare, so the write is stored where no read finds it",
+			sceneId, label)
+	}
+
+	if !reflect.DeepEqual(*got, *want) {
+		t.Errorf("read back %s data %v, want %v", label, *got, *want)
 	}
 }
 
@@ -345,20 +378,14 @@ func applyUpdate(t *testing.T, path string, value interface{}) *models.Game {
 // fail a test that only compared strings, so the rule is checked against the
 // models themselves.
 //
-// The scenes' private data store is still not exercised: models.Scene tags it
-// "private_data" while models.DataStoreType spells it "privateData", a third
-// instance of this same defect. It stays excluded because the fix is not a
-// one-character edit — it changes a persisted format that live documents
-// already use — and that decision is recorded, with the evidence behind it, on
-// models.Scene. Delete this paragraph and add the private store to the calls
-// below when the tag is fixed.
-//
-// The exclusion is not a blind spot in the meantime: models has its own guard,
-// TestBsonAndJsonNamesAgreeAcrossTheGameDocument, which reports every field in
-// the game document whose bson and json names disagree and fails if this one is
-// fixed without the exception being removed.
+// The scenes' private store was the third such key and the last exception here:
+// models.Scene tagged it "private_data" while models.DataStoreType spells it
+// "privateData", so every private write landed on a field no read returns. The
+// tag was flipped, and the exclusion went with it — this test now drives every
+// data store of every entry point with no exceptions at all.
 func TestEveryPathThisPackageWritesNamesAFieldTheModelsDeclare(t *testing.T) {
 	public := models.DataStorePublic
+	private := models.DataStorePrivate
 	widgetPath := "widgets.score"
 
 	calls := map[string]func(ss *Service) error{
@@ -383,6 +410,12 @@ func TestEveryPathThisPackageWritesNamesAFieldTheModelsDeclare(t *testing.T) {
 		"UpdateScene with a sub-path": func(ss *Service) error {
 			return ss.UpdateScene("game", sceneId, public, &widgetPath, 1)
 		},
+		"UpdateScene of the private store": func(ss *Service) error {
+			return ss.UpdateScene("game", sceneId, private, nil, 1)
+		},
+		"UpdateScene of the private store with a sub-path": func(ss *Service) error {
+			return ss.UpdateScene("game", sceneId, private, &widgetPath, 1)
+		},
 		"LoadFromScript": func(ss *Service) error {
 			return ss.LoadFromScript("game", "script")
 		},
@@ -391,6 +424,9 @@ func TestEveryPathThisPackageWritesNamesAFieldTheModelsDeclare(t *testing.T) {
 		},
 		"LoadSceneFromScript of one data store": func(ss *Service) error {
 			return ss.LoadSceneFromScript("game", sceneId, &public)
+		},
+		"LoadSceneFromScript of the private store": func(ss *Service) error {
+			return ss.LoadSceneFromScript("game", sceneId, &private)
 		},
 	}
 
