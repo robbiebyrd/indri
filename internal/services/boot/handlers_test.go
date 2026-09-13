@@ -2,11 +2,13 @@ package boot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
+	"github.com/robbiebyrd/indri/internal/handlers/actions/script"
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -24,6 +27,7 @@ import (
 	"github.com/robbiebyrd/indri/internal/transport"
 	graphqlTransport "github.com/robbiebyrd/indri/internal/transport/graphql"
 	"github.com/robbiebyrd/indri/internal/transport/graphql/generated"
+	"github.com/robbiebyrd/indri/internal/transport/graphql/resolvers"
 	"github.com/robbiebyrd/indri/internal/transport/rest"
 	sseTransport "github.com/robbiebyrd/indri/internal/transport/sse"
 	webrtcTransport "github.com/robbiebyrd/indri/internal/transport/webrtc"
@@ -132,11 +136,14 @@ func scriptEngine(t *testing.T, src string) *luaService.Engine {
 // declared but registerHandlers never registered is silently unreachable, and
 // the script author has no way to tell the difference from a broken client.
 //
-// Each handler below reports itself by raising, because raising is the only
-// thing a script can do that reaches the dispatcher today. That is what makes
-// the check honest: Dispatch answers an unregistered action with no error at
-// all, so an assertion that dispatch merely *succeeded* would pass with nothing
-// wired up whatsoever.
+// Each handler below reports itself by raising. That is what makes the check
+// honest: Dispatch answers an unregistered action with an empty result, so an
+// assertion that dispatch merely *succeeded* would pass with nothing wired up
+// whatsoever.
+//
+// The report is read out of Responses rather than off the error return, because
+// a script's own failure is a models.WSError frame and not a Go error — see
+// lua.Invoke, and TestScriptErrorReachesEveryTransport below.
 func TestRegisterHandlers_CoversEveryScriptAction(t *testing.T) {
 	engine := scriptEngine(t, `
 indri.on("move", function(req) error("ran:" .. req.action, 0) end)
@@ -157,8 +164,15 @@ indri.on("pass", function(req) error("ran:" .. req.action, 0) end)
 	}
 
 	for _, action := range declared {
-		_, err := router.Dispatch(context.Background(), nil, action, map[string]interface{}{})
-		if err == nil {
+		result, err := router.Dispatch(context.Background(), nil, action, map[string]interface{}{})
+		if err != nil {
+			t.Errorf("dispatching %q failed before it reached the script: %v", action, err)
+
+			continue
+		}
+
+		report := scriptErrorMessage(t, result)
+		if report == "" {
 			t.Errorf(
 				"the script declared the action %q but dispatching it ran nothing, so clients cannot reach it",
 				action,
@@ -167,9 +181,149 @@ indri.on("pass", function(req) error("ran:" .. req.action, 0) end)
 			continue
 		}
 
-		if want := "ran:" + action; !strings.Contains(err.Error(), want) {
-			t.Errorf("dispatching %q ran something that did not report %q: %v", action, want, err)
+		if want := "ran:" + action; !strings.Contains(report, want) {
+			t.Errorf("dispatching %q ran something that did not report %q: %v", action, want, report)
 		}
+	}
+}
+
+// scriptErrorMessage returns the message of the models.WSError frame a failed
+// script answers with, or an empty string when the result carries none.
+func scriptErrorMessage(t *testing.T, result actions.Result) string {
+	t.Helper()
+
+	for _, response := range result.Responses {
+		var frame models.WSError
+
+		// The code is what tells a script's failure from an ordinary reply: any
+		// JSON object unmarshals into a WSError, with a zero code.
+		if json.Unmarshal(response, &frame) == nil && frame.ErrorCode == models.ErrScriptFailed.ErrorCode {
+			return frame.Message
+		}
+	}
+
+	return ""
+}
+
+// scriptErrorFixture registers one script action and returns the action name
+// under which the three transports below can reach it.
+//
+// The router action and the script action are deliberately different names.
+// Script-declared actions have no REST route and no GraphQL mutation yet — that
+// parity is a later step of the plan — and indri.on refuses a built-in name, so
+// the only way to drive a script over all three transports today is to register
+// the script handler under a built-in action's name. Everything else in the
+// chain is the production one: the real router, the real engine, the real
+// script, and each transport's own rendering of the Result.
+func scriptErrorFixture(t *testing.T) string {
+	t.Helper()
+
+	engine := scriptEngine(t, `
+indri.on("move", function(req) error("the script gave up", 0) end)
+`)
+
+	router.Reset()
+	t.Cleanup(router.Reset)
+
+	router.RegisterHandler("lua_move", "leave", script.New(&injector.Injector{
+		ClientsInjector:  &injector.ClientsInjector{Transport: ws.New()},
+		ServicesInjector: &injector.ServicesInjector{LuaEngine: engine},
+	}, "move"))
+
+	return "leave"
+}
+
+// TestScriptErrorReachesEveryTransport is the criterion the whole error-channel
+// decision rests on.
+//
+// lua.Invoke answers a script's own failure with a models.WSError in
+// Result.Responses and a nil Go error, rather than the other way round, because
+// the transports do not agree about a Go error: handleClientMessage only
+// log.Printfs a dispatch error, so a WebSocket player would be told nothing at
+// all, while a REST or GraphQL caller of the same action would get the raw Go
+// error string. Responses is the one channel every transport writes back, and
+// this test is what holds all three to it — a future change that moved the
+// failure back onto the error return would fail here first.
+func TestScriptErrorReachesEveryTransport(t *testing.T) {
+	t.Run("websocket", func(t *testing.T) {
+		action := scriptErrorFixture(t)
+
+		// An anonymous conn, so handleClientMessage resolves no session and needs
+		// no session store. This is the real WebSocket bridge otherwise.
+		conn := newFakeConn("")
+
+		handleClientMessage(
+			&injector.Injector{ClientsInjector: &injector.ClientsInjector{Transport: ws.New()}},
+			conn,
+			[]byte(`{"action":"`+action+`"}`),
+		)
+
+		written := conn.written()
+		if len(written) != 1 {
+			t.Fatalf("the socket received %d frames, want exactly one script error", len(written))
+		}
+
+		requireScriptErrorFrame(t, written[0])
+	})
+
+	t.Run("rest", func(t *testing.T) {
+		action := scriptErrorFixture(t)
+
+		api := rest.New(noSessions{})
+
+		mux := http.NewServeMux()
+		api.Register(mux)
+
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/"+action, nil))
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("the request answered %d with %q, want 200 carrying the script error",
+				recorder.Code, recorder.Body.String())
+		}
+
+		requireScriptErrorFrame(t, recorder.Body.Bytes())
+	})
+
+	t.Run("graphql", func(t *testing.T) {
+		action := scriptErrorFixture(t)
+
+		if action != "leave" {
+			t.Fatalf("the fixture registered %q, but the mutation driven below is leaveGame", action)
+		}
+
+		resolver := &resolvers.Resolver{Sessions: noSessions{}, Sinks: &transport.Registry{}}
+
+		document, err := resolver.Mutation().LeaveGame(context.Background())
+		if err != nil {
+			t.Fatalf("the mutation returned a Go error instead of the script's frame: %v", err)
+		}
+
+		requireScriptErrorFrame(t, document)
+	})
+}
+
+// requireScriptErrorFrame fails unless frame is the models.WSError a failed
+// script answers with, carrying the script's own message.
+func requireScriptErrorFrame(t *testing.T, frame []byte) {
+	t.Helper()
+
+	var decoded models.WSError
+	if err := json.Unmarshal(frame, &decoded); err != nil {
+		t.Fatalf("the frame %q is not a models.WSError: %v", frame, err)
+	}
+
+	if decoded.ErrorCode != models.ErrScriptFailed.ErrorCode {
+		t.Fatalf("the frame %q carries code %d, want a script failure (%d)",
+			frame, decoded.ErrorCode, models.ErrScriptFailed.ErrorCode)
+	}
+
+	if decoded.OperationType != "error" {
+		t.Errorf("the frame carries op %q, want %q", decoded.OperationType, "error")
+	}
+
+	if !strings.Contains(decoded.Message, "the script gave up") {
+		t.Errorf("the message %q does not carry the script's own words", decoded.Message)
 	}
 }
 

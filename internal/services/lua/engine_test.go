@@ -1,6 +1,8 @@
 package lua
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -8,6 +10,9 @@ import (
 	"testing"
 
 	lua "github.com/yuin/gopher-lua"
+
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
+	"github.com/robbiebyrd/indri/internal/models"
 )
 
 // writeScript writes one script into the test's own directory and returns its
@@ -100,6 +105,45 @@ func mustCompileFiles(t *testing.T, paths ...string) []scriptChunk {
 	}
 
 	return chunks
+}
+
+// splitScriptError separates the models.WSError frame Invoke answers a failed
+// script with from the frames the script itself replied with.
+//
+// Invoke does not report a script's own failure through its error return — a
+// WebSocket player would never see it, so the failure is packed into Responses
+// instead and only a host failure reaches the error return. Tests whose subject
+// is something else fold that frame back into an ordinary error through this,
+// rather than each unpacking it by hand. The packing itself is asserted in
+// host_io_test.go, and on all three transports in
+// internal/services/boot/handlers_test.go.
+func splitScriptError(res actions.Result, err error) (actions.Result, error) {
+	if err != nil {
+		return res, err
+	}
+
+	kept := make([][]byte, 0, len(res.Responses))
+
+	var failure error
+
+	for _, response := range res.Responses {
+		var frame models.WSError
+
+		// The code is what tells a script's failure from a reply: a reply is an
+		// arbitrary JSON object, and every object unmarshals into a WSError with
+		// a zero code.
+		if json.Unmarshal(response, &frame) == nil && frame.ErrorCode == models.ErrScriptFailed.ErrorCode {
+			failure = errors.New(frame.Message)
+
+			continue
+		}
+
+		kept = append(kept, response)
+	}
+
+	res.Responses = kept
+
+	return res, failure
 }
 
 // requireErrorMentions fails unless err is non-nil and names every want.

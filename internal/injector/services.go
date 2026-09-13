@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robbiebyrd/indri/internal/handlers/router"
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	authSevice "github.com/robbiebyrd/indri/internal/services/authentication"
 	broadcastService "github.com/robbiebyrd/indri/internal/services/broadcast"
@@ -97,6 +98,11 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 	if err != nil {
 		return nil, fmt.Errorf("loading the game scripts: %w", err)
 	}
+
+	// Set here rather than inside the engine, so the lua package never imports
+	// the handler layer. Without it indri.send refuses, which would make a
+	// script's events silently stop working on a server that loaded fine.
+	le.Dispatch = router.Dispatch
 
 	return &ServicesInjector{
 		GameService:      gs,

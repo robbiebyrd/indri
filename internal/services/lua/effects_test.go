@@ -172,9 +172,9 @@ func invokeWithEffects(
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	return e.Invoke(ctx, "move", actions.Request{
+	return splitScriptError(e.Invoke(ctx, "move", actions.Request{
 		Session: &models.Session{UserID: stringPtr("player-1"), GameID: &gameID},
-	})
+	}))
 }
 
 // responseMarks renders the frames an invocation answered with, so the order
@@ -616,10 +616,10 @@ end)
 	t.Cleanup(e.Close)
 
 	for _, mark := range []string{"first call", "second call"} {
-		res, invokeErr := e.Invoke(context.Background(), "move", actions.Request{
+		res, invokeErr := splitScriptError(e.Invoke(context.Background(), "move", actions.Request{
 			Session: &models.Session{UserID: stringPtr("player-1"), GameID: &id},
 			Payload: map[string]interface{}{"mark": mark},
-		})
+		}))
 		if invokeErr != nil {
 			t.Fatalf("invoking with %q: %v", mark, invokeErr)
 		}

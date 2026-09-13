@@ -111,9 +111,9 @@ func invokeMove(t *testing.T, games GameMutator, gameID, src string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	_, err := e.Invoke(ctx, "move", actions.Request{
+	_, err := splitScriptError(e.Invoke(ctx, "move", actions.Request{
 		Session: &models.Session{UserID: stringPtr("player-1"), GameID: &gameID},
-	})
+	}))
 
 	return err
 }
@@ -473,10 +473,10 @@ end)
 `))
 
 	// A caller in no game, naming a real one they have no claim to.
-	_, err := e.Invoke(context.Background(), "move", actions.Request{
+	_, err := splitScriptError(e.Invoke(context.Background(), "move", actions.Request{
 		Session: &models.Session{UserID: stringPtr("outsider")},
 		Payload: map[string]interface{}{"gameId": id, "code": "ABCD"},
-	})
+	}))
 
 	if err == nil {
 		t.Fatal("a caller with no game edited a game named in their own payload")
@@ -520,7 +520,7 @@ end)
 
 	for name, session := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := e.Invoke(context.Background(), "move", actions.Request{Session: session})
+			_, err := splitScriptError(e.Invoke(context.Background(), "move", actions.Request{Session: session}))
 			if err == nil {
 				t.Fatal("indri.mutate ran for a caller with no game")
 			}
@@ -597,17 +597,17 @@ indri.on("move", function(req)
 end)
 `))
 
-	if _, err := e.Invoke(context.Background(), "move", actions.Request{
+	if _, err := splitScriptError(e.Invoke(context.Background(), "move", actions.Request{
 		Session: &models.Session{UserID: stringPtr("player-1"), GameID: &id},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("the first invocation failed: %v", err)
 	}
 
 	// The same pooled state, now serving a caller who is in no game. If the
 	// context leaked, this would quietly edit the previous caller's game.
-	_, err := e.Invoke(context.Background(), "move", actions.Request{
+	_, err := splitScriptError(e.Invoke(context.Background(), "move", actions.Request{
 		Session: &models.Session{UserID: stringPtr("player-2")},
-	})
+	}))
 	if err == nil {
 		t.Fatal("the second invocation reused the first one's game")
 	}

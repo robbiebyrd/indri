@@ -2,6 +2,9 @@ package lua
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 
@@ -24,6 +27,21 @@ import (
 // runaway script: the VM checks it between instructions. The caller sets it per
 // invocation (internal/handlers/actions/script does), because the deadline
 // belongs to the request that is waiting rather than to the engine.
+//
+// # Which channel carries which failure
+//
+// The error return is for a *host* failure: no state to run on, no handler
+// registered for the action, a payload with no Lua form. Those mean the server
+// is misconfigured or the router and the manifest have drifted apart, and the
+// operator is who needs to hear about them.
+//
+// A *script's own* failure does not go there. It is packed into Responses as a
+// models.WSError and the error return stays nil, because the three transports do
+// not agree about a Go error: boot.handleClientMessage only log.Printfs a
+// dispatch error, so a WebSocket player would see nothing at all, while the REST
+// and GraphQL callers of the same action would each get the raw Go error string.
+// Responses is the one channel every transport writes back, which makes it the
+// only place a script error reaches every player the same way.
 func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request) (actions.Result, error) {
 	s, err := e.pool.acquire()
 	if err != nil {
@@ -54,7 +72,13 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 	// this caller's game, deadline and store, and so the next invocation on this
 	// pooled state cannot find them. The game id comes from the session the
 	// transport authenticated; a script never names the game it edits.
-	inv := &invocation{ctx: ctx, gameID: gameIDOf(req), games: e.games}
+	inv := &invocation{
+		ctx:      ctx,
+		gameID:   gameIDOf(req),
+		games:    e.games,
+		session:  req.Session,
+		dispatch: e.Dispatch,
+	}
 
 	setInvocation(s.L, inv)
 	defer clearInvocation(s.L)
@@ -65,8 +89,8 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 		// The ledger is dropped with the invocation. A handler that unwound left
 		// the game as it found it — indri.mutate returns its callback's error
 		// rather than writing — so the effects it queued describe a move that
-		// never happened, and the error is the only honest answer to its caller.
-		return actions.Result{}, fmt.Errorf("running the lua handler for %q: %w", action, err)
+		// never happened, and the failure is the only honest answer to its caller.
+		return scriptFailure(action, err), nil
 	}
 
 	// The handler has returned, so everything it queued is now owed to somebody.
@@ -83,6 +107,63 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 	}
 
 	return result, nil
+}
+
+// scriptFailure renders a script's own failure as the frame its caller is
+// answered with, and logs the whole of it for the operator.
+//
+// The frame carries the script's file, line and message. Leaking a server-side
+// path to a client would normally be out of the question; here it is the right
+// call, because the "server-side" code in question is the operator's own game
+// script and its author is the only person who can act on the failure. A
+// correlation id alone — the usual answer — is useless to a script author who
+// cannot read the server's logs, and it is what turns a game that "just stops
+// working" into a typo on a line they can open.
+//
+// The Lua stack traceback is not in the frame. It names the host functions the
+// call passed through as well as the script's own frames, so it is detail for
+// the log, which the id ties the two together with.
+func scriptFailure(action string, err error) actions.Result {
+	id := correlationID()
+
+	log.Printf("lua script error [%s] running the handler for %q: %v", id, action, err)
+
+	failure := models.ErrScriptFailed
+	failure.Message = fmt.Sprintf("%s [%s]", raisedMessage(err), id)
+
+	return actions.Result{Responses: [][]byte{failure.BytesError()}}
+}
+
+// raisedMessage is what the script raised, without the traceback gopher-lua
+// appends to it.
+//
+// Read off the ApiError rather than by cutting err.Error() at its first
+// newline: a script is free to raise a message with a newline in it, and
+// truncating that would hide the half the author wrote.
+func raisedMessage(err error) string {
+	var apiErr *lua.ApiError
+	if errors.As(err, &apiErr) && apiErr.Object != nil {
+		return apiErr.Object.String()
+	}
+
+	return err.Error()
+}
+
+// correlationID ties the frame a player was sent to the log line holding the
+// traceback.
+//
+// Sixty-four bits, because it only has to be unique among the errors in a log
+// an operator is reading, and it is short enough to be quoted in a bug report.
+func correlationID() string {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		// crypto/rand does not fail on the platforms this runs on. A frame is
+		// still owed to the player if it somehow did, so fall back rather than
+		// turning a script's typo into a failed request.
+		return "no-id"
+	}
+
+	return hex.EncodeToString(buf)
 }
 
 // gameIDOf is the game a script's edits land on: the one the caller's own

@@ -30,4 +30,12 @@ var (
 	ErrSessionNotFound   = WSError{3003, "session not found", "error"}
 	ErrSessionWrongTeam  = WSError{3003, "session already exists with different team", "error"}
 	ErrSessionWrongGame  = WSError{3003, "session already exists with different game", "error"}
+
+	// ErrScriptFailed is a game script raising, rather than the framework
+	// failing. Its Message is replaced per occurrence with the script's own
+	// file, line and message, so it is the one error here whose code alone
+	// carries the meaning: 4000 is the application-private range, and it tells a
+	// client that the game's own logic refused rather than that the server is
+	// broken.
+	ErrScriptFailed = WSError{4000, "the game script failed", "error"}
 )

@@ -84,6 +84,15 @@ type Engine struct {
 	// request: every invocation on every state edits the same store.
 	games GameMutator
 	pool  *statePool
+
+	// Dispatch is how an event indri.send queued reaches the router once the
+	// handler that queued it has returned. It is an exported field set at boot
+	// rather than a constructor argument, the same shape as
+	// rest.Transport.Dispatch and for the same reason: the router is a
+	// package-level registry in the handler layer, and a service reaching back
+	// into it would invert the dependency. It must be set before the engine
+	// serves anything; a nil one makes indri.send refuse rather than drop.
+	Dispatch Dispatcher
 }
 
 // scriptChunk is one script file's bytecode, under the path it was read from.
@@ -269,6 +278,13 @@ func installHostAPI(L *lua.LState, h *stateHandlers) error {
 	// It reads the caller's game, deadline and store from the state's
 	// invocation registry rather than capturing them here — see invocation.
 	indri.RawSetString("mutate", L.NewFunction(hostMutate))
+
+	// The two ways a script speaks to the world outside its own game document.
+	// Neither acts when it is called: both queue on the invocation's ledger and
+	// are released only once the handler has returned and the write it belonged
+	// to has committed. See host_io.go.
+	indri.RawSetString("reply", L.NewFunction(hostReply))
+	indri.RawSetString("send", L.NewFunction(hostSend))
 
 	return nil
 }

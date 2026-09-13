@@ -105,6 +105,29 @@ func (l *ledger) queue(e effect) {
 	l.committed = append(l.committed, e)
 }
 
+// count reports how many queued effects match, across both levels.
+//
+// Both levels, because what is owed to the caller is the committed level plus
+// whatever the attempt currently running would add if it commits. It is how the
+// per-invocation budgets in host_io.go are measured, and measuring them here
+// rather than with a counter on the invocation is what makes them survive a
+// retry: beginAttempt clears the attempt level, so a script that replies inside
+// indri.mutate is charged once no matter how many attempts the version fence
+// cost it.
+func (l *ledger) count(match func(effect) bool) int {
+	n := 0
+
+	for _, level := range [][]effect{l.committed, l.attempt} {
+		for _, e := range level {
+			if match(e) {
+				n++
+			}
+		}
+	}
+
+	return n
+}
+
 // beginAttempt opens a fresh attempt level, discarding whatever the previous
 // attempt queued.
 //

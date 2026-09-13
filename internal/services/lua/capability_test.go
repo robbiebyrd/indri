@@ -130,7 +130,10 @@ end)
 func invokeOK(t *testing.T, e *Engine, action string, payload map[string]interface{}) {
 	t.Helper()
 
-	if _, err := e.Invoke(context.Background(), action, actions.Request{Payload: payload}); err != nil {
+	// Through splitScriptError, because these scripts report by asserting: a
+	// failed assert is now a frame in Responses rather than an error return, so
+	// checking only the error would pass with every assertion in them failing.
+	if _, err := splitScriptError(e.Invoke(context.Background(), action, actions.Request{Payload: payload})); err != nil {
 		t.Fatalf("invoking %q: %v", action, err)
 	}
 }
@@ -233,7 +236,7 @@ end)
 
 			e := newProbeEngine(t, calls, granted(path, probeName))
 
-			_, err := e.Invoke(context.Background(), "write", actions.Request{})
+			_, err := splitScriptError(e.Invoke(context.Background(), "write", actions.Request{}))
 			requireErrorMentions(t, err, "read-only")
 		})
 	}

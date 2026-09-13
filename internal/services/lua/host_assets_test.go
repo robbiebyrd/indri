@@ -341,7 +341,7 @@ end)
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	if _, err := e.Invoke(ctx, "move", actions.Request{}); err != nil {
+	if _, err := splitScriptError(e.Invoke(ctx, "move", actions.Request{})); err != nil {
 		t.Fatalf("invoking a handler that reads an asset: %v", err)
 	}
 }

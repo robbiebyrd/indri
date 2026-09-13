@@ -34,25 +34,23 @@ end)
 `
 
 // invokeEcho runs the echo handler and returns the pipe-separated report it
-// raised, with the engine's own wrapping removed.
+// raised, with the correlation id the engine appends removed.
 func invokeEcho(t *testing.T, e *Engine, req actions.Request) string {
 	t.Helper()
 
-	_, err := e.Invoke(context.Background(), "echo", req)
+	_, err := splitScriptError(e.Invoke(context.Background(), "echo", req))
 	if err == nil {
 		t.Fatal("the echo handler returned without raising its report")
 	}
 
-	// The raised message is the tail of the error's first line; the Lua stack
-	// traceback follows it on the lines after.
-	message, _, _ := strings.Cut(err.Error(), "\n")
-
-	at := strings.LastIndex(message, ": ")
+	// echoScript raises at level 0, so its message carries no file and line of
+	// its own; everything up to the bracketed correlation id is the report.
+	at := strings.LastIndex(err.Error(), " [")
 	if at < 0 {
-		t.Fatalf("the error %q does not carry a report", message)
+		t.Fatalf("the error %q carries no correlation id", err.Error())
 	}
 
-	return message[at+2:]
+	return err.Error()[:at]
 }
 
 func stringPtr(s string) *string {
@@ -165,7 +163,7 @@ func TestInvoke_StopsAScriptAtItsDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	if _, err := e.Invoke(ctx, "spin", actions.Request{}); err == nil {
+	if _, err := splitScriptError(e.Invoke(ctx, "spin", actions.Request{})); err == nil {
 		t.Fatal("the infinite loop returned without an error")
 	}
 
@@ -193,7 +191,7 @@ end)
 `))
 
 	for attempt := 1; attempt <= 2; attempt++ {
-		_, err := e.Invoke(context.Background(), "count", actions.Request{})
+		_, err := splitScriptError(e.Invoke(context.Background(), "count", actions.Request{}))
 		requireErrorMentions(t, err, "counter=1")
 	}
 }

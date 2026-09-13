@@ -44,6 +44,17 @@ type invocation struct {
 	gameID string
 	games  GameMutator
 
+	// session is who is calling, as the transport authenticated them. It is held
+	// so that an event indri.send queues is dispatched with the caller's own
+	// authority and no more: a script cannot reach an action by sending it that
+	// the player could not have sent themselves.
+	session *models.Session
+
+	// dispatch is how a sent event reaches the router, once the handler that
+	// queued it has returned. Nil on an engine built without one, and
+	// indri.send refuses rather than dropping the event.
+	dispatch Dispatcher
+
 	// effects is everything this call asked the host to do outside the game
 	// document, held until it is known whether the write it belonged to
 	// happened. See effects.go for why nothing is performed inline.

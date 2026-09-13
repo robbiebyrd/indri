@@ -507,9 +507,9 @@ end)
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
 
-			_, err = e.Invoke(ctx, "move", actions.Request{
+			_, err = splitScriptError(e.Invoke(ctx, "move", actions.Request{
 				Session: &models.Session{UserID: stringPtr("player-1"), GameID: &gameID},
-			})
+			}))
 
 			requireErrorMentions(t, err, "not available while a dispatched action is running")
 
