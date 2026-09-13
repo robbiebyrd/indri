@@ -58,6 +58,15 @@ func (r *mutationResolver) LeaveGame(ctx context.Context) (model.JSON, error) {
 	return r.dispatch(ctx, "leave", map[string]interface{}{})
 }
 
+// Refresh is the resolver for the refresh field.
+func (r *mutationResolver) Refresh(ctx context.Context) (model.JSON, error) {
+	// The keyframe is always the game the caller's own session is in: the action
+	// reads it off the session dispatch resolves from the bearer token. There is
+	// deliberately no argument to name a game with, so a caller cannot ask for a
+	// keyframe of one they have not joined.
+	return r.dispatch(ctx, "refresh", map[string]interface{}{})
+}
+
 // Kick is the resolver for the kick field.
 func (r *mutationResolver) Kick(ctx context.Context, code string, userID string) (model.JSON, error) {
 	return r.dispatch(ctx, "kick", map[string]interface{}{"code": code, "userId": userID})

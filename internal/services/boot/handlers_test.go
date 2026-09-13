@@ -383,13 +383,12 @@ func TestRestRoutesMatchRegisteredActions(t *testing.T) {
 }
 
 // knownMissingFromGraphQL records actions that have no GraphQL mutation today.
-// It is a list of gaps, not of exemptions: "refresh" returns a keyframe, which a
-// GraphQL client needs as much as an SSE one does. Entries belong here only
-// while somebody means to remove them — but an action that is in neither this
-// list nor the schema fails the test, so a gap cannot open by accident.
-var knownMissingFromGraphQL = map[string]string{
-	"refresh": "GraphQL clients have no keyframe call and can only subscribe to deltas",
-}
+// It is a list of gaps, not of exemptions: an entry belongs here only while
+// somebody means to remove it — and an action that is in neither this list nor
+// the schema fails the test, so a gap cannot open by accident. It is empty, and
+// the switch below is what keeps it that way: putting an action back costs a
+// deliberate edit here, not a silent omission from schema.graphqls.
+var knownMissingFromGraphQL = map[string]string{}
 
 // TestGraphQLMutationsMatchRegisteredActions closes the gap the WebSocket
 // coverage test leaves. TestRegisterHandlers_CoversEveryActionPackage guards the

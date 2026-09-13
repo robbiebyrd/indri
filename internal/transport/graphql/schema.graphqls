@@ -18,6 +18,14 @@ type Mutation {
   createGame(code: String!, teamId: String!, private: Boolean): JSON!
   joinGame(code: String!, teamId: String!): JSON!
   leaveGame: JSON
+
+  # The keyframe call, and the GraphQL twin of POST /api/refresh. gameUpdates
+  # carries deltas only, so a client that never received its keyframe — a
+  # reconnect resuming into an active game answers with two documents and a
+  # mutation resolves to the first — has no state to replay them over. It asks
+  # here and starts again from the sanitised game the caller's own session is in.
+  refresh: JSON!
+
   kick(code: String!, userId: String!): JSON
   logout: JSON
   inquire(inquiryType: String!, inquiry: String, code: String): JSON

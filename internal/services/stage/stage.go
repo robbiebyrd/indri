@@ -6,8 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-
 	"github.com/robbiebyrd/indri/internal/models"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
@@ -72,6 +70,18 @@ func validateSegment(label string, segment string) error {
 	return nil
 }
 
+// scenePath is the one place a scene's path is composed.
+//
+// Every write into a scene goes through it so the field name cannot drift
+// between call sites: LoadSceneFromScript used to build "stage.scene." while
+// the other three built "stage.scenes.", and the bson tag on models.Stage is
+// "scenes". A scene loaded from the script therefore went into a field the
+// model does not declare, where no read could ever find it again, and the
+// delta announcing it named a path the client has nothing to apply to.
+func scenePath(sceneId string) string {
+	return "stage.scenes." + sceneId
+}
+
 // validatePath validates a caller-supplied dotted path into a data store. Dots
 // in it are the caller's own separators — the path addresses a nested field —
 // so each segment is checked on its own.
@@ -110,7 +120,7 @@ func (ss *Service) AddScene(gameId string, sceneId string, scene *models.Scene) 
 		return err
 	}
 
-	g, err := ss.gameService.Fetch(gameId)
+	g, err := ss.gameRepo.Get(gameId)
 	if err != nil {
 		return err
 	}
@@ -120,9 +130,7 @@ func (ss *Service) AddScene(gameId string, sceneId string, scene *models.Scene) 
 		return fmt.Errorf("scene with id %s already exists", sceneId)
 	}
 
-	path := "stage.scenes." + sceneId
-
-	err = ss.gameRepo.UpdateField(g.ID.Hex(), path, scene)
+	err = ss.gameRepo.UpdateField(g.ID.Hex(), scenePath(sceneId), scene)
 	if err != nil {
 		return err
 	}
@@ -157,9 +165,7 @@ func (ss *Service) DeleteScene(gameId string, sceneId string) error {
 		return err
 	}
 
-	path := "stage.scenes." + sceneId
-
-	err = ss.gameRepo.DeleteField(g.ID.Hex(), path)
+	err = ss.gameRepo.DeleteField(g.ID.Hex(), scenePath(sceneId))
 	if err != nil {
 		return err
 	}
@@ -167,29 +173,20 @@ func (ss *Service) DeleteScene(gameId string, sceneId string) error {
 	return nil
 }
 
-// SetScript sets a script for the current stage.
-func (ss *Service) SetScript(gameId string, id string) error {
-	if gameId == "" {
-		return fmt.Errorf("gameId cannot be nil")
-	}
-
-	g, err := ss.gameService.Fetch(gameId)
-	if err != nil {
-		return err
-	}
-
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
-
-	err = ss.gameRepo.UpdateField(g.ID.Hex(), "stage.scriptId", objectId)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
+// There is deliberately no SetScript here and no script id on models.Stage.
+//
+// SetScript wrote "stage.scriptId" — a bson path models.Stage does not declare
+// — from an ObjectID hex that nothing in this repo ever minted: a script is not
+// a Mongo document. It is the config.json the server booted with (models.Script,
+// one per process, held as gameService.Script), and the Lua game scripts that
+// file lists are compiled once at boot with their per-script grants
+// (internal/services/lua). The layout editor attaches Lua to a board, scene or
+// widget as inline source inside the layout itself, not by reference.
+//
+// No script is therefore selected per game or per stage, so a stage-level
+// script id addresses nothing. It was removed rather than given a real field,
+// because adding the field would mean inventing the per-game script selection
+// it implies — a feature no caller has asked for.
 
 // LoadFromScript loads a script's stage data into the current game's stage.
 func (ss *Service) LoadFromScript(gameId string, scriptId string) error {
@@ -219,7 +216,7 @@ func (ss *Service) LoadSceneFromScript(
 		return err
 	}
 
-	updatedPath := "stage.scene." + sceneId
+	updatedPath := scenePath(sceneId)
 
 	var sceneData interface{}
 
@@ -255,7 +252,7 @@ func (ss *Service) SetSceneOrder(gameId string, sceneOrder []string) error {
 		return fmt.Errorf("gameId cannot be nil")
 	}
 
-	g, err := ss.gameService.Fetch(gameId)
+	g, err := ss.gameRepo.Get(gameId)
 	if err != nil {
 		return err
 	}
@@ -303,7 +300,7 @@ func (ss *Service) UpdateScene(
 		return err
 	}
 
-	fullPath := "stage.scenes." + sceneId + "." + dataType.String()
+	fullPath := scenePath(sceneId) + "." + dataType.String()
 
 	if path != nil && *path != "" {
 		fullPath += "." + *path

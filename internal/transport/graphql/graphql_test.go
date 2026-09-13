@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,10 +17,15 @@ import (
 	"time"
 
 	coderws "github.com/coder/websocket"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/handlers/router"
+	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/transport"
+	"github.com/robbiebyrd/indri/internal/transport/graphql/generated"
+	"github.com/robbiebyrd/indri/internal/transport/graphql/resolvers"
+	"github.com/robbiebyrd/indri/internal/transport/rest"
 )
 
 // The gameUpdates subscription is a WebSocket upgrade, and gqlgen's upgrader
@@ -307,12 +313,14 @@ func captureLog(t *testing.T) *syncBuffer {
 	return buf
 }
 
-// mutate runs one operation against a server carrying only the registry the
-// test populated, and returns the decoded response.
-func mutate(t *testing.T, query string) map[string]interface{} {
+// postGraphQL runs one operation against a server carrying only the registry
+// the test populated, and returns the raw response document. token, when set,
+// is sent as the caller's bearer credential — the one place a resolver is
+// allowed to learn who is asking.
+func postGraphQL(t *testing.T, sessions resolvers.SessionLookup, token, query string) []byte {
 	t.Helper()
 
-	tr := New(nil)
+	tr := New(sessions)
 
 	mux := http.NewServeMux()
 	tr.Register(mux)
@@ -332,6 +340,10 @@ func mutate(t *testing.T, query string) map[string]interface{} {
 
 	req.Header.Set("Content-Type", "application/json")
 
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
 	resp, err := server.Client().Do(req)
 	if err != nil {
 		t.Fatalf("Do() = %v", err)
@@ -342,6 +354,15 @@ func mutate(t *testing.T, query string) map[string]interface{} {
 	if err != nil {
 		t.Fatalf("ReadAll() = %v", err)
 	}
+
+	return document
+}
+
+// mutate runs one anonymous operation and returns the decoded response.
+func mutate(t *testing.T, query string) map[string]interface{} {
+	t.Helper()
+
+	document := postGraphQL(t, nil, "", query)
 
 	var decoded map[string]interface{}
 	if err := json.Unmarshal(document, &decoded); err != nil {
@@ -407,5 +428,243 @@ func TestMutation_SingleResponseActionIsUnchangedAndSilent(t *testing.T) {
 
 	if report := logged.String(); report != "" {
 		t.Errorf("a single-response action logged %q, want nothing", report)
+	}
+}
+
+// keyframe is a sanitised game document of the shape the refresh action answers
+// with: nested teams, players, scenes and free-form data blobs, and no
+// privateData anywhere. Its exact bytes are the assertion below — a transport
+// that re-encoded it, escaped it, or delivered only its top level would not
+// reproduce them.
+const keyframe = `{"id":"65f1b2c3d4e5f60718293a4b","code":"ABCD","version":7,` +
+	`"data":{"round":2,"prompt":"who is the imposter?"},` +
+	`"teams":{"red":{"id":"red","name":"Red","data":{"score":3}}},` +
+	`"players":{"u1":{"id":"u1","name":"Ada","host":true,"connected":true,"data":{"ready":true}}},` +
+	`"stage":{"currentScene":"vote","scenes":{"vote":{"id":"vote","data":{"deadline":"2026-09-13T23:19:58Z"}}}}}`
+
+// fakeSessions resolves exactly one token, standing in for the session store.
+type fakeSessions struct {
+	token string
+	id    bson.ObjectID
+}
+
+func (f fakeSessions) GetByToken(token string) (*models.Session, error) {
+	if token != f.token {
+		return nil, errors.New("no such session")
+	}
+
+	return &models.Session{ID: f.id, Token: token}, nil
+}
+
+// sessionRecorder answers with one document and remembers the session the
+// transport resolved for the caller, which is the only thing the refresh action
+// has to go on when it decides which game's keyframe to hand back.
+type sessionRecorder struct {
+	document string
+
+	mu      sync.Mutex
+	calls   int
+	session *models.Session
+}
+
+func (h *sessionRecorder) Handle(req actions.Request) (actions.Result, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.calls++
+	h.session = req.Session
+
+	return actions.Result{Responses: [][]byte{[]byte(h.document)}}, nil
+}
+
+func (h *sessionRecorder) seen() (int, *models.Session) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return h.calls, h.session
+}
+
+// refreshField returns the raw bytes the refresh mutation resolved to, failing
+// if the operation carried errors. Reading the field as a json.RawMessage rather
+// than decoding it is deliberate: decoding and re-encoding would normalise away
+// exactly the mangling this test is looking for.
+func refreshField(t *testing.T, response []byte) []byte {
+	t.Helper()
+
+	var decoded struct {
+		Data struct {
+			Refresh json.RawMessage `json:"refresh"`
+		} `json:"data"`
+		Errors json.RawMessage `json:"errors"`
+	}
+
+	if err := json.Unmarshal(response, &decoded); err != nil {
+		t.Fatalf("Unmarshal(%q) = %v", response, err)
+	}
+
+	if len(decoded.Errors) > 0 {
+		t.Fatalf("the refresh mutation returned errors: %s", decoded.Errors)
+	}
+
+	if len(decoded.Data.Refresh) == 0 {
+		t.Fatalf("the refresh mutation resolved to nothing (response %q)", response)
+	}
+
+	return decoded.Data.Refresh
+}
+
+// postREST drives the equivalent REST route with the same credential, so the two
+// request-response transports can be compared on the one action they both serve.
+func postREST(t *testing.T, sessions rest.SessionLookup, token, action string) []byte {
+	t.Helper()
+
+	api := rest.New(sessions)
+
+	mux := http.NewServeMux()
+	api.Register(mux)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/"+action, strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("NewRequest() = %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("Do() = %v", err)
+	}
+	defer resp.Body.Close()
+
+	document, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() = %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/%s = %d (%q), want %d", action, resp.StatusCode, document, http.StatusOK)
+	}
+
+	return bytes.TrimSpace(document)
+}
+
+// The subscription carries deltas only, so a GraphQL client that never received
+// a keyframe — a reconnect resuming into an active game answers with two
+// documents and a mutation resolves to the first — has nothing to replay them
+// over. This is the call that gets it one, and it has to hand back the same
+// document POST /api/refresh hands an SSE client in the same session: a client
+// that switches transports, or a delta replay shared between them, cannot depend
+// on two renderings of the same state.
+//
+// The action itself is stubbed because building the real one needs a game
+// repository, and its sanitising is covered where it lives. What is under test
+// here is the surface this story added: that the mutation reaches the refresh
+// action at all, and that it delivers the action's document whole.
+func TestMutation_RefreshReturnsTheSameKeyframeAsTheRestRoute(t *testing.T) {
+	router.Reset()
+	t.Cleanup(router.Reset)
+
+	router.RegisterHandler("test_refresh", "refresh", staticHandler{keyframe})
+
+	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+
+	overGraphQL := refreshField(t, postGraphQL(t, sessions, "good-token", "mutation { refresh }"))
+	overREST := postREST(t, sessions, "good-token", "refresh")
+
+	if !bytes.Equal(overGraphQL, overREST) {
+		t.Errorf("the refresh mutation resolved to\n\t%s\nbut POST /api/refresh answered\n\t%s\n"+
+			"the same session must see the same keyframe over either transport", overGraphQL, overREST)
+	}
+
+	// Equality alone would be satisfied by both transports mangling it the same
+	// way, so each is also held to the action's own bytes.
+	if string(overGraphQL) != keyframe {
+		t.Errorf("the refresh mutation resolved to\n\t%s\nwant the keyframe the action produced\n\t%s",
+			overGraphQL, keyframe)
+	}
+
+	if string(overREST) != keyframe {
+		t.Errorf("POST /api/refresh answered\n\t%s\nwant the keyframe the action produced\n\t%s",
+			overREST, keyframe)
+	}
+}
+
+// refresh hands back the game the caller is in, so who the caller is decides
+// what they see. The mutation takes no argument naming a session, a user or a
+// game (TestSchema_RefreshTakesNoArguments), which leaves the bearer token as
+// the only thing that can answer it — and an unauthenticated caller must reach
+// the action with no session at all rather than with somebody else's.
+func TestMutation_RefreshResolvesTheCallerFromTheBearerTokenAlone(t *testing.T) {
+	id := bson.NewObjectID()
+	sessions := fakeSessions{token: "good-token", id: id}
+
+	cases := map[string]struct {
+		token           string
+		wantAuthorative bool
+	}{
+		"the caller's own token": {token: "good-token", wantAuthorative: true},
+		"an unknown token":       {token: "not-a-token"},
+		"no token at all":        {},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			router.Reset()
+			t.Cleanup(router.Reset)
+
+			handler := &sessionRecorder{document: keyframe}
+			router.RegisterHandler("test_refresh", "refresh", handler)
+
+			postGraphQL(t, sessions, tc.token, "mutation { refresh }")
+
+			calls, session := handler.seen()
+			if calls != 1 {
+				t.Fatalf("the refresh action ran %d times, want exactly 1", calls)
+			}
+
+			if !tc.wantAuthorative {
+				if session != nil {
+					t.Errorf("the action was handed session %v, want none — %s authenticates nobody",
+						session.ID.Hex(), name)
+				}
+
+				return
+			}
+
+			if session == nil {
+				t.Fatal("the action was handed no session despite a valid bearer token")
+			}
+
+			if session.ID != id {
+				t.Errorf("the action was handed session %v, want %v", session.ID.Hex(), id.Hex())
+			}
+		})
+	}
+}
+
+// A gameId or sessionId argument here would let any caller ask for the keyframe
+// of a game they never joined, because the action trusts what it is handed. The
+// field is deliberately argument-free, and the schema is where that is enforced.
+func TestSchema_RefreshTakesNoArguments(t *testing.T) {
+	schema := generated.NewExecutableSchema(generated.Config{}).Schema()
+	if schema.Mutation == nil {
+		t.Fatal("the GraphQL schema declares no Mutation type")
+	}
+
+	field := schema.Mutation.Fields.ForName("refresh")
+	if field == nil {
+		t.Fatal("the GraphQL schema declares no refresh mutation, so a client cannot ask for a keyframe")
+	}
+
+	for _, arg := range field.Arguments {
+		t.Errorf("the refresh mutation takes an argument %q; the caller must be resolved from their"+
+			" bearer token, never from something they can name", arg.Name)
 	}
 }

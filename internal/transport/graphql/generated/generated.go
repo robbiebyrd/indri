@@ -47,6 +47,7 @@ type ComplexityRoot struct {
 		Login      func(childComplexity int, email string, password string) int
 		Logout     func(childComplexity int) int
 		Reconnect  func(childComplexity int, token string) int
+		Refresh    func(childComplexity int) int
 		Register   func(childComplexity int, email string, password string, name string) int
 	}
 
@@ -70,6 +71,7 @@ type MutationResolver interface {
 	CreateGame(ctx context.Context, code string, teamID string, private *bool) (model.JSON, error)
 	JoinGame(ctx context.Context, code string, teamID string) (model.JSON, error)
 	LeaveGame(ctx context.Context) (model.JSON, error)
+	Refresh(ctx context.Context) (model.JSON, error)
 	Kick(ctx context.Context, code string, userID string) (model.JSON, error)
 	Logout(ctx context.Context) (model.JSON, error)
 	Inquire(ctx context.Context, inquiryType string, inquiry *string, code *string) (model.JSON, error)
@@ -189,6 +191,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.Reconnect(childComplexity, args["token"].(string)), true
+	case "Mutation.refresh":
+		if e.ComplexityRoot.Mutation.Refresh == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Mutation.Refresh(childComplexity), true
 	case "Mutation.register":
 		if e.ComplexityRoot.Mutation.Register == nil {
 			break
@@ -339,6 +347,14 @@ type Mutation {
   createGame(code: String!, teamId: String!, private: Boolean): JSON!
   joinGame(code: String!, teamId: String!): JSON!
   leaveGame: JSON
+
+  # The keyframe call, and the GraphQL twin of POST /api/refresh. gameUpdates
+  # carries deltas only, so a client that never received its keyframe — a
+  # reconnect resuming into an active game answers with two documents and a
+  # mutation resolves to the first — has no state to replay them over. It asks
+  # here and starts again from the sanitised game the caller's own session is in.
+  refresh: JSON!
+
   kick(code: String!, userId: String!): JSON
   logout: JSON
   inquire(inquiryType: String!, inquiry: String, code: String): JSON
@@ -1008,6 +1024,29 @@ func (ec *executionContext) _Mutation_leaveGame(ctx context.Context, field graph
 	)
 }
 func (ec *executionContext) fieldContext_Mutation_leaveGame(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Mutation", field, true, true, errors.New("field of type JSON does not have child fields"))
+}
+
+func (ec *executionContext) _Mutation_refresh(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_refresh(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Mutation().Refresh(ctx)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v model.JSON) graphql.Marshaler {
+			return ec.marshalNJSON2githubᚗcomᚋrobbiebyrdᚋindriᚋinternalᚋtransportᚋgraphqlᚋmodelᚐJSON(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_refresh(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("Mutation", field, true, true, errors.New("field of type JSON does not have child fields"))
 }
 
@@ -2436,6 +2475,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 				return ec._Mutation_leaveGame(ctx, field)
 			})
 			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "refresh":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_refresh(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
 		case "kick":
