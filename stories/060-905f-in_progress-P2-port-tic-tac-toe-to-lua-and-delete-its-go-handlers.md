@@ -1,15 +1,16 @@
 ---
 id: 060-905f
 title: Port tic-tac-toe to Lua and delete its Go handlers
-status: pending
+status: in_progress
 priority: P2
 type: refactor
 created: "2026-09-12T01:28:12.574Z"
-updated: "2026-09-12T01:29:08.411Z"
+updated: "2026-09-13T23:56:50.720Z"
 dependencies: ["055", "057"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 15
 depends_on: ["stories/055-c8e1-pending-P2-shared-helper-library-in-lua-served-from-memory.md", "stories/057-1deb-pending-P2-indri-after-indri-at-and-indri-cancel.md"]
+started_at: "2026-09-13T23:56:50.719Z"
 ---
 
 # Port tic-tac-toe to Lua and delete its Go handlers
