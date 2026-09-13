@@ -199,6 +199,16 @@ A `Script` (`models.Script`, loaded from `config.json`) is the template new game
 `Config` (pvp, maxTeams, maxPlayersPerTeam, profanityFilter, createTeams), initial `Teams`, initial
 `Stage`, and initial data stores.
 
+It also carries `schemaVersion` and the `scripts` list. `schemaVersion` is the config format the file
+was written for; a version this build does not know fails boot, and a missing one is read as the
+current version and warned about. Each `scripts` entry is `{"path": ..., "grants": [...]}` — the Lua
+game script to load and the host capabilities it may reach. Grants are **per script**: a capability a
+script was not granted is absent from the `indri` table it sees, not present behind a permission
+check, so what a script can do is a glance at its grant list rather than an audit of every host
+function. An unrecognised grant name fails boot, and a config with no `scripts` at all warns loudly,
+because the server it produces answers nothing but the built-in actions
+(`internal/services/lua/capability.go`, `internal/repo/script/script.go`).
+
 ## Layout engine
 
 A **layout** is the board a game draws: a grid, a set of scenes, and the widgets placed in them. It is data,
