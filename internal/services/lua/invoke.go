@@ -3,6 +3,7 @@ package lua
 import (
 	"context"
 	"fmt"
+	"log"
 
 	lua "github.com/yuin/gopher-lua"
 
@@ -53,19 +54,35 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 	// this caller's game, deadline and store, and so the next invocation on this
 	// pooled state cannot find them. The game id comes from the session the
 	// transport authenticated; a script never names the game it edits.
-	setInvocation(s.L, &invocation{ctx: ctx, gameID: gameIDOf(req), games: e.games})
+	inv := &invocation{ctx: ctx, gameID: gameIDOf(req), games: e.games}
+
+	setInvocation(s.L, inv)
 	defer clearInvocation(s.L)
 
 	// call installs the per-invocation environment, applies ctx and marks the
 	// state spoiled if the interpreter was interrupted rather than unwound.
 	if _, err := s.call(ctx, fn, arg); err != nil {
+		// The ledger is dropped with the invocation. A handler that unwound left
+		// the game as it found it — indri.mutate returns its callback's error
+		// rather than writing — so the effects it queued describe a move that
+		// never happened, and the error is the only honest answer to its caller.
 		return actions.Result{}, fmt.Errorf("running the lua handler for %q: %w", action, err)
 	}
 
-	// A script has no way to answer its caller yet: replying is a host function
-	// rather than a return value, so the handler's result is deliberately
-	// ignored here and the dispatcher is told nothing happened.
-	return actions.Result{}, nil
+	// The handler has returned, so everything it queued is now owed to somebody.
+	// A script cannot answer its caller by returning a value — replying is a host
+	// function — so this, and not the call's return value, is the result.
+	var result actions.Result
+
+	if err := inv.effects.flush(ctx, &result); err != nil {
+		// Logged rather than returned, for the reason a failed publish is: the
+		// write this invocation made has already committed, and a delivery hiccup
+		// must not report the move itself as failed. What the caller loses is the
+		// frame, which the next refresh keyframe replaces.
+		log.Printf("delivering the effects of the lua handler for %q: %v", action, err)
+	}
+
+	return result, nil
 }
 
 // gameIDOf is the game a script's edits land on: the one the caller's own

@@ -329,25 +329,32 @@ func TestNewEngineWithGrants_RefusesAnEntryWithNoPath(t *testing.T) {
 // difference between a typo and a name this server understands but cannot
 // serve. Both fail boot; only one of them is the operator's fault, and the
 // messages have to say which.
+//
+// It is written against a reserved name of its own rather than against a
+// shipped one, because every capability this build ships now has an installer:
+// a test that named one would stop testing the reserved-but-unbuilt path the
+// day that name was implemented, which is exactly what happened to http and
+// assets.
 func TestNewEngineWithGrants_RefusesACapabilityThisBuildHasNotImplemented(t *testing.T) {
 	t.Parallel()
 
+	const reserved = "reserved"
+
 	path := writeScript(t, "game.lua", `indri.on("noop", function(req) end)`)
 
-	for _, name := range []string{CapabilityHTTP, CapabilityAssets} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+	_, err := newEngine(
+		[]models.ScriptFile{granted(path, reserved)},
+		nil,
+		capabilitySet{reserved: nil},
+	)
 
-			_, err := NewEngineWithGrants([]models.ScriptFile{granted(path, name)}, nil)
-			requireErrorMentions(t, err, "does not implement yet", name, path)
-		})
-	}
+	requireErrorMentions(t, err, "does not implement yet", reserved, path)
 }
 
 // TestDefaultCapabilities_AreTheNamesTheGrantListAccepts pins the vocabulary a
-// config may use. A name added to the set without an installer is a name an
-// operator can write and a script can never use, so the two halves are listed
-// together here.
+// config may use. A name in the set without an installer is a name an operator
+// can write and a script can never use, so the two halves are checked together
+// here.
 func TestDefaultCapabilities_AreTheNamesTheGrantListAccepts(t *testing.T) {
 	t.Parallel()
 
@@ -355,6 +362,12 @@ func TestDefaultCapabilities_AreTheNamesTheGrantListAccepts(t *testing.T) {
 
 	if got := defaultCapabilities.names(); !slices.Equal(got, want) {
 		t.Fatalf("the known capabilities are %v, want %v", got, want)
+	}
+
+	for name, install := range defaultCapabilities {
+		if install == nil {
+			t.Errorf("the capability %q has no installer, so granting it would fail boot", name)
+		}
 	}
 }
 

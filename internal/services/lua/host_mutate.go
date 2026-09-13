@@ -44,6 +44,11 @@ type invocation struct {
 	gameID string
 	games  GameMutator
 
+	// effects is everything this call asked the host to do outside the game
+	// document, held until it is known whether the write it belonged to
+	// happened. See effects.go for why nothing is performed inline.
+	effects ledger
+
 	// inMutate is the reentrancy guard. mutation.Run takes a lock keyed on the
 	// game, and lock.InProcess is a plain keyed mutex with no notion of a
 	// holder, so a nested indri.mutate on the same game would wait for a lock
@@ -146,7 +151,19 @@ func hostMutate(L *lua.LState) int {
 
 	defer inv.leave()
 
-	committed, err := inv.games.MutateResult(inv.ctx, inv.gameID, applyThroughLua(L, fn))
+	committed, err := inv.games.MutateResult(inv.ctx, inv.gameID, applyThroughLua(L, inv, fn))
+
+	// The committed flag, and not the nil error, is what settles the effects the
+	// callback queued: mutation.Run returns nil for an abort as well as for a
+	// write, so an error-only reading would release the effects of a mutation
+	// that stored nothing. Settled before the raise below, because RaiseError
+	// unwinds and never comes back.
+	if committed {
+		inv.effects.commitAttempt()
+	} else {
+		inv.effects.discardAttempt()
+	}
+
 	if err != nil {
 		L.RaiseError("indri.mutate: %s", err.Error())
 	}
@@ -164,8 +181,12 @@ func hostMutate(L *lua.LState) int {
 // each time rather than one it saw before — a callback that kept a reference to
 // the previous attempt's table would be editing a document that is no longer
 // current.
-func applyThroughLua(L *lua.LState, fn *lua.LFunction) func(*models.Game) error {
+func applyThroughLua(L *lua.LState, inv *invocation, fn *lua.LFunction) func(*models.Game) error {
 	return func(g *models.Game) error {
+		// Every run starts the ledger's attempt level over, so whatever the
+		// previous, rejected attempt queued goes with the state it described.
+		inv.effects.beginAttempt()
+
 		before, err := events.ToMap(g)
 		if err != nil {
 			return fmt.Errorf("rendering game as a document: %w", err)

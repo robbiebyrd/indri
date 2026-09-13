@@ -39,9 +39,14 @@ type capabilityInstaller func(L *lua.LState) (lua.LValue, error)
 type capabilitySet map[string]capabilityInstaller
 
 // defaultCapabilities is the set a real engine is built against.
+//
+// Both installers are configured here and nowhere else. What bounds a fetch and
+// which directory an asset comes from are properties of the server, not of the
+// script that was granted them, so a grant list decides only whether a script
+// may reach the capability at all.
 var defaultCapabilities = capabilitySet{
-	CapabilityHTTP:   nil,
-	CapabilityAssets: nil,
+	CapabilityHTTP:   httpCapability(defaultHTTPConfig()),
+	CapabilityAssets: assetsCapability(defaultAssetsConfig()),
 }
 
 // grantedCapability is one capability a particular script may reach, resolved
