@@ -63,8 +63,10 @@ func (r *Resolver) sessionFromContext(ctx context.Context) *models.Session {
 }
 
 // dispatch runs an action through the shared dispatcher and returns its first
-// response document as the mutation result. DisconnectIDs (kick/logout) are
-// applied against every transport.
+// response document as the mutation result. A mutation resolves to one value,
+// so a dispatch that produced several responses can deliver only that first one;
+// transport.FirstResponse reports the rest rather than dropping them silently.
+// DisconnectIDs (kick/logout) are applied against every transport.
 func (r *Resolver) dispatch(ctx context.Context, action string, payload map[string]interface{}) (model.JSON, error) {
 	session := r.sessionFromContext(ctx)
 
@@ -75,8 +77,8 @@ func (r *Resolver) dispatch(ctx context.Context, action string, payload map[stri
 	}
 
 	var out model.JSON
-	if len(result.Responses) > 0 {
-		out = model.JSON(result.Responses[0])
+	if document := transport.FirstResponse(action, result.Responses); document != nil {
+		out = model.JSON(document)
 	}
 
 	return out, err

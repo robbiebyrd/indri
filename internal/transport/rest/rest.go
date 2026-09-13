@@ -122,7 +122,7 @@ func (t *Transport) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, action, result)
 }
 
 // decodeBody reads the request body as a JSON object. An empty body is an empty
@@ -149,15 +149,19 @@ func decodeBody(r *http.Request, into *map[string]interface{}) error {
 	return nil
 }
 
-func writeJSON(w http.ResponseWriter, status int, result actions.Result) {
+func writeJSON(w http.ResponseWriter, status int, action string, result actions.Result) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
+	// One request, one document: a dispatch that produced several responses can
+	// only answer with the first, and FirstResponse reports the rest rather than
+	// dropping them silently.
+	document := transport.FirstResponse(action, result.Responses)
+
 	// An action that changes state returns nothing: the change reaches the
 	// client as a broadcast delta on its stream, not in this response.
-	document := []byte("{}")
-	if len(result.Responses) > 0 {
-		document = result.Responses[0]
+	if document == nil {
+		document = []byte("{}")
 	}
 
 	_, _ = w.Write(document)

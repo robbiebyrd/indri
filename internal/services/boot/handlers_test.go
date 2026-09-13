@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -488,6 +489,59 @@ func TestBroadcastReachesEveryAggregatedTransport(t *testing.T) {
 		got := c.written()
 		if len(got) != 1 || string(got[0]) != "delta" {
 			t.Errorf("%s conn received %q, want exactly one %q", name, got, "delta")
+		}
+	}
+}
+
+// staticHandler returns one response document, the way every built-in action
+// does. Two of them registered under the same action is the multi-handler
+// dispatch router.Dispatch merges — a game handler alongside a built-in, a Lua
+// hook, or a received/processed pre/post hook.
+type staticHandler struct{ document string }
+
+func (h staticHandler) Handle(actions.Request) (actions.Result, error) {
+	return actions.Result{Responses: [][]byte{[]byte(h.document)}}, nil
+}
+
+// WebSocket (and WebRTC, which shares this dispatch path) is a message stream,
+// so it delivers every response of a multi-handler dispatch as its own frame.
+// REST and GraphQL answer one request with one document and can deliver only the
+// first, reporting the rest — see
+// TestDispatch_MultiHandlerActionDeliversTheFirstResponseAndReportsTheRest in
+// internal/transport/rest and its GraphQL twin. This is the other half of that
+// divergence, which docs/PROTOCOL.md records as intentional. It is asserted here
+// so a future change that "unifies" the transports by truncating the stream one
+// fails loudly instead of quietly costing reconnect its keyframe.
+func TestHandleClientMessage_WritesEveryResponseOfAMultiHandlerDispatch(t *testing.T) {
+	router.Reset()
+	t.Cleanup(router.Reset)
+
+	router.RegisterHandler("test_logout_first", "logout", staticHandler{`{"first":true}`})
+	router.RegisterHandler("test_logout_second", "logout", staticHandler{`{"second":true}`})
+
+	// An anonymous conn carries no session key, so nothing reaches the session
+	// store and the test needs no database.
+	conn := newFakeConn("")
+
+	i := &injector.Injector{
+		ClientsInjector: &injector.ClientsInjector{
+			Transport: bareTransport{&transport.Registry{}},
+		},
+	}
+
+	handleClientMessage(i, conn, []byte(`{"action":"logout"}`))
+
+	want := []string{`{"first":true}`, `{"second":true}`}
+
+	written := conn.written()
+	if len(written) != len(want) {
+		t.Fatalf("the connection received %d frames (%q), want %d — a stream transport delivers"+
+			" every response", len(written), written, len(want))
+	}
+
+	for i, frame := range written {
+		if string(frame) != want[i] {
+			t.Errorf("frame %d = %q, want %q", i, frame, want[i])
 		}
 	}
 }

@@ -1,10 +1,12 @@
 package rest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
+	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/transport"
 )
@@ -441,3 +444,117 @@ func (peerTransport) Register(*http.ServeMux)   {}
 
 // The transport must be usable inside a transport.Multi alongside the others.
 var _ transport.Transport = (*Transport)(nil)
+
+// staticHandler returns one response document, the way every built-in action
+// does. Two of them registered under the same action is the multi-handler
+// dispatch router.Dispatch merges — a game handler alongside a built-in, a Lua
+// hook, or a received/processed pre/post hook.
+type staticHandler struct{ document string }
+
+func (h staticHandler) Handle(actions.Request) (actions.Result, error) {
+	return actions.Result{Responses: [][]byte{[]byte(h.document)}}, nil
+}
+
+// syncBuffer is a log sink safe to read from the test goroutine while the
+// server goroutine writes to it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+func captureLog(t *testing.T) *syncBuffer {
+	t.Helper()
+
+	buf := &syncBuffer{}
+	out := log.Writer()
+
+	log.SetOutput(buf)
+	t.Cleanup(func() { log.SetOutput(out) })
+
+	return buf
+}
+
+// One HTTP request answers with one document, so a dispatch that produced two
+// responses can deliver only the first. That is the contract (docs/PROTOCOL.md),
+// and the WebSocket transport deliberately differs — see
+// TestHandleClientMessage_WritesEveryResponseOfAMultiHandlerDispatch in
+// internal/services/boot. What must never happen is the drop going unreported.
+func TestDispatch_MultiHandlerActionDeliversTheFirstResponseAndReportsTheRest(t *testing.T) {
+	router.Reset()
+	t.Cleanup(router.Reset)
+
+	router.RegisterHandler("test_logout_first", "logout", staticHandler{`{"first":true}`})
+	router.RegisterHandler("test_logout_second", "logout", staticHandler{`{"second":true}`})
+
+	logged := captureLog(t)
+
+	// The real router, not the recorder: the point is that two registered
+	// handlers really do merge into one Result here.
+	tr := New(fakeSessions{token: "good-token", id: bson.NewObjectID()})
+
+	mux := http.NewServeMux()
+	tr.Register(mux)
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	resp := post(t, srv.URL+"/api/logout", `{}`, bearer("good-token"))
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	if got, want := body(t, resp), `{"first":true}`; got != want {
+		t.Errorf("body = %q, want %q (the first response, not the merged set)", got, want)
+	}
+
+	report := logged.String()
+
+	if !strings.Contains(report, `"logout"`) {
+		t.Errorf("the dropped response was not reported (log was %q); a silent drop is "+
+			"indistinguishable from a handler that never ran", report)
+	}
+}
+
+// The single-response case is every action today, and it must stay exactly as
+// it was: one document, and nothing logged.
+func TestDispatch_SingleResponseActionIsUnchangedAndSilent(t *testing.T) {
+	router.Reset()
+	t.Cleanup(router.Reset)
+
+	router.RegisterHandler("test_logout_only", "logout", staticHandler{`{"only":true}`})
+
+	logged := captureLog(t)
+
+	tr := New(fakeSessions{token: "good-token", id: bson.NewObjectID()})
+
+	mux := http.NewServeMux()
+	tr.Register(mux)
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	resp := post(t, srv.URL+"/api/logout", `{}`, bearer("good-token"))
+
+	if got, want := body(t, resp), `{"only":true}`; got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+
+	if report := logged.String(); report != "" {
+		t.Errorf("a single-response action logged %q, want nothing", report)
+	}
+}

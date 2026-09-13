@@ -1,18 +1,24 @@
 package graphql
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	coderws "github.com/coder/websocket"
 
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
+	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/transport"
 )
 
@@ -256,4 +262,150 @@ func readMessageType(ctx context.Context, conn *coderws.Conn) (string, error) {
 	}
 
 	return message.Type, nil
+}
+
+// staticHandler returns one response document, the way every built-in action
+// does. Two of them registered under the same action is the multi-handler
+// dispatch router.Dispatch merges — a game handler alongside a built-in, a Lua
+// hook, or a received/processed pre/post hook.
+type staticHandler struct{ document string }
+
+func (h staticHandler) Handle(actions.Request) (actions.Result, error) {
+	return actions.Result{Responses: [][]byte{[]byte(h.document)}}, nil
+}
+
+// syncBuffer is a log sink safe to read from the test goroutine while the
+// server goroutine writes to it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+func captureLog(t *testing.T) *syncBuffer {
+	t.Helper()
+
+	buf := &syncBuffer{}
+	out := log.Writer()
+
+	log.SetOutput(buf)
+	t.Cleanup(func() { log.SetOutput(out) })
+
+	return buf
+}
+
+// mutate runs one operation against a server carrying only the registry the
+// test populated, and returns the decoded response.
+func mutate(t *testing.T, query string) map[string]interface{} {
+	t.Helper()
+
+	tr := New(nil)
+
+	mux := http.NewServeMux()
+	tr.Register(mux)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	body, err := json.Marshal(map[string]interface{}{"query": query})
+	if err != nil {
+		t.Fatalf("Marshal() = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+path, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("NewRequest() = %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("Do() = %v", err)
+	}
+	defer resp.Body.Close()
+
+	document, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() = %v", err)
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(document, &decoded); err != nil {
+		t.Fatalf("Unmarshal(%q) = %v", document, err)
+	}
+
+	if errs, ok := decoded["errors"]; ok {
+		t.Fatalf("the operation returned errors: %v", errs)
+	}
+
+	return decoded
+}
+
+// A mutation resolves to one value, so a dispatch that produced two responses
+// can deliver only the first. That is the contract (docs/PROTOCOL.md), and the
+// WebSocket transport deliberately differs — see
+// TestHandleClientMessage_WritesEveryResponseOfAMultiHandlerDispatch in
+// internal/services/boot. What must never happen is the drop going unreported.
+func TestMutation_MultiHandlerActionResolvesToTheFirstResponseAndReportsTheRest(t *testing.T) {
+	router.Reset()
+	t.Cleanup(router.Reset)
+
+	router.RegisterHandler("test_logout_first", "logout", staticHandler{`{"first":true}`})
+	router.RegisterHandler("test_logout_second", "logout", staticHandler{`{"second":true}`})
+
+	logged := captureLog(t)
+
+	decoded := mutate(t, "mutation { logout }")
+
+	data, _ := decoded["data"].(map[string]interface{})
+
+	want := map[string]interface{}{"first": true}
+	if got := data["logout"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("logout = %v, want %v (the first response, not the merged set)", got, want)
+	}
+
+	report := logged.String()
+
+	if !strings.Contains(report, `"logout"`) {
+		t.Errorf("the dropped response was not reported (log was %q); a silent drop is "+
+			"indistinguishable from a handler that never ran", report)
+	}
+}
+
+// The single-response case is every action today, and it must stay exactly as
+// it was: one document, and nothing logged.
+func TestMutation_SingleResponseActionIsUnchangedAndSilent(t *testing.T) {
+	router.Reset()
+	t.Cleanup(router.Reset)
+
+	router.RegisterHandler("test_logout_only", "logout", staticHandler{`{"only":true}`})
+
+	logged := captureLog(t)
+
+	decoded := mutate(t, "mutation { logout }")
+
+	data, _ := decoded["data"].(map[string]interface{})
+
+	want := map[string]interface{}{"only": true}
+	if got := data["logout"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("logout = %v, want %v", got, want)
+	}
+
+	if report := logged.String(); report != "" {
+		t.Errorf("a single-response action logged %q, want nothing", report)
+	}
 }

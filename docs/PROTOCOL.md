@@ -93,6 +93,11 @@ A user has at most one session; logging in again returns the existing one.
 Re-binds the stored session to this connection and replies with the same authenticated payload. If the
 session was already in a game, a full game keyframe follows immediately.
 
+That second document is the one action that produces two responses today, so it is also the one place
+the per-transport difference below bites: over GraphQL or `POST /api/reconnect` only the auth payload
+comes back, and the keyframe must be fetched with `refresh`. See
+[How many responses an action produces](#how-many-responses-an-action-produces).
+
 ### `create`
 
 ```json
@@ -245,6 +250,27 @@ never authenticated.
 after, the message's real action. Registering a handler on either gives you a pre/post hook that fires
 on every inbound message. Nothing is registered on them by default.
 
+### How many responses an action produces
+
+Handler registration is additive: several handlers may share one action, and `router.Dispatch` merges
+their responses in registration order. So one inbound action can produce more than one response
+document — `reconnect` into an active game already does (auth payload, then keyframe), and a `received`
+or `processed` hook adds one to any action at all.
+
+**The transports deliberately differ on what they do with the extras, because their shapes differ:**
+
+| Transport | Delivers |
+|---|---|
+| WebSocket, WebRTC | Every response, each as its own frame, in order. |
+| GraphQL mutation, `POST /api/<action>` | The **first** response only. One request resolves to one document. |
+
+A request/response transport cannot deliver a stream without wrapping every action's result in an array,
+which would make each of them pay for a case that arises in one. Dropping is therefore the contract, not
+a bug — but it is never silent: the server logs the action and how many responses it dropped
+(`transport.FirstResponse`). A REST or GraphQL caller recovers the dropped state the same way it gets
+state at any other time: `POST /api/refresh` for a keyframe, and the `/events` or `gameUpdates` stream
+for deltas.
+
 ---
 
 ## Server → client
@@ -347,7 +373,11 @@ the delta/keyframe payloads verbatim — no double-encoding, objects and arrays 
 
 ### Mutations (client → server)
 
-Each returns a `JSON` result — the same response document the WebSocket action produces.
+Each returns a `JSON` result — the same response document the WebSocket action produces. A mutation
+resolves to one value, so an action that produced several responses resolves to the **first** and the
+server logs the rest as dropped; see
+[How many responses an action produces](#how-many-responses-an-action-produces). `reconnect` is the
+action this affects: it resolves to the auth payload, and its keyframe is not returned.
 
 | Mutation | Action | Notes |
 |---|---|---|
@@ -422,6 +452,12 @@ token, never from a body field.
 broadcast. `400` for a missing or mistyped argument and for a handler error, `404` for an unknown
 action, `405` for a non-POST, each as `{"error": "…"}`.
 
+One request answers with one document, so an action that produced several responses answers with the
+**first** and the server logs the rest as dropped; see
+[How many responses an action produces](#how-many-responses-an-action-produces).
+`POST /api/reconnect` is the action this affects: it returns the auth payload, and an SSE client
+resuming into a game must follow it with `POST /api/refresh` for the keyframe.
+
 Arguments are validated before dispatch and unknown body keys are dropped, so a caller cannot smuggle
 extra fields into a payload. `layout` is the one exception, because an op's arguments are objects whose
 shape depends on the op: its body passes through whole, and the handler rejects every field the op does not
@@ -457,7 +493,8 @@ oldest are dropped, and the client recovers with `POST /api/refresh`.
 1. `POST /api/login` (or `/api/reconnect`) → bearer token
 2. `POST /api/join` or `/api/create` → the keyframe, in the response
 3. `GET /events?token=…` → open the stream
-4. `POST /api/refresh` → a fresh keyframe if the stream ever drops or a delta is missed
+4. `POST /api/refresh` → a fresh keyframe if the stream ever drops or a delta is missed, and always
+   after a `reconnect`, which returns only the auth payload here
 
 Open the stream before or immediately after joining. Deltas broadcast while no stream is open are not
 replayed — recover with `refresh`.

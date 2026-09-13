@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
@@ -12,8 +13,18 @@ import (
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 )
 
+// sceneStore is the narrow part of the game store this service writes through:
+// one read, plus the two single-field writes whose key is published verbatim as
+// the delta path. Depending on the port rather than the store keeps the path
+// rules below testable without a database.
+type sceneStore interface {
+	Get(id string) (*models.Game, error)
+	UpdateField(id string, key string, value interface{}) error
+	DeleteField(id string, key string) error
+}
+
 type Service struct {
-	gameRepo    *gameRepo.Store
+	gameRepo    sceneStore
 	gameService *gameService.Service
 }
 
@@ -23,6 +34,55 @@ func NewService(gameRepo *gameRepo.Store, gameService *gameService.Service) *Ser
 		gameRepo,
 		gameService,
 	}
+}
+
+// ErrInvalidPathSegment reports a caller-supplied key that cannot be used as a
+// path segment.
+//
+// UpdateField and DeleteField use the key they are given twice: as the MongoDB
+// update path and, unchanged, as the path of the published delta. A key holding
+// a "." would therefore forge a segment in both — a scene id of
+// "foo.privateData" writes to a nested "privateData" field and produces a delta
+// path whose last segment is literally "privateData", which SanitizeDelta drops,
+// so every update to that scene would vanish from the broadcast. Escaping the
+// key (what events.joinPath does) is not available here, because MongoDB would
+// read the escape characters as part of the field name. The boundary therefore
+// rejects the key instead of transforming it.
+//
+// "$" is rejected for the same reason in the other direction: MongoDB does not
+// accept it in a field name, and a leading "$" is read as an update operator.
+var ErrInvalidPathSegment = errors.New("invalid path segment")
+
+const (
+	pathSeparator   = "."
+	mongoOperator   = "$"
+	forbiddenInKeys = pathSeparator + mongoOperator
+)
+
+// validateSegment rejects a key that cannot stand as a single path segment.
+func validateSegment(label string, segment string) error {
+	switch {
+	case segment == "":
+		return fmt.Errorf("%s is empty: %w", label, ErrInvalidPathSegment)
+	case strings.ContainsAny(segment, forbiddenInKeys):
+		return fmt.Errorf("%s %q contains %q or %q: %w",
+			label, segment, pathSeparator, mongoOperator, ErrInvalidPathSegment)
+	}
+
+	return nil
+}
+
+// validatePath validates a caller-supplied dotted path into a data store. Dots
+// in it are the caller's own separators — the path addresses a nested field —
+// so each segment is checked on its own.
+func validatePath(label string, path string) error {
+	for _, segment := range strings.Split(path, pathSeparator) {
+		if err := validateSegment(label, segment); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Get will fetch the stage for a specific gameId.
@@ -46,8 +106,8 @@ func (ss *Service) AddScene(gameId string, sceneId string, scene *models.Scene) 
 		return fmt.Errorf("gameId cannot be nil")
 	}
 
-	if sceneId == "" {
-		return fmt.Errorf("scene id cannot be nil")
+	if err := validateSegment("scene id", sceneId); err != nil {
+		return err
 	}
 
 	g, err := ss.gameService.Fetch(gameId)
@@ -155,6 +215,10 @@ func (ss *Service) LoadSceneFromScript(
 		return fmt.Errorf("gameId cannot be nil")
 	}
 
+	if err := validateSegment("scene id", sceneId); err != nil {
+		return err
+	}
+
 	updatedPath := "stage.scene." + sceneId
 
 	var sceneData interface{}
@@ -224,6 +288,16 @@ func (ss *Service) UpdateScene(
 	path *string,
 	data interface{},
 ) error {
+	if err := validateSegment("scene id", sceneId); err != nil {
+		return err
+	}
+
+	if path != nil && *path != "" {
+		if err := validatePath("scene data path", *path); err != nil {
+			return err
+		}
+	}
+
 	g, err := ss.gameRepo.Get(gameId)
 	if err != nil {
 		return err
@@ -276,8 +350,8 @@ func (ss *Service) validateAndFetchGame(gameId string, sceneId string) (*models.
 		return nil, fmt.Errorf("gameId cannot be nil")
 	}
 
-	if sceneId == "" {
-		return nil, fmt.Errorf("must specify scene")
+	if err := validateSegment("scene id", sceneId); err != nil {
+		return nil, err
 	}
 
 	g, err := ss.gameRepo.Get(gameId)
