@@ -1,7 +1,11 @@
 import React, {createContext, useEffect, useRef} from 'react'
-import AsyncStorage from '@react-native-async-storage/async-storage'
 
 import {MessageHandler} from "@/services/message-handler";
+import {FailoverTransport} from "@/services/failover-transport";
+import {SseRestTransport} from "@/services/sse-transport";
+import {WebSocketTransport} from "@/services/transport";
+import {WebRTCTransport} from "@/services/webrtc-transport";
+import {currentToken, loadToken} from "@/services/session-token";
 import {useGameList} from "@/providers/game-list/use-game-list";
 import {useGameState} from "@/providers/game-state/use-game-state";
 import {useUserState} from "@/providers/user-state/use-user-state";
@@ -14,12 +18,16 @@ interface SocketProviderProps {
     children: ReactNode;
 }
 
+// How long one channel gets to come up before the next is tried, how long to
+// wait after a cycle in which none did, and how many pre-open sends to hold.
+const FAILOVER = {attemptTimeoutMs: 5000, backoffMs: 1000, queueLimit: 32}
+
 /**
- * One websocket for the whole app.
+ * One connection for the whole app — over whichever transport works.
  *
  * IT LIVES AT THE ROOT, NOT IN A SCREEN, and that is the point. The session —
  * who you are, which game you are in — is per CONNECTION on the server, so a
- * socket owned by a route dies with that route and takes the authenticated
+ * connection owned by a route dies with that route and takes the authenticated
  * session with it. It used to be owned by `app/index.tsx`, which meant
  * navigating to any other route silently logged the player out and left every
  * other screen unable to send anything.
@@ -32,7 +40,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({children}) => {
     const {dispatch: userDispatch} = useUserState()
     const {dispatch: gameListDispatch} = useGameList()
 
-    // Create the socket once (lazy ref, not useMemo — opening a socket is a
+    // Create the connection once (lazy ref, not useMemo — connecting is a
     // side effect) and close it on unmount to avoid leaking connections.
     const wsRef = useRef<MessageHandler | undefined>(undefined)
     if (!wsRef.current) {
@@ -46,46 +54,77 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({children}) => {
                 "and restart Metro — EXPO_PUBLIC_* values are inlined at build time.",
             )
         }
-        wsRef.current = new MessageHandler(apiUrl ?? "", userDispatch, gameDispatch, gameListDispatch)
+
+        // The candidate list is a FUNCTION, re-evaluated on every selection
+        // cycle. SSE authenticates at its handshake and has no anonymous form
+        // to bind a session to later, so it is not even a legal candidate
+        // until a token exists — which a fixed array could not express.
+        //
+        // Fresh instances per cycle: a transport that has been closed cannot
+        // be redialled.
+        const transport = new FailoverTransport(() => [
+            new WebRTCTransport(),
+            new WebSocketTransport(),
+            ...(currentToken() ? [new SseRestTransport(currentToken)] : []),
+        ], FAILOVER)
+
+        wsRef.current = new MessageHandler(
+            apiUrl ?? "", userDispatch, gameDispatch, gameListDispatch, [], transport,
+        )
     }
     const ws: MessageHandler = wsRef.current
 
-    // Restore the session the moment the socket is up.
+    // Restore the session on EVERY connect, not just the first.
     //
-    // The server's session is per CONNECTION, so a full page load — a refresh,
-    // or a typed route URL — arrives with a brand new socket and no identity,
-    // and without this the player is silently dropped back to the login screen
-    // with their game gone. `reconnect` re-binds the stored token and the
-    // server follows with a full keyframe if that session was in a game, so
-    // game state comes back through the normal path with no special casing.
+    // The server's session is per CONNECTION. A full page load — a refresh, or
+    // a typed route URL — arrives with no identity, and so does every channel
+    // the supervisor fails over to. Without this the player is silently
+    // dropped back to the login screen with their game gone.
     //
-    // It has to wait for `onOpen`: `send` drops anything written before the
-    // handshake finishes, so firing this on mount would restore nothing.
+    // `reconnect` re-binds the stored token; `refresh` then asks for a
+    // keyframe, because a new connection's delta stream starts mid-flight and
+    // GameStateParser has nothing to replay those deltas onto. Over REST the
+    // two are independent requests rather than an ordered pair, which is
+    // harmless: each carries the bearer token and resolves its own session.
     useEffect(() => {
         const handler = wsRef.current
         if (handler === undefined) return
 
         let cancelled = false
+        let unsubscribe: (() => void) | undefined
 
-        const unsubscribe = handler.onOpen(() => {
-            AsyncStorage.getItem('sessionId')
-                .then((token) => {
+        // Subscribe only AFTER the token is in the synchronous cache. That is
+        // what lets `restore` send without awaiting: the supervisor flushes
+        // its queued sends the moment a channel opens, and an awaited storage
+        // read would put `reconnect` behind them. onOpen runs an observer
+        // immediately when already connected, so subscribing late costs
+        // nothing.
+        loadToken()
+            .catch((err: unknown) => {
+                // A failed restore leaves the app unauthenticated, which is
+                // the login screen — a correct state, just not the wanted one.
+                // Swallowing it silently would hide a broken store.
+                console.warn('could not read the stored session', err)
+
+                return null
+            })
+            .then(() => {
+                if (cancelled) return
+
+                unsubscribe = handler.onOpen(() => {
+                    const token = currentToken()
+
                     // No token is the normal first-visit case, not an error.
-                    if (cancelled || token === null || token === '') return
+                    if (token === null) return
 
                     handler.send({action: 'reconnect', sessionId: token})
+                    handler.send({action: 'refresh'})
                 })
-                .catch((err: unknown) => {
-                    // A failed restore leaves the app unauthenticated, which is
-                    // the login screen — a correct state, just not the wanted
-                    // one. Swallowing it silently would hide a broken store.
-                    console.warn('could not restore the stored session', err)
-                })
-        })
+            })
 
         return () => {
             cancelled = true
-            unsubscribe()
+            unsubscribe?.()
         }
     }, [])
 

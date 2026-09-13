@@ -1,5 +1,6 @@
 import {User} from "@/models/models"
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import {rememberToken} from "@/services/session-token"
 
 
 export type Action = 'setUser'
@@ -11,20 +12,20 @@ export type UserDispatchMessage = {
 }
 
 
-const storeData = async (value: string) => {
-    console.log('Storing data...', value);
-    try {
-        await AsyncStorage.setItem('sessionId', value);
-    } catch (e) {
-        return e
-    }
-};
-
 export function dataHandler(state?: User, action?: UserDispatchMessage): User | undefined {
     switch (action?.type) {
         case 'setUser':
             if (action?.sessionId) {
-                storeData(action.sessionId).finally()
+                // Through session-token, not AsyncStorage directly: the
+                // supervisor has to be able to read this token synchronously
+                // when it picks a channel, and a write that only reached
+                // storage would be invisible until the next app start.
+                rememberToken(action.sessionId).catch((err: unknown) => {
+                    // The session still works for this connection; only its
+                    // survival across a restart is lost. Worth a warning, not
+                    // worth failing the login over.
+                    console.warn('could not persist the session token', err)
+                })
             }
             return {...action.payload};
         default:

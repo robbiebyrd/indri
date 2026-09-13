@@ -406,6 +406,45 @@ test("losing the active channel is reported through onClose", async () => {
     failover.close();
 });
 
+// The resync contract (plans/client-transport-failover.md, Step 6), tested
+// where it actually lives: SocketProvider is a .tsx that pulls in React and
+// Expo, so the ORDERING guarantee it depends on is pinned here instead.
+//
+// `reconnect` must reach the wire before anything the app queued, because a
+// switch lands on a server-side connection with no session and every other
+// action would be rejected as unauthenticated. `refresh` follows it because
+// that connection's delta stream starts mid-flight, and GameStateParser needs
+// a keyframe to replay onto.
+test("an onOpen observer's sends precede the flushed queue, so reconnect can go first", async () => {
+    const first = new FakeChannel("first");
+    const second = new FakeChannel("second");
+    const failover = new FailoverTransport(() => [first, second], OPTS);
+
+    failover.onOpen(() => {
+        failover.send({action: "reconnect", sessionId: "tok"});
+        failover.send({action: "refresh"});
+    });
+
+    await failover.connect("ws://test");
+    failover.send({action: "layout"});
+
+    assert.deepStrictEqual(first.sent, [
+        {action: "reconnect", sessionId: "tok"},
+        {action: "refresh"},
+        {action: "layout"},
+    ]);
+
+    first.die();
+    await waitFor(() => second.sent.length === 2, "the resync on the new channel");
+
+    assert.deepStrictEqual(second.sent, [
+        {action: "reconnect", sessionId: "tok"},
+        {action: "refresh"},
+    ], "the switch re-runs the resync, and replays no application message");
+
+    failover.close();
+});
+
 test("the supervisor is itself a ClientTransport, which is the whole design", () => {
     const failover: ClientTransport = new FailoverTransport(() => [], OPTS);
 
