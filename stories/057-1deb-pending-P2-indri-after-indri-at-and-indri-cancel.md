@@ -49,3 +49,5 @@ Countdown and wall-clock triggers collapse to one absolute fire time. A fired ti
 
 ## Work Log
 
+### 2026-09-13T17:18:25.180Z - CI now fails on any test that skips without a database (repo-wide guard in ci.yml, KNOWN_SKIPS allowlist). The scheduler package inherits this automatically - write its tests DB-free against schedule.MemoryStore or CI will reject them.
+

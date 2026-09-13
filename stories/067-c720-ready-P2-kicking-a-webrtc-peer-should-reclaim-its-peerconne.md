@@ -1,13 +1,13 @@
 ---
-id: "067-c720"
-title: "Kicking a WebRTC peer should reclaim its PeerConnection"
-status: pending
+id: 067-c720
+title: Kicking a WebRTC peer should reclaim its PeerConnection
+status: ready
 priority: P2
 type: fix
-created: 2026-09-13T17:57:18.988Z
-updated: 2026-09-13T17:57:18.988Z
+created: "2026-09-13T17:57:18.988Z"
+updated: "2026-09-13T18:01:46.484Z"
 dependencies: []
-plan: "plans/webrtc-transport.md"
+plan: plans/webrtc-transport.md
 ---
 
 # Kicking a WebRTC peer should reclaim its PeerConnection
