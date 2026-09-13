@@ -113,6 +113,73 @@ test("a throwing observer does not stop the next one", () => {
     });
 });
 
+// THE WHOLE POINT OF THIS HOOK, once a transport can fail over
+// (plans/client-transport-failover.md, Step 5). A switch lands on a brand new
+// server-side connection with no session, so session restore has to run again
+// or the player is silently logged out mid-game with their game gone. The old
+// latch fired observers exactly once and made that impossible.
+test("an open observer runs again on every later reconnect", () => {
+    withFakeSocket(() => {
+        const {ws, socket} = newHandler();
+        let fired = 0;
+        ws.onOpen(() => {fired++});
+
+        socket.open();
+        assert.equal(fired, 1, "the first connect");
+
+        socket.open();
+        assert.equal(fired, 2, "and again when the transport reconnects");
+    });
+});
+
+test("an observer registered while already open still runs on a later reconnect", () => {
+    withFakeSocket(() => {
+        const {ws, socket} = newHandler();
+        socket.open();
+
+        let fired = 0;
+        ws.onOpen(() => {fired++});
+        assert.equal(fired, 1, "immediately, because the transport is already up");
+
+        socket.open();
+        assert.equal(fired, 2, "and again on the reconnect — it was not a one-shot");
+    });
+});
+
+test("unsubscribing after an open stops the observer firing on a reconnect", () => {
+    withFakeSocket(() => {
+        const {ws, socket} = newHandler();
+        socket.open();
+
+        let fired = 0;
+        const off = ws.onOpen(() => {fired++});
+        assert.equal(fired, 1);
+
+        off();
+        socket.open();
+        assert.equal(fired, 1, "a provider that unmounted must not act on a later reconnect");
+    });
+});
+
+test("an observer that throws when registered late does not stop the next one", () => {
+    withFakeSocket(() => {
+        const {ws, socket} = newHandler();
+        socket.open();
+
+        const warn = console.warn;
+        console.warn = () => undefined;
+        let second = 0;
+        try {
+            ws.onOpen(() => {throw new Error("boom")});
+            ws.onOpen(() => {second++});
+        } finally {
+            console.warn = warn;
+        }
+
+        assert.equal(second, 1, "the throw did not escape onOpen either");
+    });
+});
+
 // The reason onOpen exists: send() drops anything written before the
 // handshake, so a reconnect fired on mount would restore nothing.
 test("send before open is dropped, and lands once open", () => {

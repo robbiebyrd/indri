@@ -88,13 +88,17 @@ export class MessageHandler {
 
         this.transport.onOpen(() => {
             this.opened = true
-            for (const observer of this.openObservers) {
-                try {
-                    observer()
-                } catch (err) {
-                    console.warn("a socket-open observer threw", err)
-                }
+            for (const observer of [...this.openObservers]) {
+                this.notifyOpen(observer)
             }
+        })
+
+        // A transport that fails over lands on a NEW server-side connection,
+        // so "already connected" stops being true the moment the channel
+        // dies. Tracking that is what keeps onOpen's immediate-run branch
+        // honest.
+        this.transport.onClose(() => {
+            this.opened = false
         })
 
         this.transport.onMessage((data: string) => {
@@ -132,25 +136,40 @@ export class MessageHandler {
     }
 
     /**
-     * Run `observer` once the socket is open, or immediately if it already is.
+     * Run `observer` on EVERY connect: now if the transport is already up, and
+     * again each time it reconnects.
      *
      * `send` drops anything written before the handshake completes, so anything
      * that must be the FIRST thing on the wire — restoring a session, say — has
      * to wait for this rather than firing on mount.
      *
+     * It used to fire once and never subscribe a late observer at all. That is
+     * a silent logout under failover: a switch lands on a brand new
+     * server-side connection with no identity, and without re-running this the
+     * player loses their session and their game mid-play.
+     *
      * Returns an unsubscribe so a caller that unmounts first does not fire.
      */
     onOpen(observer: () => void): () => void {
-        if (this.opened) {
-            observer()
-
-            return () => undefined
-        }
-
         this.openObservers.add(observer)
+
+        if (this.opened) {
+            this.notifyOpen(observer)
+        }
 
         return () => {
             this.openObservers.delete(observer)
+        }
+    }
+
+    /** One observer, one notification, with its throw contained. */
+    private notifyOpen(observer: () => void): void {
+        try {
+            observer()
+        } catch (err) {
+            // A misbehaving observer must not cost the next one its
+            // notification, nor escape into the caller registering it.
+            console.warn("a socket-open observer threw", err)
         }
     }
 
