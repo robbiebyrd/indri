@@ -144,8 +144,20 @@ being connected.
    force a second PeerConnection or an SFU. (LiveKit may still be the right call once mesh sizing at
    4–8 participants is considered — see Research Findings — but that is a separate, scaling-driven
    decision, not a renegotiation-capability one.)
-2. Does `react-native-webrtc` work under Expo SDK 53 New Architecture with React 19? — **Step 9 answers
-   this.** If not: disable New Arch in `app.json`, or defer the client half and keep Steps 1–8.
+2. Does `react-native-webrtc` work under Expo SDK 53 New Architecture with React 19? — **PARTIALLY
+   ANSWERED; the device half is still open.** Installed `react-native-webrtc@124.0.8`,
+   `@config-plugins/react-native-webrtc@15.0.2` and `react-native-webrtc-web-shim@1.0.7`, added the
+   config plugin to `client/app.json`, and confirmed `newArchEnabled: true` is already set. `pnpm run
+   typecheck` and all 305 client tests pass, so the dependency does not break the JS build.
+   `npx expo-doctor` reports **"Untested on New Architecture: react-native-webrtc"** — React Native
+   Directory has no verdict either way, so the automated signal cannot settle this. It is an *unknown*,
+   not a known incompatibility. The remaining question is only answerable on hardware: build a custom
+   dev client (`npx expo prebuild` + `eas build --profile development`) and confirm a DataChannel
+   reaches `open` on a real iOS device, a real Android device, and web.
+   If it fails there: set `"newArchEnabled": false` in `app.json`, or defer the client half — Steps 1–8
+   ship without it.
+   (`expo-doctor` also fails its config-schema check on missing `assets/images/icon.png` and
+   `adaptive-icon.png`. Pre-existing and unrelated: `client/assets/images/` does not exist.)
 
 ### Important (P2 - Affects implementation)
 3. Chunking for keyframes over 16 KiB — needed before a real game ships, deferred to Step 7's assertion
