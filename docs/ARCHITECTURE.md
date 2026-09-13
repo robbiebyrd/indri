@@ -7,14 +7,14 @@ day-to-day commands and conventions see [../CLAUDE.md](../CLAUDE.md).
 
 ```
 browser / native client
-        │  WebSocket /ws  ·or·  GraphQL /graphql  ·or·  REST /api/<action> + SSE /events
+        │  WebSocket /ws · GraphQL /graphql · REST /api/<action> + SSE /events · WebRTC /rtc/offer
         ▼
 internal/entrypoints/http/server.go      net/http mux, timeouts, one shared OriginPolicy
                                          (allowlist + CORS), graceful shutdown
         ▼
 internal/transport/                      Transport interface: ws (melody), graphql (gqlgen),
-                                         sse, rest — aggregated by transport.Multi.
-                                         Resolves the session, then:
+                                         sse, rest, webrtc (pion) — aggregated by
+                                         transport.Multi. Resolves the session, then:
         ▼
 internal/handlers/router/                DispatchMessage (WS) / Dispatch (GraphQL): decode, run
                                          "received" → <action> → "processed"; recover() per handler
@@ -34,7 +34,7 @@ internal/repo/*                          MongoDB stores
         │                   ▼
         │       internal/services/boot/monitor.go    Subscribe, fan out per game
         │                   ▼
-        └────── internal/services/broadcast/         Transport.BroadcastFilter → WS, GraphQL, SSE
+        └────── internal/services/broadcast/         BroadcastFilter → WS, GraphQL, SSE, WebRTC
 ```
 
 Note the delta path is driven by the **application**, not by MongoDB. Because the server is the sole
@@ -91,7 +91,8 @@ streams behave identically rather than approximately:
 | `graphql` | `/graphql` | gqlgen. Typed mutations → `router.Dispatch` (auth from the `Authorization` header); a `gameUpdates` subscription (graphql-transport-ws, auth from `connection_init`) whose push conn is a channel-backed `Conn` fed by the existing broadcast. Dynamic data uses a `JSON` scalar (`json.RawMessage`). |
 | `sse` | `/events` | Server-Sent Events, push-only. Authenticated at the handshake from `Authorization` or a `token` query parameter — the browser `EventSource` API cannot set headers. Clears the server's `WriteTimeout` per stream (unlike a WebSocket upgrade, SSE never hijacks the connection), emits a `:ping` comment while idle, and frames each delta as `data:`. |
 | `rest` | `/api/<action>` | The inbound half for SSE clients: one POST route per action, arguments validated then dispatched to `router.Dispatch` (auth from the `Authorization` header). Holds no connections — its `Registry` stays empty, so it contributes routes and nothing to fan-out. |
-| `Multi` | — | Aggregates the above so `broadcast` fans out to all of them; `Conns` are unioned. Adding a protocol (WebRTC, WebTransport) means a new adapter, nothing above the interface. |
+| `webrtc` | `/rtc/offer` + a DataChannel | pion. Bidirectional and message-oriented, so it implements `Handle` in full and is shaped like `ws`, not like the push-only adapters — the existing dispatch path drives it unchanged. One HTTP round trip performs non-trickle signalling; the `game` DataChannel becomes a `Conn`, `signal` is reserved for renegotiation and never reaches the router. Signalling is optionally authenticated, so a peer may start anonymous and bind its session on `login`. A global peer cap and a pending TTL bound what an unauthenticated caller can allocate. |
+| `Multi` | — | Aggregates the above so `broadcast` fans out to all of them; `Conns` are unioned. Adding a protocol (WebTransport, …) means a new adapter, nothing above the interface. |
 
 ### `internal/entrypoints`
 

@@ -1,6 +1,6 @@
 # Indri client protocol
 
-The same actions are reachable over three transports, which run side by side (see
+The same actions are reachable over four transports, which run side by side (see
 [ARCHITECTURE.md](ARCHITECTURE.md#transports) — the `transport.Transport` abstraction):
 
 | Transport | Client → server | Server → client |
@@ -8,15 +8,20 @@ The same actions are reachable over three transports, which run side by side (se
 | **WebSocket** | `ws://<host>:<port>/ws` — one JSON message per action | the same socket |
 | **GraphQL** | `POST /graphql` typed mutations | `gameUpdates` subscription (graphql-transport-ws) |
 | **REST + SSE** | `POST /api/<action>` JSON | `GET /events` event stream |
+| **WebRTC** | `game` DataChannel — one JSON message per action | the same DataChannel |
 
-The default address is `localhost:5002`. All three drive the same connection-independent action logic
+The default address is `localhost:5002`. All four drive the same connection-independent action logic
 (`router.Dispatch`); only the wire framing and auth mechanism differ. The bulk of this document
 describes the WebSocket message shapes; every action also exists as a GraphQL mutation and a REST route
-with the same semantics.
+with the same semantics, and WebRTC carries the WebSocket shapes verbatim.
 
 The REST and SSE halves are two sides of one transport pair: SSE is push-only (it has no inbound
 channel), so an SSE client sends its actions over REST — or over GraphQL mutations, which work equally
 well. See [REST and SSE](#rest-and-sse) below.
+
+WebRTC is the odd one out in a useful way: a DataChannel is bidirectional and message-oriented, so it
+carries exactly the WebSocket message shapes in both directions and needs no separate inbound surface.
+See [WebRTC](#webrtc) below.
 
 Every WebSocket message is a JSON object. Client→server messages **must** carry a string `action` field;
 the router uses it to pick handlers and removes it from the payload before the handler sees it. REST and
@@ -449,3 +454,80 @@ oldest are dropped, and the client recovers with `POST /api/refresh`.
 
 Open the stream before or immediately after joining. Deltas broadcast while no stream is open are not
 replayed — recover with `refresh`.
+
+---
+
+## WebRTC
+
+`internal/transport/webrtc` carries the protocol over a WebRTC DataChannel. Unlike SSE it is
+bidirectional, so it is shaped like the WebSocket transport rather than the push-only ones: the same
+JSON messages travel in both directions, with the same `action` field, and the same server → client
+keyframes and deltas come back. Nothing in [Client → server](#client--server) or
+[Server → client](#server--client) changes.
+
+It shares the broadcast pipeline with the other three, so clients on all four transports in the same
+game receive identical deltas.
+
+### Connecting
+
+Signalling is one HTTP round trip. The server answers **non-trickle** — a single complete SDP with its
+ICE candidates already gathered — and there is no channel for streaming candidates afterwards, so the
+client must finish gathering before it posts:
+
+```
+POST /rtc/offer
+{ "type": "offer", "sdp": "<complete SDP, candidates gathered>" }
+
+200 OK
+{ "type": "answer", "sdp": "<complete SDP, candidates gathered>" }
+```
+
+Create both DataChannels **before** the offer, so they are negotiated in it:
+
+| Label | Purpose |
+|---|---|
+| `game` | client actions and server keyframes/deltas — reliable and ordered |
+| `signal` | renegotiation only; never reaches the action router |
+
+`game` must be created with no `RTCDataChannelInit`. Reliable and ordered is the DataChannel default,
+and that is exactly what makes it match Indri's delta-delivery contract — an unreliable channel would
+silently weaken it.
+
+### Auth
+
+`Authorization: Bearer <token>` on the signalling POST binds the session at handshake, as SSE does.
+
+It is **optional**. With no token the connection is anonymous and carries no session key, and a
+`login` or `reconnect` sent over the `game` DataChannel binds one through the ordinary dispatch path —
+exactly as it does over WebSocket. This is what lets WebRTC stand alone: a client can register, log in
+and play without any other transport ever being open.
+
+### Limits
+
+Anonymous signalling means an unauthenticated caller can allocate PeerConnections in a loop, so two
+limits are enforced, both configurable (`INDRI_RTC_MAX_PEERS`, `INDRI_RTC_PENDING_TTL`):
+
+- a global peer cap — once reached, `POST /rtc/offer` returns **503** without allocating anything
+- a pending TTL — a peer that never reaches `connected` is closed and dropped
+
+Payloads above **16 KiB** are logged and dropped rather than sent. That is the practical cross-browser
+DataChannel ceiling, not the spec's 256 KiB. Chunking is not implemented, so a keyframe larger than
+that will not arrive — recover with `refresh`.
+
+A kicked player's DataChannel stops carrying traffic in both directions immediately, but the underlying
+PeerConnection is reclaimed only when it fails or its TTL expires.
+
+### Deployment
+
+`INDRI_RTC_UDP_PORT` (default 8443) is the single UDP port every peer shares. It must be reachable, and
+it must not be remapped: the ICE mux advertises the port it binds verbatim in its candidates, so a
+container mapping like `9000:8443` advertises an address nothing can reach. `docker compose --profile
+server up -d` publishes it correctly.
+
+Behind a NAT, set `INDRI_RTC_NAT_1TO1_IPS` to the externally routable address, or ICE gathering
+advertises a private one. A misconfiguration here fails *silently at the HTTP layer*: the signalling
+POST returns a perfectly normal 200 and the DataChannel simply never opens.
+
+**TURN is required in production even though no media is involved.** NAT traversal applies to a
+DataChannel exactly as it does to audio or video, and a meaningful share of consumer connections cannot
+be established without a relay. `INDRI_RTC_ICE_SERVERS` configures it.

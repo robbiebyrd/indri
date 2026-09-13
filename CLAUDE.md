@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Indri is a Go backend for real-time, multiplayer, browser/mobile party games. Clients talk to it over a
 swappable transport — WebSocket (`/ws`, JSON messages routed by an `action` field), GraphQL
-(`/graphql`, typed mutations + a `gameUpdates` subscription), or REST+SSE (`/api/<action>` posts +
-a `/events` stream) — behind the `internal/transport` interface. Game state lives in MongoDB; each write computes its own delta in application code and
+(`/graphql`, typed mutations + a `gameUpdates` subscription), REST+SSE (`/api/<action>` posts +
+a `/events` stream), or WebRTC (`/rtc/offer` signalling + a DataChannel) — behind the
+`internal/transport` interface. Game state lives in MongoDB; each write computes its own delta in application code and
 publishes it on an event bus, which broadcasts it to everyone in that game. `client/` is a companion
 Expo/React Native reference client.
 
@@ -95,7 +96,17 @@ than reimplement:
   `internal/entrypoints/http` so every route agrees.
 
 SSE is push-only (no inbound channel), so SSE clients send actions over `rest` or GraphQL mutations.
-`rest` holds no connections: its `Registry` stays empty and it contributes routes only. Because it
+`rest` holds no connections: its `Registry` stays empty and it contributes routes only.
+
+**`webrtc` is bidirectional and needs no new inbound plumbing.** A DataChannel is message-oriented, so
+the adapter implements `Handle` in full and is shaped like `ws`: pipe `OnMessage` into
+`Handlers.Message` and `boot.handleClientMessage` drives login, kick and logout unchanged. The only
+genuinely new part is signalling, which is transport-owned (`POST /rtc/offer`) rather than an action —
+action handlers only receive `req.Session`, never the conn, which would have forced every peer to be
+keyed by session and required logging in over another transport first. Because signalling is therefore
+optionally authenticated, an unauthenticated caller can allocate PeerConnections: the global peer cap
+and pending TTL are load-bearing, not polish. Two channel labels — `game` reaches the router, `signal`
+never does. Because it
 duplicates the action surface, `TestRestRoutesMatchRegisteredActions` fails if a registered action has
 no `/api` route or vice versa — an action added to the router and the mutations but not to
 `internal/transport/rest/routes.go` is unreachable for SSE clients.
