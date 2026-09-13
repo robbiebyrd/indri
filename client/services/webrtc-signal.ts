@@ -80,9 +80,111 @@ export function signalUrl(wsUrl: string): string {
     return u.toString()
 }
 
+// A chunk frame's first byte. internal/transport/webrtc/conn.go's
+// sendChunked prefixes every chunk with this exact byte, chosen because a
+// JSON text's first non-whitespace byte is always '{' -- every game message
+// this transport ever carries is JSON, so a NUL byte can never legitimately
+// open one. That is what lets accept() below tell a chunk from an ordinary
+// message with a single byte read, with no ambiguity and no need to parse
+// the payload to find out.
+const CHUNK_MARKER = 0
+
+// The second byte of a chunk frame: whether more chunks follow. There is no
+// sequence number -- see ChunkReassembler's comment for why one in-flight
+// sequence per connection is all this ever needs to track.
+const CHUNK_FLAG_FINAL = 1
+const CHUNK_HEADER_BYTES = 2
+
+// Bounds a sequence that never sends its final chunk -- a bug on the server,
+// or a corrupted/hostile stream -- so it cannot hold this buffer forever on
+// a connection that stays open. Comfortably above any real keyframe; a
+// caller building a reassembler for a real connection should leave this at
+// its default, tests use a smaller bound to stay fast and deterministic.
+const DEFAULT_MAX_REASSEMBLY_BYTES = 64 * 1024 * 1024
+
+/**
+ * Reassembles a chunked DataChannel payload (internal/transport/webrtc/conn.go's
+ * sendChunked) back into the single message it was split from.
+ *
+ * One instance is owned per connection (WebRTCTransport creates a fresh one
+ * in connect() and drops the reference in close()), which is what keeps a
+ * connection closing mid-sequence from leaking its partial buffer: once the
+ * transport lets go of the reassembler, nothing else in this module holds a
+ * reference to it, and there is no static/module-level table keyed by
+ * connection or peer id for a stale sequence to survive in.
+ *
+ * A chunked sequence can never interleave with another message on the same
+ * connection: sendChunked's Go-side comment explains why the server never
+ * writes anything else to the wire until every chunk of one sequence has
+ * gone out. That is what lets this reassembler track exactly one in-flight
+ * sequence with no id to disambiguate it from another.
+ *
+ * Chunks also carry no sequence number: reassembly relies on the "game"
+ * DataChannel being reliable and ordered, which is its default (created with
+ * no RTCDataChannelInit in WebRTCTransport.connect). If that channel is ever
+ * made unreliable or unordered, this breaks.
+ */
+export class ChunkReassembler {
+    private readonly maxBytes: number
+    private chunks: Uint8Array[] = []
+    private bufferedBytes = 0
+
+    constructor(maxBytes: number = DEFAULT_MAX_REASSEMBLY_BYTES) {
+        this.maxBytes = maxBytes
+    }
+
+    /**
+     * Feeds one raw DataChannel payload into the reassembler. Returns the
+     * complete message's bytes once its final chunk arrives, the bytes
+     * unchanged if data was never chunked at all (criterion 4), or
+     * undefined while a sequence is still in progress.
+     */
+    accept(data: Uint8Array): Uint8Array | undefined {
+        if (data.length === 0 || data[0] !== CHUNK_MARKER) {
+            return data
+        }
+
+        const final = data[1] === CHUNK_FLAG_FINAL
+        const payload = data.subarray(CHUNK_HEADER_BYTES)
+
+        this.chunks.push(payload)
+        this.bufferedBytes += payload.length
+
+        if (this.bufferedBytes > this.maxBytes) {
+            // A sequence that never completes must not hold this buffer
+            // forever even on a connection that stays open -- reset before
+            // throwing so the next message (chunked or not) starts clean.
+            this.reset()
+            throw new Error(`webrtc: chunked message exceeded ${this.maxBytes} bytes without a final chunk`)
+        }
+
+        if (!final) {
+            return undefined
+        }
+
+        const complete = new Uint8Array(this.bufferedBytes)
+        let offset = 0
+        for (const chunk of this.chunks) {
+            complete.set(chunk, offset)
+            offset += chunk.length
+        }
+
+        this.reset()
+
+        return complete
+    }
+
+    private reset(): void {
+        this.chunks = []
+        this.bufferedBytes = 0
+    }
+}
+
 /**
  * Normalises a DataChannel message payload to a string, which is what
- * ClientTransport.onMessage hands its consumer.
+ * ClientTransport.onMessage hands its consumer, reassembling chunk sequences
+ * along the way (criterion 5: chunk normalisation lives in this single place
+ * binary payloads are already normalised, not bolted on beside it).
  *
  * This is a REAL cross-platform trap, not boilerplate: react-native-webrtc
  * bridges binary DataChannel payloads across the JS bridge as base64, while
@@ -93,13 +195,26 @@ export function signalUrl(wsUrl: string): string {
  * its base64 wire format into an ArrayBuffer before dispatching the event —
  * so this one function is the single place that turns whichever of the two
  * shapes arrives into the string form every consumer downstream expects.
+ *
+ * A string payload passes straight through without ever touching
+ * reassembler: the Go transport's rtcConn always writes with Send([]byte),
+ * never SendText, so chunk framing is only ever binary -- a string can never
+ * carry it.
+ *
+ * Returns undefined while reassembler is still buffering a chunk sequence;
+ * the caller must not treat that as a message to hand upward.
  */
-export function normaliseMessage(data: string | ArrayBuffer): string {
+export function normaliseMessage(data: string | ArrayBuffer, reassembler: ChunkReassembler): string | undefined {
     if (typeof data === "string") {
         return data
     }
 
-    return new TextDecoder().decode(data)
+    const complete = reassembler.accept(new Uint8Array(data))
+    if (!complete) {
+        return undefined
+    }
+
+    return new TextDecoder().decode(complete)
 }
 
 /**

@@ -526,7 +526,7 @@ func newTestPeerConnection(t *testing.T) *pion.PeerConnection {
 // conn_test.go), so teardown tests can assert the conn was actually closed
 // without a real DataChannel.
 func newTestPeerRTCConn() *rtcConn {
-	return newConn("session-1", newFakeSink())
+	return newConn("session-1", newFakeSink(), 0)
 }
 
 // assertConnClosed fails the test unless conn's drain goroutine has stopped,

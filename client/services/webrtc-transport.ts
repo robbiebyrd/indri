@@ -19,7 +19,7 @@
 // webrtc-transport.node-test.ts run at all.
 import {RTCPeerConnection} from "react-native-webrtc-web-shim"
 
-import {buildOfferSignal, normaliseMessage, parseSignalFromJson, signalUrl, waitForIceGatheringComplete} from "./webrtc-signal.ts"
+import {ChunkReassembler, buildOfferSignal, normaliseMessage, parseSignalFromJson, signalUrl, waitForIceGatheringComplete} from "./webrtc-signal.ts"
 
 import type {ClientTransport} from "./transport.ts"
 
@@ -32,10 +32,16 @@ const SIGNAL_CHANNEL_LABEL = "signal"
 export class WebRTCTransport implements ClientTransport {
     private pc?: RTCPeerConnection = undefined
     private game?: RTCDataChannel = undefined
+    // One reassembler per connection: a fresh one every connect(), and
+    // dropped in close() so a connection that closes mid chunk-sequence
+    // cannot hold its partial buffer anywhere (see ChunkReassembler's
+    // comment in webrtc-signal.ts).
+    private reassembler?: ChunkReassembler = undefined
 
     connect(url: string): void {
         const pc = new RTCPeerConnection()
         this.pc = pc
+        this.reassembler = new ChunkReassembler()
 
         // "game" carries every action to/from the server, and is left at the
         // DataChannel default — reliable, ordered (no maxRetransmits or
@@ -112,7 +118,17 @@ export class WebRTCTransport implements ClientTransport {
         if (!this.game) {
             return
         }
-        this.game.onmessage = (e: MessageEvent) => handler(normaliseMessage(e.data))
+        this.game.onmessage = (e: MessageEvent) => {
+            if (!this.reassembler) {
+                return
+            }
+            const message = normaliseMessage(e.data, this.reassembler)
+            // undefined means a chunk sequence is still in progress: nothing
+            // to hand upward yet (criterion 5).
+            if (message !== undefined) {
+                handler(message)
+            }
+        }
     }
 
     onOpen(handler: () => void): void {
@@ -123,6 +139,10 @@ export class WebRTCTransport implements ClientTransport {
     }
 
     close(): void {
+        // Drop the reassembler before anything else: criterion 3, a
+        // connection closing mid-sequence must not hold its partial buffer.
+        this.reassembler = undefined
+
         if (this.game) {
             // Drop handlers before closing, matching WebSocketTransport: a
             // teardown must not fire onclose logic (e.g. a future reconnect)

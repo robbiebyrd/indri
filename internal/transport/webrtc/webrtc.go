@@ -274,7 +274,7 @@ func (t *Transport) schedulePendingTTL(p *peer) {
 // login bind a session with no new action code; closing deregisters it and
 // fires Handlers.Disconnect.
 func (t *Transport) attachGame(p *peer, sessionID string, dc *pion.DataChannel) {
-	conn := newConn(sessionID, dc)
+	conn := newConn(sessionID, dc, negotiatedMaxMessageSize(p.pc))
 	p.setConn(conn)
 
 	// Make it an invariant that closing this conn tears down its peer, so
@@ -314,6 +314,18 @@ func (t *Transport) attachGame(p *peer, sessionID string, dc *pion.DataChannel) 
 			t.handlers.Message(conn, msg.Data)
 		}
 	})
+}
+
+// negotiatedMaxMessageSize reads the SCTP max-message-size pion negotiated
+// for pc's association (criterion 2) -- the same negotiation the browser's
+// own RTCSctpTransport.maxMessageSize reports for the same peer. SCTP()
+// never returns nil for a PeerConnection built through New/newAPI, and
+// GetCapabilities is itself nil-safe on its receiver, but the zero value this
+// returns before any association exists is exactly newConn's signal to fall
+// back to fallbackMaxMessageSize -- so no extra nil check earns its keep
+// here.
+func negotiatedMaxMessageSize(pc *pion.PeerConnection) uint32 {
+	return pc.SCTP().GetCapabilities().MaxMessageSize
 }
 
 // attachSignal wires the "signal" DataChannel to p: renegotiate (story 041,

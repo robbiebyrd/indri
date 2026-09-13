@@ -2,14 +2,11 @@ package webrtc
 
 import (
 	"bytes"
-	"log"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/robbiebyrd/indri/internal/transport"
 )
@@ -157,7 +154,7 @@ func waitForSentCount(t *testing.T, sink *fakeSink, n int) {
 // Criterion 1: the conn embeds transport.BufferedConn so it inherits the
 // shared drop-oldest queue. This only compiles if the embedding is real.
 func TestRTCConn_EmbedsBufferedConn(t *testing.T) {
-	conn := newConn("session-1", newFakeSink())
+	conn := newConn("session-1", newFakeSink(), 0)
 	defer conn.Close()
 
 	var _ *transport.BufferedConn[[]byte] = conn.BufferedConn
@@ -168,7 +165,7 @@ func TestRTCConn_EmbedsBufferedConn(t *testing.T) {
 // Criterion 2: writes reach the sink in order.
 func TestRTCConn_WritesReachSinkInOrder(t *testing.T) {
 	sink := newFakeSink()
-	conn := newConn("session-1", sink)
+	conn := newConn("session-1", sink, 0)
 	defer conn.Close()
 
 	want := [][]byte{[]byte("one"), []byte("two"), []byte("three")}
@@ -203,7 +200,7 @@ func TestRTCConn_SeventeenthMessageDropped(t *testing.T) {
 	var unblockOnce sync.Once
 	unblock := func() { unblockOnce.Do(func() { close(block) }) }
 
-	conn := newConn("session-1", sink)
+	conn := newConn("session-1", sink, 0)
 	defer func() {
 		unblock()
 		conn.Close()
@@ -260,7 +257,7 @@ func TestRTCConn_SeventeenthMessageDropped(t *testing.T) {
 // Criterion 4: Close stops the drain goroutine, proven with a done channel
 // rather than assumed.
 func TestRTCConn_CloseStopsDrainGoroutine(t *testing.T) {
-	conn := newConn("session-1", newFakeSink())
+	conn := newConn("session-1", newFakeSink(), 0)
 
 	select {
 	case <-conn.stopped:
@@ -281,7 +278,7 @@ func TestRTCConn_CloseStopsDrainGoroutine(t *testing.T) {
 
 // Criterion 5: calling Close twice is safe.
 func TestRTCConn_DoubleCloseIsSafe(t *testing.T) {
-	conn := newConn("session-1", newFakeSink())
+	conn := newConn("session-1", newFakeSink(), 0)
 
 	if err := conn.Close(); err != nil {
 		t.Fatalf("first Close returned error: %v", err)
@@ -299,7 +296,7 @@ func TestRTCConn_HighBufferedAmountParksDrain(t *testing.T) {
 	sink := newFakeSink()
 	sink.setBufferedAmount(backpressureThreshold + 1)
 
-	conn := newConn("session-1", sink)
+	conn := newConn("session-1", sink, 0)
 	defer conn.Close()
 
 	if err := conn.Write([]byte("blocked")); err != nil {
@@ -331,47 +328,256 @@ func TestRTCConn_HighBufferedAmountParksDrain(t *testing.T) {
 	}
 }
 
-// Criterion 7 (story 040-9cec): a payload over the practical cross-browser
-// DataChannel ceiling is reported and logged, never silently truncated (which
-// pion would otherwise hand to the sink, risking corruption) and never
-// silently dropped with no trace (which would leave a player's client simply
-// frozen with nothing anywhere to explain why).
-func TestRTCConn_OversizedPayloadReportedNotSent(t *testing.T) {
-	var logBuf bytes.Buffer
+// reassembleChunks strips each chunk's 2-byte header and concatenates the
+// raw payload bytes -- exactly what the client's ChunkReassembler
+// (client/services/webrtc-signal.ts) does. It is deliberately byte-level,
+// never decoding a chunk to a string before the last one arrives: doing that
+// instead would corrupt any multi-byte UTF-8 rune split across a chunk
+// boundary, which is exactly what TestRTCConn_OversizedPayloadIsChunked
+// below is designed to catch.
+func reassembleChunks(t *testing.T, frames [][]byte) []byte {
+	t.Helper()
 
-	log.SetOutput(&logBuf)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	var out []byte
+
+	for i, frame := range frames {
+		if len(frame) < chunkHeaderSize {
+			t.Fatalf("frame %d has length %d, shorter than the %d byte chunk header", i, len(frame), chunkHeaderSize)
+		}
+
+		if frame[0] != chunkMarker {
+			t.Fatalf("frame %d marker byte = %#x, want chunkMarker %#x", i, frame[0], chunkMarker)
+		}
+
+		final := frame[1] == chunkFlagFinal
+		if !final && i == len(frames)-1 {
+			t.Fatalf("last frame (%d) was not flagged final", i)
+		}
+		if final && i != len(frames)-1 {
+			t.Fatalf("frame %d flagged final but %d more frames follow", i, len(frames)-1-i)
+		}
+
+		out = append(out, frame[chunkHeaderSize:]...)
+	}
+
+	return out
+}
+
+// Criterion 1 (load-bearing on the Go side too): an over-ceiling payload is
+// split into chunkMarker-framed pieces that reassemble, byte for byte, into
+// the original payload -- including a multi-byte UTF-8 rune ('€', 3 bytes)
+// deliberately placed to straddle a chunk boundary, so a reassembly that
+// decoded each chunk to a string before concatenating (instead of joining
+// raw bytes first) would be caught corrupting it.
+func TestRTCConn_OversizedPayloadIsChunked(t *testing.T) {
+	const ceiling = 10 // chunkHeaderSize(2) + 8 payload bytes per chunk
 
 	sink := newFakeSink()
-	conn := newConn("session-1", sink)
+	conn := newConn("session-1", sink, ceiling)
 	defer conn.Close()
 
-	oversized := make([]byte, maxMessageSize+1)
+	// Bytes 0-6 are ASCII filler (7 bytes); "€" is the 3-byte UTF-8 sequence
+	// E2 82 AC, landing at offsets 7-9 -- one byte in the first 8-byte chunk,
+	// two in the second. More filler follows to force a third chunk.
+	payload := append([]byte("1234567"), []byte{0xE2, 0x82, 0xAC}...)
+	payload = append(payload, []byte("more-tail-bytes-forcing-a-third-chunk")...)
 
+	if !utf8.Valid(payload) {
+		t.Fatal("test payload itself is not valid UTF-8 -- fix the test")
+	}
+
+	if err := conn.Write(payload); err != nil {
+		t.Fatalf("Write(payload) returned error: %v", err)
+	}
+
+	wantChunks := (len(payload) + ceiling - chunkHeaderSize - 1) / (ceiling - chunkHeaderSize)
+	waitForSentCount(t, sink, wantChunks)
+
+	got := sink.sentMessages()
+	if len(got) != wantChunks {
+		t.Fatalf("sink received %d frames, want %d", len(got), wantChunks)
+	}
+
+	for i, frame := range got {
+		if len(frame) > ceiling {
+			t.Fatalf("frame %d is %d bytes, exceeds the %d byte ceiling", i, len(frame), ceiling)
+		}
+	}
+
+	reassembled := reassembleChunks(t, got)
+	if !bytes.Equal(reassembled, payload) {
+		t.Fatalf("reassembled payload = %q, want %q (identical bytes)", reassembled, payload)
+	}
+}
+
+// Criterion 4: a payload at or under the ceiling is written verbatim, with
+// no chunk header and in exactly one sink.Send call.
+func TestRTCConn_UnderCeilingPayloadSentUnchanged(t *testing.T) {
+	const ceiling = 10
+
+	sink := newFakeSink()
+	conn := newConn("session-1", sink, ceiling)
+	defer conn.Close()
+
+	// Exactly at the ceiling: still unchanged, proving the boundary itself
+	// isn't chunked.
+	payload := []byte("0123456789")
+	if len(payload) != ceiling {
+		t.Fatalf("test payload is %d bytes, want exactly %d", len(payload), ceiling)
+	}
+
+	if err := conn.Write(payload); err != nil {
+		t.Fatalf("Write(payload) returned error: %v", err)
+	}
+
+	waitForSentCount(t, sink, 1)
+	time.Sleep(50 * time.Millisecond)
+
+	got := sink.sentMessages()
+	if len(got) != 1 {
+		t.Fatalf("sink received %d messages, want exactly 1 (no chunking at or under the ceiling)", len(got))
+	}
+
+	if !bytes.Equal(got[0], payload) {
+		t.Fatalf("sink received %q, want %q unchanged (no framing overhead)", got[0], payload)
+	}
+}
+
+// Criterion 2: a nonzero negotiated max message size overrides the
+// fallback -- a payload that would fit under fallbackMaxMessageSize is still
+// chunked once it exceeds the smaller negotiated ceiling.
+func TestRTCConn_NegotiatedMaxMessageSizeOverridesFallback(t *testing.T) {
+	const negotiated = 32
+
+	sink := newFakeSink()
+	conn := newConn("session-1", sink, negotiated)
+	defer conn.Close()
+
+	if conn.maxMessageSize != negotiated {
+		t.Fatalf("maxMessageSize = %d, want the negotiated value %d", conn.maxMessageSize, negotiated)
+	}
+
+	payload := bytes.Repeat([]byte("a"), negotiated+1)
+	if err := conn.Write(payload); err != nil {
+		t.Fatalf("Write(payload) returned error: %v", err)
+	}
+
+	// Well under fallbackMaxMessageSize, so this only chunks at all if the
+	// negotiated ceiling -- not the fallback -- is what's in effect.
+	waitForSentCount(t, sink, 2)
+
+	got := sink.sentMessages()
+	if len(got) != 2 {
+		t.Fatalf("sink received %d frames, want 2", len(got))
+	}
+
+	if !bytes.Equal(reassembleChunks(t, got), payload) {
+		t.Fatalf("reassembled payload does not match original")
+	}
+}
+
+// Criterion 2 (fallback path): a zero negotiated size (no SCTP association
+// available) falls back to fallbackMaxMessageSize, matching the pre-chunking
+// ceiling exactly -- a payload one byte over it still chunks, one at it
+// still doesn't.
+func TestRTCConn_ZeroNegotiatedSizeFallsBackToDefault(t *testing.T) {
+	sink := newFakeSink()
+	conn := newConn("session-1", sink, 0)
+	defer conn.Close()
+
+	if conn.maxMessageSize != fallbackMaxMessageSize {
+		t.Fatalf("maxMessageSize = %d, want fallbackMaxMessageSize %d", conn.maxMessageSize, fallbackMaxMessageSize)
+	}
+
+	oversized := bytes.Repeat([]byte("b"), fallbackMaxMessageSize+1)
 	if err := conn.Write(oversized); err != nil {
 		t.Fatalf("Write(oversized) returned error: %v", err)
 	}
 
-	// Follow the oversized payload with a normal one so we can prove the
-	// drain goroutine kept going instead of stalling on it.
-	if err := conn.Write([]byte("ok")); err != nil {
-		t.Fatalf("Write(ok) returned error: %v", err)
-	}
-
-	waitForSentCount(t, sink, 1)
-
-	// Give the drain goroutine a moment to see if it (incorrectly) also
-	// forwards the oversized payload.
-	time.Sleep(50 * time.Millisecond)
+	waitForSentCount(t, sink, 2)
 
 	got := sink.sentMessages()
-	if len(got) != 1 || string(got[0]) != "ok" {
-		t.Fatalf("sink received %q, want exactly one message %q -- the oversized payload must never reach the sink", got, "ok")
+	if len(got) != 2 {
+		t.Fatalf("sink received %d frames, want 2", len(got))
 	}
 
-	logged := logBuf.String()
-	if !strings.Contains(logged, strconv.Itoa(len(oversized))) || !strings.Contains(logged, strconv.Itoa(maxMessageSize)) {
-		t.Errorf("log output = %q, want it to report both the oversized payload's size (%d) and the ceiling (%d)",
-			logged, len(oversized), maxMessageSize)
+	for i, frame := range got {
+		if len(frame) > fallbackMaxMessageSize {
+			t.Fatalf("frame %d is %d bytes, exceeds fallbackMaxMessageSize %d", i, len(frame), fallbackMaxMessageSize)
+		}
+	}
+
+	if !bytes.Equal(reassembleChunks(t, got), oversized) {
+		t.Fatalf("reassembled payload does not match original")
+	}
+}
+
+// A negotiated size too small to carry even one payload byte per chunk
+// (at or below chunkHeaderSize) must not be trusted -- it would otherwise
+// make sendChunked loop forever. newConn falls back to
+// fallbackMaxMessageSize instead.
+func TestRTCConn_TooSmallNegotiatedSizeFallsBackToDefault(t *testing.T) {
+	conn := newConn("session-1", newFakeSink(), chunkHeaderSize)
+	defer conn.Close()
+
+	if conn.maxMessageSize != fallbackMaxMessageSize {
+		t.Fatalf("maxMessageSize = %d, want fallbackMaxMessageSize %d for a negotiated size <= chunkHeaderSize", conn.maxMessageSize, fallbackMaxMessageSize)
+	}
+}
+
+// Criterion 3 (Go side): closing the conn mid-chunk-sequence stops the drain
+// goroutine instead of hanging or panicking, and does not push the rest of
+// the in-flight sequence to the sink. Close cannot interrupt a Send already
+// in flight (nothing short of the sink itself returning would), so this
+// blocks the first chunk's Send, closes, and only then unblocks it -- proving
+// the SECOND chunk, which sendChunked's done-check must refuse to start, is
+// the one that never reaches the sink. The client-side counterpart -- proving
+// the reassembly buffer itself is dropped, not just that sending stops --
+// lives in webrtc-signal.node-test.ts.
+func TestRTCConn_CloseMidChunkSequenceStopsCleanly(t *testing.T) {
+	const ceiling = 10
+
+	sink := newFakeSink()
+	block := make(chan struct{})
+	sink.setSendBlock(block)
+
+	conn := newConn("session-1", sink, ceiling)
+
+	payload := bytes.Repeat([]byte("c"), (ceiling-chunkHeaderSize)*5) // 5 chunks
+
+	writeErr := make(chan error, 1)
+	go func() { writeErr <- conn.Write(payload) }()
+
+	select {
+	case <-sink.sendStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the first chunk's Send to start")
+	}
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	// Only now unblock the first chunk's already-in-flight Send: Close
+	// cannot interrupt it, it can only stop the chunk after it from ever
+	// starting.
+	close(block)
+
+	select {
+	case <-conn.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the drain goroutine to stop after Close")
+	}
+
+	if err := <-writeErr; err != nil {
+		t.Fatalf("Write returned error: %v", err)
+	}
+
+	// Give the drain goroutine a moment to see if it (incorrectly) sends
+	// more than the one chunk that was already in flight when Close ran.
+	time.Sleep(50 * time.Millisecond)
+
+	if got := len(sink.sentMessages()); got != 1 {
+		t.Fatalf("sink received %d of 5 chunks after a mid-sequence Close, want exactly 1 (the chunk already in flight)", got)
 	}
 }
