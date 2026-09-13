@@ -23,6 +23,10 @@ WebRTC is the odd one out in a useful way: a DataChannel is bidirectional and me
 carries exactly the WebSocket message shapes in both directions and needs no separate inbound surface.
 See [WebRTC](#webrtc) below.
 
+A client is not required to choose one transport and stay on it. It may arrive on any of them and
+**switch mid-session**, because the server's session is rebound from its bearer token on whichever
+channel the client is holding. See [Transport failover](#transport-failover) below.
+
 Every WebSocket message is a JSON object. Client→server messages **must** carry a string `action` field;
 the router uses it to pick handlers and removes it from the payload before the handler sees it. REST and
 GraphQL name the action in the route or the mutation instead, so their payloads never carry it.
@@ -575,3 +579,54 @@ POST returns a perfectly normal 200 and the DataChannel simply never opens.
 **TURN is required in production even though no media is involved.** NAT traversal applies to a
 DataChannel exactly as it does to audio or video, and a meaningful share of consumer connections cannot
 be established without a relay. `INDRI_RTC_ICE_SERVERS` configures it.
+
+---
+
+## Transport failover
+
+A client may arrive on **any** transport and move to another one mid-session, without reloading and
+without the player noticing. The reference client (`client/services/failover-transport.ts`) does this
+automatically: it probes WebRTC, then WebSocket, then REST+SSE, keeps the first that comes up, and
+switches when that one dies.
+
+Nothing on the server is aware of this, and nothing needs to be. All four transports feed the same
+`router.Dispatch`, so a switch changes the pipe and nothing above it.
+
+### The resync contract
+
+**A switch lands on a brand new server-side connection with no session.** The session is per
+connection; the token is what survives. So on *every* connect — the first one included — a client that
+holds a token must send, in this order:
+
+| # | Action | Why |
+|---|---|---|
+| 1 | `reconnect` with the stored token | rebinds the session. Until this lands the connection is anonymous, and every other action is rejected as unauthenticated. |
+| 2 | `refresh` | returns a full keyframe. The new connection's delta stream starts mid-flight, and a client rebuilding state from deltas has nothing to replay them onto. |
+
+Both already exist and are documented above; failover does not add a message. Over REST the two are
+independent HTTP requests rather than an ordered pair, which is harmless — each carries its own bearer
+token and resolves its own session.
+
+A duplicate delta is safe: a client replays timestamp-ordered deltas over the last keyframe and
+discards any older than that keyframe's cutoff.
+
+### An action in flight during a switch may be lost
+
+This is **deliberate**, and it is the one thing about failover worth arguing with before changing.
+
+The server has no idempotency keys. Replaying a queued action onto the new channel would mean a
+`create` that fails because the game now exists, or a game action applied twice — a wrong board, with
+nothing in the logs to say why. A dropped action is visible to the player, who acts again; a duplicated
+one is not.
+
+So a client-side send queue may cover the window before a channel opens, but it must be **dropped, not
+replayed**, when the channel changes. The client resyncs with `refresh` instead.
+
+### Not all transports are eligible at all times
+
+REST+SSE authenticates at the SSE handshake (`GET /events?token=...`) and has no anonymous form, so it
+**cannot be a client's first channel while logged out**. WebSocket and WebRTC accept an anonymous
+connection and bind a session when `login` or `reconnect` arrives, so either can be.
+
+A client choosing a channel therefore has to re-evaluate what it is allowed to try each time it
+selects, rather than hold a fixed list.

@@ -58,6 +58,10 @@ Clients on different transports in the same game receive identical deltas. Pick 
 socket if you want one connection, REST+SSE if you would rather have plain HTTP and no socket at all,
 WebRTC if you want a peer connection you can later add audio and video to.
 
+A client need not pick once. The reference client picks automatically and **switches mid-session** when
+a channel dies, resynchronising with `reconnect` + `refresh` — see
+[Transport failover](docs/PROTOCOL.md#transport-failover).
+
 The bundled `docker-compose.yml` starts a standalone MongoDB and Redis. No replica set is needed —
 deltas are computed and published by the application, not tailed from a change stream.
 
