@@ -3,6 +3,7 @@ import {Pressable, StyleSheet, Text, View} from "react-native"
 
 import {BoardView} from "@/components/board/board-view"
 import {EditorOverlay} from "@/components/board/editor/drag-resize"
+import {DOCK_WIDTH_FRACTION, EditorDock} from "@/components/board/editor/editor-dock"
 import {useGameState} from "@/providers/game-state/use-game-state"
 import {useSocket} from "@/providers/socket/use-socket"
 import {useUserState} from "@/providers/user-state/use-user-state"
@@ -24,6 +25,9 @@ export default function Board() {
     const ws = useSocket()
 
     const [editing, setEditing] = useState(false)
+    // Selection lives here because BOTH halves of the editor need it: the
+    // frames highlight it, the dock edits it.
+    const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
 
     const layout = gameState?.data?.layout
     const sceneId = gameState?.stage?.currentScene
@@ -57,11 +61,39 @@ export default function Board() {
         )
     }
 
+    const editingDock = editing && canEdit && code !== undefined
+
     return (
         <View style={styles.screen}>
-            <BoardView layout={layout} sceneId={sceneId}/>
-            {editing && canEdit && code !== undefined && (
-                <EditorOverlay ws={ws} layout={layout} sceneId={sceneId} gameCode={code}/>
+            {/*
+              In edit mode the board gives up the dock's width rather than
+              having it float on top. An opaque pane over the canvas would hide
+              widgets that are still editable underneath, and the frame layer
+              measures its percentage boxes against the board — so a widget
+              behind the dock would still accept a drag the author cannot see.
+            */}
+            <View style={editingDock ? styles.boardEditing : styles.board}>
+                <BoardView layout={layout} sceneId={sceneId}/>
+                {editingDock && (
+                    <EditorOverlay
+                        ws={ws}
+                        layout={layout}
+                        sceneId={sceneId}
+                        gameCode={code as string}
+                        selectedId={selectedId}
+                        onSelect={setSelectedId}
+                    />
+                )}
+            </View>
+            {editingDock && (
+                <EditorDock
+                    ws={ws}
+                    layout={layout}
+                    sceneId={sceneId}
+                    gameCode={code as string}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                />
             )}
             {canEdit && (
                 <Pressable
@@ -87,6 +119,15 @@ function isHost(game: Game | undefined, userId: string | undefined): boolean {
 const styles = StyleSheet.create({
     screen: {
         flex: 1,
+        flexDirection: 'row',
+    },
+    board: {
+        flex: 1,
+    },
+    // The board's share while the dock is open. Expressed as the complement of
+    // the dock's fraction so the two cannot drift apart.
+    boardEditing: {
+        width: `${(1 - DOCK_WIDTH_FRACTION) * 100}%`,
     },
     empty: {
         alignItems: 'center',

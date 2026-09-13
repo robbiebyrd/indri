@@ -34,10 +34,8 @@ import Animated, {
 } from "react-native-reanimated"
 
 import {setPlacement} from "@/layout/edit/ops"
-import {getWidget, knownWidgetTypes} from "@/layout/registry/registry"
+import {knownWidgetTypes} from "@/layout/registry/registry"
 import {parseLayout} from "@/layout/schema/layout"
-import {ConfigPanel} from "./config-panel"
-import {Palette} from "./palette"
 import {cellSize, lineIndexes, rectToPixels, showGridLines, snapMove, snapResize} from "./snap"
 
 import type {LayoutChangeEvent} from "react-native"
@@ -71,27 +69,18 @@ export interface EditorOverlayProps {
     sceneId?: string
     /** Addresses the game the op is written to. */
     gameCode: string
+    /** Selection is owned by the route, because the dock needs it too. */
+    selectedId?: string
+    onSelect: (id: string) => void
 }
 
 /**
- * Editable frames over the current scene, plus the grid the author is snapping
- * to.
+ * What both halves of the editor need from a raw layout.
  *
- * ONLY GRID-PLACED WIDGETS GET A FRAME. An absolute widget is positioned in
- * percentages and is exempt from collision as both subject and obstacle, so
- * dragging one is a different operation with a different op payload
- * (`setAbsolutePlacement`) and different rules. Pretending it snapped to cells
- * would write a grid placement over an absolute one and silently change what
- * the author authored.
+ * Shared so the frame layer and the dock cannot disagree about which widgets
+ * exist or what the grid is. Parsing twice is cheap next to that risk.
  */
-export function EditorOverlay({ws, layout, sceneId, gameCode}: EditorOverlayProps) {
-    // The board's pixel size, which is the only thing that turns a gesture in
-    // pixels into cells. Absent until the first `onLayout`.
-    const [board, setBoard] = useState<BoardSize | undefined>(undefined)
-
-    // The selection drives both the palette's removal and the config panel.
-    const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
-
+export function useEditorScene(layout: unknown, sceneId: string | undefined, gameCode: string) {
     const parsed = useMemo(
         () => parseLayout(layout, {knownWidgetTypes: knownWidgetTypes()}).layout,
         [layout],
@@ -105,6 +94,33 @@ export function EditorOverlay({ws, layout, sceneId, gameCode}: EditorOverlayProp
     // deliberately absent — see `layout/grid/collision.ts`.
     const siblings = useMemo(() => gridSiblings(scene), [scene])
 
+    const ctx: EditContext | undefined = parsed === undefined || sceneId === undefined
+        ? undefined
+        : {gameCode, sceneId, grid: parsed.grid, siblings}
+
+    return {parsed, scene, siblings, ctx}
+}
+
+/**
+ * Editable frames over the current scene, plus the grid the author is snapping
+ * to.
+ *
+ * ONLY GRID-PLACED WIDGETS GET A FRAME. An absolute widget is positioned in
+ * percentages and is exempt from collision as both subject and obstacle, so
+ * dragging one is a different operation with a different op payload
+ * (`setAbsolutePlacement`) and different rules. Pretending it snapped to cells
+ * would write a grid placement over an absolute one and silently change what
+ * the author authored.
+ */
+export function EditorOverlay(
+    {ws, layout, sceneId, gameCode, selectedId, onSelect}: EditorOverlayProps,
+) {
+    // The board's pixel size, which is the only thing that turns a gesture in
+    // pixels into cells. Absent until the first `onLayout`.
+    const [board, setBoard] = useState<BoardSize | undefined>(undefined)
+
+    const {parsed, scene, siblings, ctx} = useEditorScene(layout, sceneId, gameCode)
+
     const onLayout = useCallback((e: LayoutChangeEvent) => {
         const {width, height} = e.nativeEvent.layout
         setBoard((prev) =>
@@ -113,21 +129,13 @@ export function EditorOverlay({ws, layout, sceneId, gameCode}: EditorOverlayProp
                 : {width, height})
     }, [])
 
-    if (parsed === undefined || scene === undefined || sceneId === undefined) return null
-
-    // EVERY id at this level, absolutes included. `siblings` omits them by
-    // design, and generating a new id from that list alone would collide with
-    // an absolutely placed widget — which the server rejects rather than
-    // replaces.
-    const widgetIds = Object.keys(scene.widgets)
-
-    const selected = selectedId === undefined ? undefined : scene.widgets[selectedId]
-    const selectedDef = selected === undefined ? undefined : getWidget(selected.type)
+    if (parsed === undefined || scene === undefined || ctx === undefined) return null
 
     const grid = parsed.grid
-    const ctx: EditContext = {gameCode, sceneId, grid, siblings}
     const cell = board === undefined ? undefined : cellSize(board, grid)
 
+    // Frames and guides only. The palette and the config panel live in the
+    // dock beside the board, not over it — see editor-dock.tsx.
     return (
         <View style={styles.overlay} onLayout={onLayout}>
             <GridGuides grid={grid}/>
@@ -136,7 +144,7 @@ export function EditorOverlay({ws, layout, sceneId, gameCode}: EditorOverlayProp
                     key={sibling.id}
                     id={sibling.id}
                     selected={sibling.id === selectedId}
-                    onSelect={setSelectedId}
+                    onSelect={onSelect}
                     rect={sibling.rect}
                     cell={cell}
                     grid={grid}
@@ -144,23 +152,6 @@ export function EditorOverlay({ws, layout, sceneId, gameCode}: EditorOverlayProp
                     ws={ws}
                 />
             ))}
-            <Palette
-                ws={ws}
-                ctx={ctx}
-                widgetIds={widgetIds}
-                selectedId={selectedId}
-                onAdd={setSelectedId}
-                onRemove={() => setSelectedId(undefined)}
-            />
-            {selected !== undefined && selectedDef !== undefined && selectedId !== undefined && (
-                <ConfigPanel
-                    def={selectedDef}
-                    widgetId={selectedId}
-                    config={selected.config ?? {}}
-                    socket={ws}
-                    ctx={ctx}
-                />
-            )}
         </View>
     )
 }
