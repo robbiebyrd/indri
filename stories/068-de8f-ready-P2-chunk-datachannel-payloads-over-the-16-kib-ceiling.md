@@ -1,13 +1,13 @@
 ---
-id: "068-de8f"
-title: "Chunk DataChannel payloads over the 16 KiB ceiling"
-status: pending
+id: 068-de8f
+title: Chunk DataChannel payloads over the 16 KiB ceiling
+status: ready
 priority: P2
 type: feature
-created: 2026-09-13T17:57:18.991Z
-updated: 2026-09-13T17:57:18.991Z
+created: "2026-09-13T17:57:18.991Z"
+updated: "2026-09-13T18:11:00.896Z"
 dependencies: []
-plan: "plans/webrtc-transport.md"
+plan: plans/webrtc-transport.md
 ---
 
 # Chunk DataChannel payloads over the 16 KiB ceiling

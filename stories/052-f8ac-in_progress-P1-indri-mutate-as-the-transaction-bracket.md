@@ -1,15 +1,16 @@
 ---
 id: 052-f8ac
 title: indri.mutate as the transaction bracket
-status: pending
+status: in_progress
 priority: P1
 type: feature
 created: "2026-09-12T01:27:37.176Z"
-updated: "2026-09-12T02:41:10.979Z"
+updated: "2026-09-13T18:11:16.598Z"
 dependencies: ["051", "067"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 7
 depends_on: ["stories/051-0e8c-pending-P2-script-handler-reachable-through-the-router.md", "stories/067-4fbf-pending-P1-game-and-lua-fidelity-with-structural-invariants-e.md"]
+started_at: "2026-09-13T18:11:16.597Z"
 ---
 
 # indri.mutate as the transaction bracket
