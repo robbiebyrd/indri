@@ -156,6 +156,23 @@ being connected.
    reaches `open` on a real iOS device, a real Android device, and web.
    If it fails there: set `"newArchEnabled": false` in `app.json`, or defer the client half — Steps 1–8
    ship without it.
+
+   **Attempted, and blocked by something else entirely.** Web is verified end to end (see above). The
+   iOS simulator leg got as far as pods and stopped on a toolchain incompatibility that has nothing to
+   do with `react-native-webrtc`: **React Native 0.79.6 vendors `fmt 11.0.2`, whose `FMT_STRING`
+   consteval path Xcode 26's clang rejects** (`call to consteval function ... is not a constant
+   expression`, `Pods/fmt/include/fmt/format-inl.h`). That breaks *any* RN 0.79 native build on Xcode 26,
+   with or without WebRTC. It is **not workaroundable from build settings**: `FMT_USE_CONSTEVAL` is set
+   by an unguarded `#if/#elif` chain in `base.h` with no `#ifndef`, so an external define loses to the
+   header. The fixes are upgrading React Native, bumping `fmt` to 11.1+, or using an older Xcode — all
+   app-wide, none belonging to this spike.
+   What the attempt *did* establish: the config plugin injects the iOS usage strings and the Android
+   permissions; pods resolve and link `react-native-webrtc 124.0.8` + `JitsiWebRTC 124.0.2`; and
+   `newArchEnabled: true` reaches `Podfile.properties.json`, so a successful build would genuinely
+   exercise the New Architecture rather than silently falling back.
+   Incidental prerequisites, in case anyone retries: the machine had only an iOS 18.6 simulator runtime
+   against a 26.5 SDK (needs `xcodebuild -downloadPlatform iOS`, ~8.5 GB), and CocoaPods refuses to run
+   while `~/.netrc` is mode 644.
    (`expo-doctor` also fails its config-schema check on missing `assets/images/icon.png` and
    `adaptive-icon.png`. Pre-existing and unrelated: `client/assets/images/` does not exist.)
 
