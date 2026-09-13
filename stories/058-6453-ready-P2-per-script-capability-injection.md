@@ -1,11 +1,11 @@
 ---
 id: 058-6453
 title: Per-script capability injection
-status: pending
+status: ready
 priority: P2
 type: feature
 created: "2026-09-12T01:28:12.573Z"
-updated: "2026-09-12T01:29:08.087Z"
+updated: "2026-09-13T18:12:46.241Z"
 dependencies: ["051"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 13
