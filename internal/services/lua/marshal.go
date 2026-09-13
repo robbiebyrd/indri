@@ -395,12 +395,13 @@ func keyFromLua(k lua.LValue) (string, error) {
 // validateKey refuses field names that are unsafe in the two systems a game
 // document passes through.
 //
-// A dot is the delta protocol's path separator: events.joinPath builds a path
-// as prefix + "." + key and SanitizeDelta splits it back on ".", so a key
-// containing a dot forges a path segment. A key named "a.privateData" would
-// produce the path "x.a.privateData", which SanitizeDelta would then redact —
-// or, in the other direction, a key could impersonate a nested node and make
-// the client apply an update to the wrong place.
+// A dot is the delta protocol's path separator. events.joinPath now escapes a
+// key before joining it, so a dotted key no longer forges a path segment on its
+// own — that hole was closed in 80d2746. The rejection stays as defence in
+// depth rather than as the only guard: it keeps a dotted key out of the
+// document in the first place, so the escaping never has to be the last line,
+// and an escaped key would in any case arrive at the client as a segment it
+// cannot match against the state it already holds.
 //
 // A dollar sign and a NUL are Mongo field-name violations; a leading dollar
 // sign additionally reads as an update operator. An empty name is rejected

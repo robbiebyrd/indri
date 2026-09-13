@@ -439,12 +439,12 @@ func TestFromLua_RejectsNestedUnrepresentableValues(t *testing.T) {
 }
 
 // TestFromLua_RejectsUnsafeKeys is the delta-path and Mongo safety boundary.
-// events.joinPath builds a delta path as prefix + "." + key and SanitizeDelta
-// splits it back on ".", so a key containing a dot forges a path segment: it can
-// impersonate a nested node, or produce a path that the privateData redaction
-// then silently swallows. A dollar sign and a NUL are Mongo field-name
-// violations, and a leading dollar sign additionally reads as an update
-// operator.
+// A dot is the delta protocol's path separator. events.joinPath escapes a key
+// before joining it as of 80d2746, so a dotted key can no longer forge a
+// segment by itself; this rejection is the layer in front of that, keeping such
+// a key out of the document at all rather than relying on the escaping to be
+// correct forever. A dollar sign and a NUL are Mongo field-name violations, and
+// a leading dollar sign additionally reads as an update operator.
 func TestFromLua_RejectsUnsafeKeys(t *testing.T) {
 	tests := []struct {
 		name string
