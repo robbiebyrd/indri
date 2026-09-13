@@ -432,23 +432,26 @@ being connected.
 
 ## Acceptance Criteria
 
-- [ ] A pion client connects over `POST /rtc/offer` and exchanges game messages on the DataChannel
-- [ ] `register`, `login`, `create`, `join` and `kick` work over WebRTC with no new action code
-- [ ] A delta broadcast reaches WebRTC, WebSocket, GraphQL and SSE clients in the same game identically
-- [ ] An authenticated signalling request binds `SessionIDKey` at handshake; an anonymous one binds on login
-- [ ] A peer that never connects is dropped after the TTL; the global cap returns 503
-- [ ] `Failed` tears the peer down exactly once and removes it from the `Registry`; `Disconnected` does not
-- [ ] Step 8 produces a recorded yes/no on post-connect `AddTrack`, written into this plan
-- [ ] Step 9 produces a recorded yes/no on Expo New Architecture compatibility
-- [ ] `go vet ./...` and `go test -race ./...` clean
-- [ ] No audio/video feature code ships
+- [x] A pion client connects over `POST /rtc/offer` and exchanges game messages on the DataChannel
+- [x] `register`, `login`, `create`, `join` and `kick` work over WebRTC with no new action code
+- [x] A delta broadcast reaches WebRTC, WebSocket, GraphQL and SSE clients in the same game identically
+- [x] An authenticated signalling request binds `SessionIDKey` at handshake; an anonymous one binds on login
+- [x] A peer that never connects is dropped after the TTL; the global cap returns 503
+- [x] `Failed` tears the peer down exactly once and removes it from the `Registry`; `Disconnected` does not
+- [x] Step 8 produces a recorded yes/no on post-connect `AddTrack`, written into this plan
+- [~] Step 9 produces a recorded yes/no on Expo New Architecture compatibility — **partial**: deps
+  installed and `expo-doctor` says *untested* on New Architecture, which no automated check can
+  resolve. The device half is story 042-38ee, blocked on hardware.
+- [x] `go vet ./...` and `go test -race ./...` clean — verified green at each commit of this work.
+  (A later unrelated break arrived from concurrent Lua work in `internal/injector/injector.go`.)
+- [x] No audio/video feature code ships
 
 ## Checklist (non-TDD cleanup)
 
-- [ ] `docs/PROTOCOL.md` gains a WebRTC section; the transport table at the top gains a fourth row
-- [ ] `docs/ARCHITECTURE.md` adapter table and request-lifecycle diagram updated
-- [ ] `README.md` transport table updated
-- [ ] `CLAUDE.md` transports section notes that WebRTC is bidirectional and needs no new inbound plumbing
-- [ ] `.env.example` documents every new `INDRI_RTC_*` variable
-- [ ] `docker-compose.yml` publishes the UDP port
-- [ ] TURN is documented as required in production even without media
+- [x] `docs/PROTOCOL.md` gains a WebRTC section; the transport table at the top gains a fourth row
+- [x] `docs/ARCHITECTURE.md` adapter table and request-lifecycle diagram updated
+- [x] `README.md` transport table updated
+- [x] `CLAUDE.md` transports section notes that WebRTC is bidirectional and needs no new inbound plumbing
+- [x] `.env.example` documents every new `INDRI_RTC_*` variable
+- [x] `docker-compose.yml` publishes the UDP port
+- [x] TURN is documented as required in production even without media
