@@ -277,6 +277,13 @@ func (t *Transport) attachGame(p *peer, sessionID string, dc *pion.DataChannel) 
 	conn := newConn(sessionID, dc)
 	p.setConn(conn)
 
+	// Make it an invariant that closing this conn tears down its peer, so
+	// every path that closes a conn (kick via Registry.Disconnect, a natural
+	// DataChannel close, transport shutdown) reclaims the PeerConnection too
+	// -- not just kick. Set once, here, before conn is reachable from any
+	// other goroutine (AddSink/OnClose are registered below).
+	conn.onTeardown = func() { p.teardown.Do(p.close) }
+
 	dc.OnOpen(func() {
 		t.AddSink(conn)
 

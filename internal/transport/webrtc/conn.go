@@ -58,6 +58,19 @@ type rtcConn struct {
 	// low is signalled by the OnBufferedAmountLow callback. Buffered by one so
 	// a callback firing while the drain isn't yet waiting is not lost.
 	low chan struct{}
+
+	// onTeardown, when set, is invoked by Close (never by closeConn) once
+	// this conn's own plumbing has stopped. attachGame wires it to the owning
+	// peer's teardown, so closing this conn from anywhere -- including a kick
+	// reaching it through Registry.Disconnect -- also releases the
+	// PeerConnection, not just this conn: without it, the ICE agent, DTLS and
+	// SCTP resources survive until pion's own Failed callback fires. peer.close
+	// calls closeConn instead of Close for exactly this reason: it already
+	// runs inside that same teardown (guarded by peer.teardown, a sync.Once),
+	// and looping back into onTeardown from there would call Once.Do
+	// reentrantly on the same goroutine -- documented by sync.Once as a
+	// deadlock, not something the Once guards against.
+	onTeardown func()
 }
 
 var _ transport.Conn = (*rtcConn)(nil)
@@ -87,11 +100,26 @@ func newConn(sessionID string, sink dataSink) *rtcConn {
 	return c
 }
 
-// Close stops the drain goroutine and releases the queue, however many times
-// it is called. BufferedConn.Close guards the queue's channel; closeOnce
-// guards done separately, because a drain parked on low (not reading Events)
-// would otherwise never see the queue close.
+// Close stops the drain goroutine, releases the queue, and (if set) tears
+// down the owning peer -- however many times Close itself is called. Use
+// closeConn instead from inside peer.close; see onTeardown's comment.
 func (c *rtcConn) Close() error {
+	err := c.closeConn()
+
+	if c.onTeardown != nil {
+		c.onTeardown()
+	}
+
+	return err
+}
+
+// closeConn is Close's actual plumbing-teardown, split out so peer.close can
+// invoke it without also firing onTeardown -- see onTeardown's comment for
+// why looping back through Close there would deadlock. BufferedConn.Close
+// guards the queue's channel; closeOnce guards done separately, because a
+// drain parked on low (not reading Events) would otherwise never see the
+// queue close.
+func (c *rtcConn) closeConn() error {
 	err := c.BufferedConn.Close()
 
 	c.closeOnce.Do(func() { close(c.done) })

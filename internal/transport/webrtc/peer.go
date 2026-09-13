@@ -232,7 +232,11 @@ func (p *peer) close() {
 	p.connMu.Unlock()
 
 	if conn != nil {
-		if err := conn.Close(); err != nil {
+		// closeConn, not Close: Close would fire conn.onTeardown, which calls
+		// back into p.teardown.Do(p.close) -- but we are already inside that
+		// same Do call, on the same goroutine, and sync.Once documents that
+		// as a deadlock, not something it guards against.
+		if err := conn.closeConn(); err != nil {
 			log.Printf("webrtc: closing conn during peer teardown: %v", err)
 		}
 	}

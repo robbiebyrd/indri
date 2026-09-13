@@ -583,3 +583,66 @@ func TestTransport_KickedPeerCannotStillSend(t *testing.T) {
 		t.Fatalf("Handlers.Message called %d times after the peer was kicked, want 0", got)
 	}
 }
+
+// serverPeerConnection finds the one server-side *pion.PeerConnection tr
+// allocated for the handshake this test drove -- tests live in this package,
+// so reaching into the unexported peer table is fine, and it's the only way
+// to assert on pion's own state rather than our bookkeeping.
+func serverPeerConnection(t *testing.T, tr *Transport) *pion.PeerConnection {
+	t.Helper()
+
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+
+	for _, p := range tr.peers {
+		if p != nil {
+			return p.pc
+		}
+	}
+
+	t.Fatal("no server-side peer found")
+
+	return nil
+}
+
+// A kick must reclaim the PeerConnection itself, not just stop traffic on its
+// conn: Registry.Disconnect closing the conn leaves the ICE agent, DTLS and
+// SCTP resources alive until pion's own Failed callback fires, or until the
+// pending-peer TTL reclaims it -- and that TTL only covers peers that never
+// reached Connected, so a kicked, fully-connected peer is not covered by it
+// at all. This asserts on pion's own SignalingState reaching Closed, not on
+// our own bookkeeping, and separately that the peer table drops the entry so
+// it stops counting toward MaxPeers.
+func TestTransport_KickClosesThePeerConnection(t *testing.T) {
+	id := bson.NewObjectID()
+
+	tr := newTestTransport(t, fakeSessions{token: "tok", id: id})
+
+	url := newTestServer(t, tr)
+
+	clientHandshake(t, url, "tok", gameChannel)
+
+	pc := serverPeerConnection(t, tr)
+
+	tr.Disconnect([]string{id.Hex()})
+
+	deadline := time.Now().Add(testTimeout)
+
+	for time.Now().Before(deadline) && pc.SignalingState() != pion.SignalingStateClosed {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if got := pc.SignalingState(); got != pion.SignalingStateClosed {
+		t.Fatalf("PeerConnection SignalingState = %v after kick, want Closed", got)
+	}
+
+	deadline = time.Now().Add(testTimeout)
+
+	for time.Now().Before(deadline) && tr.peerCount() != 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if got := tr.peerCount(); got != 0 {
+		t.Fatalf("peerCount = %d after kick, want 0 -- the peer must stop counting toward MaxPeers", got)
+	}
+}
