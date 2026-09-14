@@ -179,5 +179,6 @@ checkout. Set `INDRI_TEST_MONGO_URI` to point them at a database.
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — component map, request lifecycle, concurrency model
 - **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — the client protocol (WebSocket messages, GraphQL, REST+SSE)
+- **[docs/SCRIPTING.md](docs/SCRIPTING.md)** — writing a game in Lua: the host API, the sandbox, and `indri-script`
 - **[CLAUDE.md](CLAUDE.md)** — orientation for AI coding agents
 - **[docs/tasks.md](docs/tasks.md)** — improvement backlog

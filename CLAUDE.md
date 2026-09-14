@@ -267,15 +267,48 @@ array (`events.Diff` replaces arrays whole). The host-only `layout` action
 
 ## Adding a game action
 
-1. Create `example/<game>/server/handlers/<action>/handler.go` with a `Handler` struct holding
-   `*injector.Injector`, a `New(i)` constructor, and
-   `Handle(req actions.Request) (actions.Result, error)`.
-2. The caller's authenticated session is `req.Session` (nil if unauthenticated); its game/team are
-   `req.Session.GameID`/`TeamID`. Arguments are in `req.Payload`.
-3. Validate the move against the current game state, then write through `h.i.GameRepo.Mutate` (or
-   `UpdateField` for a single independent field). Do **not** write a response for state changes — the
-   published delta broadcasts it; return `actions.Result{}` (add `Responses` only for direct replies).
-4. Register it in `main.go` after `boot.Boot`: `router.RegisterHandler("<game>_<action>", "<action>", <pkg>.New(i))`.
+**Lua is the default. A game action is a Lua handler, and a game has no Go code.** Full reference:
+[docs/SCRIPTING.md](docs/SCRIPTING.md).
+
+1. List the script in the game's `config.json`: `"scripts": [{"path": "game.lua", "grants": []}]`.
+   Paths are resolved relative to the config file's own directory. `grants` is that script's host
+   capabilities (`assets`, `http`); an unrecognised name fails boot.
+2. Register the handler at the top level of the script — registration is a load-time act:
+
+   ```lua
+   indri.on("<action>", function(req) ... end)
+   ```
+
+   `req` is `{action, gameId, payload, session?}`. `req.session` is **absent** for an unauthenticated
+   caller, and carries only `userId`/`gameId`/`teamId`. Read `req.gameId`, not `req.session.gameId` —
+   a timer-fired action has no session at all. Authority comes from `req.session`, never `req.payload`.
+3. Validate the move, then write through `indri.mutate(function(state) ... return state end)`. The
+   callback runs inside the store's apply closure, so it gets the same lock and the same version
+   fence as a Go write — and is re-run on every fence miss, so read everything from the `state` you
+   were handed. Return `nil` (or an unchanged state) to write nothing. Refuse with `error(msg, 0)`,
+   which unwinds the store without saving. Do **not** reply for state changes: the published delta
+   broadcasts them. `indri.reply` is for a direct answer, at most one per action.
+4. Test it with a `.test.json` fixture beside the config and `indri-script test <dir>`. The fixture
+   asserts on the **published delta**, because a write that never publishes is invisible.
+
+`boot.registerScriptHandlers` wires every action `Engine.Actions()` declares into the router as
+`"lua_" + action`. A script may not claim a built-in name or a dispatch phase (`received`,
+`processed`); `indri.before`/`indri.after_action` are how a script extends a built-in instead, and
+`login`, `logout`, `reconnect` and `register` can never be hooked.
+
+**Script actions are currently WebSocket- and WebRTC-only** — they have no REST route and no GraphQL
+mutation, and the two parity tests below do not cover them. Story 062 is changing that; don't design
+around the gap without reading it.
+
+### The Go escape hatch
+
+A Go handler registered with `router.RegisterHandler(name, action, handler)` after `boot.Boot` still
+works and is deliberately kept — but nothing ships using it, and `example/tictactoe` has no Go code
+at all. Reach for it only when the host API cannot do the job: writing outside the game document,
+changing membership or host (`checkInvariants` refuses those from Lua by design), or work that cannot
+fit the 100 ms invocation budget. The handler is a `Handler` struct holding `*injector.Injector` with
+a `New(i)` constructor and `Handle(req actions.Request) (actions.Result, error)`; write through
+`h.i.GameRepo.Mutate` (or `UpdateField` for a single independent field) and return `actions.Result{}`.
 
 Built-in actions register in `boot.registerHandlers` instead, and
 `TestRegisterHandlers_CoversEveryActionPackage` fails if a package under `internal/handlers/actions/`
@@ -283,9 +316,11 @@ is never wired up — an unregistered action is silently unreachable, so the tes
 
 A **built-in** action has three inbound surfaces, and adding one means touching all three: the router
 registration, a mutation in `internal/transport/graphql/schema.graphqls` (plus its resolver), and a
-route in `internal/transport/rest/routes.go`. `TestRestRoutesMatchRegisteredActions` catches a missing
-REST route; nothing yet catches a missing mutation. Game-specific actions registered via
-`router.RegisterHandler` are WebSocket-only unless you add them to the other two yourself.
+route in `internal/transport/rest/routes.go`. `TestRestRoutesMatchRegisteredActions` and
+`TestGraphQLMutationsMatchRegisteredActions` catch a missing route and a missing mutation — but both
+build their registry from `registerHandlers` with no Lua engine, so neither sees a script action. A
+Go action registered via `router.RegisterHandler` is likewise WebSocket-only unless you add the other
+two yourself.
 
 ## Conventions
 
@@ -316,5 +351,6 @@ Do not treat these as intentional; check before relying on them.
 
 - `docs/ARCHITECTURE.md` — component map with file references.
 - `docs/PROTOCOL.md` — the client protocol: WebSocket messages and GraphQL mutations/subscription.
+- `docs/SCRIPTING.md` — the server-side Lua host API, the sandbox, the caps, and `indri-script`.
 
 @.claude/wiz-claude.md
