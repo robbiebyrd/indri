@@ -148,7 +148,7 @@ func newIOEngine(
 	e, err := newEngine(
 		[]models.ScriptFile{{Path: path, Grants: []string{effectsName, ioName}}},
 		games,
-		capabilitySet{effectsName: effectsCapability(effects), ioName: ioCapability(sent)},
+		capabilitySet{effectsName: onEveryView(effectsCapability(effects)), ioName: onEveryView(ioCapability(sent))},
 	)
 	if err != nil {
 		t.Fatalf("building an engine over %v: %v", path, err)

@@ -161,7 +161,7 @@ func invokeWithEffects(
 	e, err := newEngine(
 		[]models.ScriptFile{{Path: path, Grants: []string{effectsName}}},
 		games,
-		capabilitySet{effectsName: effectsCapability(log)},
+		capabilitySet{effectsName: onEveryView(effectsCapability(log))},
 	)
 	if err != nil {
 		t.Fatalf("building an engine over %v: %v", path, err)
@@ -607,7 +607,7 @@ end)
 	e, err := newEngine(
 		[]models.ScriptFile{{Path: path, Grants: []string{effectsName}}},
 		store,
-		capabilitySet{effectsName: effectsCapability(log)},
+		capabilitySet{effectsName: onEveryView(effectsCapability(log))},
 	)
 	if err != nil {
 		t.Fatalf("building an engine over %v: %v", path, err)

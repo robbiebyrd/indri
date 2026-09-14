@@ -174,7 +174,7 @@ func newTimerEngine(t *testing.T, src string, games GameMutator, log *timerLog, 
 	e, err := newEngine(
 		[]models.ScriptFile{{Path: path, Grants: []string{effectsName, timerLogName}}},
 		games,
-		capabilitySet{effectsName: effectsCapability(effects), timerLogName: timerLogCapability(log)},
+		capabilitySet{effectsName: onEveryView(effectsCapability(effects)), timerLogName: onEveryView(timerLogCapability(log))},
 	)
 	if err != nil {
 		t.Fatalf("building an engine over %v: %v", path, err)

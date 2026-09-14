@@ -102,13 +102,14 @@ func (e *Engine) run(
 	// this caller's game, deadline and store, and so the next invocation on this
 	// pooled state cannot find them.
 	inv := &invocation{
-		ctx:      ctx,
-		trigger:  t,
-		gameID:   gameID,
-		games:    e.games,
-		session:  session,
-		dispatch: e.Dispatch,
-		timers:   e.Timers,
+		ctx:       ctx,
+		trigger:   t,
+		gameID:    gameID,
+		games:     e.games,
+		session:   session,
+		dispatch:  e.Dispatch,
+		timers:    e.Timers,
+		lifecycle: e,
 	}
 
 	setInvocation(s.L, inv)

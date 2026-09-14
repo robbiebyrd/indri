@@ -420,7 +420,10 @@ func newHTTPEngine(t *testing.T, cfg httpConfig, games GameMutator, src string) 
 	e, err := newEngine(
 		[]models.ScriptFile{granted(path, CapabilityHTTP)},
 		games,
-		capabilitySet{CapabilityHTTP: httpCapability(cfg)},
+		// Off the action view, exactly as defaultCapabilities declares it:
+		// TestDefaultCapabilities_KeepHTTPOffTheActionView is what holds the two
+		// declarations together.
+		capabilitySet{CapabilityHTTP: offTheActionView(httpCapability(cfg))},
 	)
 
 	if e != nil {
@@ -431,12 +434,12 @@ func newHTTPEngine(t *testing.T, cfg httpConfig, games GameMutator, src string) 
 }
 
 // TestHTTPCapability_IsUsableOutsideADispatchedAction is the other half of the
-// action guard: without it, "http is refused in an action" would also be true
+// action view: without it, "http is absent from an action" would also be true
 // of an http capability that never worked at all.
 //
-// Load time stands in for the scheduled context the capability is meant for. It
-// is the one place in the engine today where a script runs with no invocation
-// installed on the state, which is exactly the condition refuseInAction tests.
+// Load time is where a chunk runs under its script's full view, which is what a
+// capability granted to a script has to be reachable from — the alternative is a
+// grant that is silently inert.
 func TestHTTPCapability_IsUsableOutsideADispatchedAction(t *testing.T) {
 	t.Parallel()
 
@@ -460,8 +463,27 @@ indri.on("noop", function(req) end)
 	}
 }
 
+// dispatchMove dispatches the "move" action as a player in a game, and returns
+// whatever the script made of it.
+//
+// It is invokeMove's counterpart for an engine the test has already built, which
+// is what a granted script needs: what it was granted is decided at
+// construction.
+func dispatchMove(t *testing.T, e *Engine, gameID string) error {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	_, err := splitScriptError(e.Invoke(ctx, "move", actions.Request{
+		Session: &models.Session{UserID: stringPtr("player-1"), GameID: &gameID},
+	}))
+
+	return err
+}
+
 // TestHTTPCapability_IsAbsentFromAnActionHandler is the constraint this
-// capability lives under.
+// capability lives under, and the form the constraint takes.
 //
 // A dispatched action is a player waiting on a request, and the only way a
 // script changes anything from there is indri.mutate, whose callback runs inside
@@ -469,10 +491,50 @@ indri.on("noop", function(req) end)
 // version-fence retry. A blocking fetch in that closure would hold the lock for
 // the whole timeout and pay it again on each retry.
 //
-// Both shapes are covered: the handler itself, and the mutate callback inside
-// it. The second is the one the constraint is really about, and the first is
-// what stops a script moving the fetch one line up to get around it.
+// What the script sees is nil, not a function that refuses. The difference is
+// the point: a capability that is not on the table cannot be reached by moving
+// the call somewhere the check does not run, and there is no function body to
+// audit to find that out.
+//
+// Both places a handler could read it from are covered — the handler itself, and
+// the mutate callback inside it, which inherits the handler's environment.
 func TestHTTPCapability_IsAbsentFromAnActionHandler(t *testing.T) {
+	t.Parallel()
+
+	store, _, gameID := newTestGame(t)
+	srv := textServer(t, "text/plain", "otter")
+
+	e, err := newHTTPEngine(t, testHTTPConfig(allowOnly(srv.addr())), store, `
+indri.on("move", function(req)
+  assert(indri.http == nil, "indri.http is on the action view")
+  assert(_G.indri.http == nil, "_G.indri.http is reachable from an action")
+  assert(type(indri.mutate) == "function", "indri.mutate is missing from the action view")
+
+  indri.mutate(function(state)
+    assert(indri.http == nil, "indri.http is reachable from inside indri.mutate")
+
+    return nil
+  end)
+end)
+`)
+	if err != nil {
+		t.Fatalf("building an engine: %v", err)
+	}
+
+	if err := dispatchMove(t, e, gameID); err != nil {
+		t.Fatalf("dispatching an action to a script granted http: %v", err)
+	}
+}
+
+// TestHTTPCapability_CannotBeFetchedThroughFromAnActionHandler is the same claim
+// stated as a script author would hit it: a handler that calls indri.http.get
+// fails on the nil, and no request leaves the process.
+//
+// The hit count is what an error alone would not say. A capability that raised
+// after fetching, or one whose refusal arrived after the connection was opened,
+// would satisfy the error and still have reached somebody else's server from
+// inside a game lock.
+func TestHTTPCapability_CannotBeFetchedThroughFromAnActionHandler(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
@@ -504,14 +566,9 @@ end)
 				t.Fatalf("building an engine: %v", err)
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-			defer cancel()
-
-			_, err = splitScriptError(e.Invoke(ctx, "move", actions.Request{
-				Session: &models.Session{UserID: stringPtr("player-1"), GameID: &gameID},
-			}))
-
-			requireErrorMentions(t, err, "not available while a dispatched action is running")
+			// The nil is indri.http itself, so the failure is the index that
+			// followed it rather than anything inside the capability.
+			requireErrorMentions(t, dispatchMove(t, e, gameID), "attempt to index", "get")
 
 			// The guard would let this server through, so a reachable capability
 			// would have fetched from it.
@@ -519,6 +576,54 @@ end)
 				t.Fatalf("the server was reached %d times from an action, want none", hits)
 			}
 		})
+	}
+}
+
+// TestHTTPCapability_ReachesALifecycleHandler is where http was always meant to
+// live, and the reason absence from an action is a narrowing rather than a ban.
+//
+// A lifecycle handler runs on the queue's own goroutine, after the write that
+// raised it committed, with no game lock of its own and nobody waiting: the
+// fetch costs this handler its deadline and nothing else. What it fetched is
+// written into the game through indri.mutate and read back out of the store, so
+// a handler that never ran and a handler that ran and fetched nothing are not
+// the same result.
+func TestHTTPCapability_ReachesALifecycleHandler(t *testing.T) {
+	t.Parallel()
+
+	store, _, gameID := newTestGame(t)
+	srv := textServer(t, "text/plain", "otter")
+
+	e, err := newHTTPEngine(t, testHTTPConfig(allowOnly(srv.addr())), store, fmt.Sprintf(`
+indri.on("player:joined", function(ev)
+  local res = indri.http.get(%q)
+
+  indri.mutate(function(state)
+    state.data.fetched = res.body
+
+    return state
+  end)
+end)
+
+indri.on("move", function(req) end)
+`, srv.URL))
+	if err != nil {
+		t.Fatalf("building an engine: %v", err)
+	}
+
+	e.EmitLifecycle(LifecyclePlayerJoined, gameID, nil)
+
+	g, err := store.Get(gameID)
+	if err != nil {
+		t.Fatalf("reading the game back: %v", err)
+	}
+
+	if fetched, _ := g.PublicData["fetched"].(string); fetched != "otter" {
+		t.Fatalf("the lifecycle handler recorded %q, want the body it fetched", fetched)
+	}
+
+	if hits := srv.hits.Load(); hits != 1 {
+		t.Fatalf("the server was reached %d times, want exactly one fetch", hits)
 	}
 }
 

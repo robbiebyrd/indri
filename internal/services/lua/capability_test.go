@@ -2,6 +2,7 @@ package lua
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -57,9 +58,34 @@ func probeCapability(calls *probeLog) capabilityInstaller {
 	}
 }
 
-// probeSet is the capability set these tests build engines against.
+// deferredName is the second test capability: the same thing as probe, except
+// that it is not on the view a dispatched action handler runs under.
+//
+// It is a test capability for the reason probe is one. What these tests prove is
+// that a view a capability was left off is a view it is *absent* from, and a
+// test written against http would stop proving that the day http's absence was
+// arranged some other way.
+const deferredName = "deferred"
+
+// onEveryView is a test capability a dispatched action may reach, which is what
+// a capability bounded by this host's own disk or memory is.
+func onEveryView(install capabilityInstaller) capability {
+	return capability{install: install, inAction: true}
+}
+
+// offTheActionView is a test capability a dispatched action may not, which is
+// what http is: it is simply not on the table a handler runs under.
+func offTheActionView(install capabilityInstaller) capability {
+	return capability{install: install}
+}
+
+// probeSet is the capability set these tests build engines against: one
+// capability on every view, and one that a dispatched action cannot reach.
 func probeSet(calls *probeLog) capabilitySet {
-	return capabilitySet{probeName: probeCapability(calls)}
+	return capabilitySet{
+		probeName:    onEveryView(probeCapability(calls)),
+		deferredName: offTheActionView(probeCapability(calls)),
+	}
 }
 
 // newProbeEngine builds an engine over the given scripts, with probe as the
@@ -82,22 +108,28 @@ func granted(path string, grants ...string) models.ScriptFile {
 	return models.ScriptFile{Path: path, Grants: grants}
 }
 
-// reachScript is the ungranted half of the isolation tests. It asserts that
-// every route a script could take to a capability it was not given comes back
-// empty, and raises the name of the route that did not.
+// reachScript registers action as a handler that asserts every route a script
+// could take to capability comes back empty, and raises the name of the route
+// that did not.
+//
+// It is the walk both halves of "absent means unreachable" are proved with: a
+// capability the script was never granted, and a capability it *was* granted
+// that is not on the view a dispatched action runs under. Neither may be
+// reachable, and the routes are the same ones either way.
 //
 // The two pairs() walks are worth stating even though a frozen table yields
 // nothing: that emptiness is what freezeTable buys, and a future change that
 // froze the globals differently would show up here rather than in a security
 // report.
-const reachScript = `
-indri.on("reach", function(req)
-  assert(indri.probe == nil, "indri.probe")
-  assert(_G.indri.probe == nil, "_G.indri.probe")
-  assert(_G.probe == nil, "_G.probe")
-  assert(package.loaded.probe == nil, "package.loaded.probe")
-  assert(package.loaded["indri.probe"] == nil, "package.loaded['indri.probe']")
-  assert(package.preload.probe == nil, "package.preload.probe")
+func reachScript(action, capability string) string {
+	return fmt.Sprintf(`
+indri.on(%[1]q, function(req)
+  assert(indri.%[2]s == nil, "indri.%[2]s")
+  assert(_G.indri.%[2]s == nil, "_G.indri.%[2]s")
+  assert(_G.%[2]s == nil, "_G.%[2]s")
+  assert(package.loaded.%[2]s == nil, "package.loaded.%[2]s")
+  assert(package.loaded["indri.%[2]s"] == nil, "package.loaded['indri.%[2]s']")
+  assert(package.preload.%[2]s == nil, "package.preload.%[2]s")
 
   -- The metatable route: the sandbox leaves a script no way to ask for one, so
   -- the backing table freezeTable hides behind __index cannot be named.
@@ -105,14 +137,15 @@ indri.on("reach", function(req)
   assert(rawget == nil, "rawget")
 
   for key in pairs(_G) do
-    assert(key ~= "probe", "_G walk found probe")
+    assert(key ~= %[2]q, "_G walk found %[2]s")
   end
 
   for key in pairs(package.loaded) do
-    assert(key ~= "probe", "package.loaded walk found probe")
+    assert(key ~= %[2]q, "package.loaded walk found %[2]s")
   end
 end)
-`
+`, action, capability)
+}
 
 // markScript is the granted half: it uses the capability at load time and again
 // from inside its handler, because those are two different lookups — the chunk
@@ -150,7 +183,7 @@ func TestCapabilities_AreAbsentWithoutAGrant(t *testing.T) {
 
 	calls := &probeLog{}
 	paths := writeScripts(t,
-		map[string]string{"mark.lua": markScript, "reach.lua": reachScript},
+		map[string]string{"mark.lua": markScript, "reach.lua": reachScript("reach", probeName)},
 		"mark.lua", "reach.lua",
 	)
 
@@ -270,6 +303,79 @@ end)
 	}
 }
 
+// viewsScript is granted both test capabilities and reports, from each kind of
+// invocation, what it can see.
+//
+// The action handler asserts as well as marks, because an assert there is
+// returned to the caller and fails the test loudly. The lifecycle handler can
+// only mark: a failure inside one is logged and goes no further — by design, see
+// EmitLifecycle — so the mark is the only evidence that reaches Go, and its
+// absence is the failure.
+const viewsScript = `
+indri.on("move", function(req)
+  assert(indri.deferred == nil, "indri.deferred is on the action view")
+  assert(type(indri.probe) == "table", "indri.probe is missing from the action view")
+  assert(type(indri.on) == "function", "indri.on is missing from the action view")
+
+  indri.probe.mark("action")
+end)
+
+indri.on("player:joined", function(ev)
+  indri.deferred.mark("lifecycle:" .. tostring(ev.gameId))
+end)
+`
+
+// TestCapabilities_AreOnTheViewTheInvocationRuns is the property this pair of
+// views exists for: one script, one grant list, and what it may reach decided by
+// why its handler is running.
+//
+// The order is the other half of the claim. A lifecycle event runs first, an
+// action second and a lifecycle event third, on a pool that hands the same state
+// back out for each: a view built by putting the capability on the table and
+// taking it off again would pass the first two calls and fail the third, or pass
+// all three and leave the capability reachable from the action in between.
+func TestCapabilities_AreOnTheViewTheInvocationRuns(t *testing.T) {
+	t.Parallel()
+
+	calls := &probeLog{}
+	path := writeScript(t, "views.lua", viewsScript)
+
+	e := newProbeEngine(t, calls, granted(path, probeName, deferredName))
+
+	e.EmitLifecycle(LifecyclePlayerJoined, "game-1", nil)
+	invokeOK(t, e, "move", nil)
+	e.EmitLifecycle(LifecyclePlayerJoined, "game-2", nil)
+
+	want := []string{"lifecycle:game-1", "action", "lifecycle:game-2"}
+
+	if got := calls.all(); !slices.Equal(got, want) {
+		t.Fatalf("the probes recorded %v, want %v", got, want)
+	}
+}
+
+// TestCapabilities_OffTheActionViewAreUnreachableFromAnAction is absence taken
+// seriously: the capability is not merely missing from indri, it cannot be
+// found by walking the globals, the module tables or a metatable either.
+//
+// It is the same walk that proves an ungranted script cannot reach a capability,
+// pointed at a capability this script *was* granted. Absence for the length of a
+// call has to mean what absence for the length of a process means, or the action
+// view is a suggestion.
+func TestCapabilities_OffTheActionViewAreUnreachableFromAnAction(t *testing.T) {
+	t.Parallel()
+
+	calls := &probeLog{}
+	path := writeScript(t, "reach.lua", reachScript("reach", deferredName))
+
+	e := newProbeEngine(t, calls, granted(path, deferredName))
+
+	invokeOK(t, e, "reach", nil)
+
+	if got := calls.all(); len(got) != 0 {
+		t.Fatalf("the probe recorded %v, want the capability never to have been reached", got)
+	}
+}
+
 // TestNewEngineWithGrants_RefusesABadGrantList is the boot-time half. Every one
 // of these would otherwise be invisible until a player triggered the handler
 // that expected the capability, and would look to the script author like the
@@ -348,7 +454,7 @@ func TestNewEngineWithGrants_RefusesACapabilityThisBuildHasNotImplemented(t *tes
 	_, err := newEngine(
 		[]models.ScriptFile{granted(path, reserved)},
 		nil,
-		capabilitySet{reserved: nil},
+		capabilitySet{reserved: {}},
 	)
 
 	requireErrorMentions(t, err, "does not implement yet", reserved, path)
@@ -367,9 +473,28 @@ func TestDefaultCapabilities_AreTheNamesTheGrantListAccepts(t *testing.T) {
 		t.Fatalf("the known capabilities are %v, want %v", got, want)
 	}
 
-	for name, install := range defaultCapabilities {
-		if install == nil {
+	for name, known := range defaultCapabilities {
+		if known.install == nil {
 			t.Errorf("the capability %q has no installer, so granting it would fail boot", name)
+		}
+	}
+}
+
+// TestDefaultCapabilities_KeepHTTPOffTheActionView pins the one grant this
+// server ships that a dispatched action may not reach.
+//
+// It is asserted on the declaration rather than only through a script, because
+// this is the whole of the rule: everything else — the two views, the trigger
+// that picks between them — is machinery that would keep working perfectly while
+// handing a player's request path a blocking fetch, if this flag were flipped.
+func TestDefaultCapabilities_KeepHTTPOffTheActionView(t *testing.T) {
+	t.Parallel()
+
+	want := map[string]bool{CapabilityHTTP: false, CapabilityAssets: true}
+
+	for name, inAction := range want {
+		if got := defaultCapabilities[name].inAction; got != inAction {
+			t.Errorf("the capability %q is on the action view: %t, want %t", name, got, inAction)
 		}
 	}
 }
@@ -380,7 +505,7 @@ func TestDefaultCapabilities_AreTheNamesTheGrantListAccepts(t *testing.T) {
 func TestNewEngine_GrantsNothing(t *testing.T) {
 	t.Parallel()
 
-	paths := writeScripts(t, map[string]string{"reach.lua": reachScript}, "reach.lua")
+	paths := writeScripts(t, map[string]string{"reach.lua": reachScript("reach", probeName)}, "reach.lua")
 
 	e, err := NewEngine(paths, nil)
 	if err != nil {

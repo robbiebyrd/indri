@@ -302,7 +302,7 @@ func newAssetsEngine(t *testing.T, cfg assetsConfig, src string) (*Engine, error
 	e, err := newEngine(
 		[]models.ScriptFile{granted(path, CapabilityAssets)},
 		nil,
-		capabilitySet{CapabilityAssets: assetsCapability(cfg)},
+		capabilitySet{CapabilityAssets: onEveryView(assetsCapability(cfg))},
 	)
 
 	if e != nil {

@@ -9,7 +9,6 @@ import (
 	"github.com/robbiebyrd/indri/internal/models"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
-	luaService "github.com/robbiebyrd/indri/internal/services/lua"
 )
 
 // sceneStore is the narrow part of the game store this service writes through:
@@ -25,12 +24,22 @@ type sceneStore interface {
 type Service struct {
 	gameRepo    sceneStore
 	gameService *gameService.Service
-
-	// Lifecycle is where scene:changed goes. An exported field set at boot, for
-	// the reason gameService.Service.Lifecycle is one: the script engine is
-	// built after the services it edits through. A nil one raises nothing.
-	Lifecycle gameService.LifecycleEmitter
 }
+
+// There is deliberately no Lifecycle emitter here, and SetCurrentScene raises
+// nothing.
+//
+// It used to. Story 063 emitted scene:changed from SetCurrentScene, which is the
+// call site the plan named — but this service is constructed nowhere and no
+// package imports it, so the emission never ran. The live way a game moves scene
+// is a script's own indri.mutate writing stage.currentScene, and that is where
+// the event is raised from now: internal/services/lua/host_mutate.go,
+// invocation.queueSceneChange.
+//
+// Adding the emission back here would mean two paths for one event, and this one
+// would still be dead. If this service is ever given a caller, the question to
+// answer first is whether that caller should be writing through the script
+// engine instead.
 
 // NewService creates a new repository for accessing game data.
 func NewService(gameRepo *gameRepo.Store, gameService *gameService.Service) *Service {
@@ -338,22 +347,9 @@ func (ss *Service) SetCurrentScene(gameId string, sceneId string) error {
 		return fmt.Errorf("scene %s is not a valid scene", sceneId)
 	}
 
-	previous := g.Stage.CurrentScene
-
 	err = ss.gameRepo.UpdateField(g.ID.Hex(), "stage.currentScene", sceneId)
 	if err != nil {
 		return err
-	}
-
-	// After the write, and only when the scene actually moved. UpdateField is a
-	// single conditional write with no version fence to lose, so its nil error
-	// is the commit; setting the scene a game is already on changes nothing and
-	// is not a scene change.
-	if previous != sceneId && ss.Lifecycle != nil {
-		ss.Lifecycle.EmitLifecycle(luaService.LifecycleSceneChanged, g.ID.Hex(), map[string]interface{}{
-			"sceneId":  sceneId,
-			"previous": previous,
-		})
 	}
 
 	return nil

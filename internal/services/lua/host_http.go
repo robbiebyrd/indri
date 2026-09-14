@@ -129,12 +129,14 @@ func httpCapability(cfg httpConfig) capabilityInstaller {
 // It returns a table of status, contentType and body, and raises on anything
 // else, so a script reads the happy path straight down and wraps the call in
 // pcall when it wants to carry on regardless.
+//
+// There is no check here for whether this capability may be used right now, and
+// that is the design rather than an omission: indri.http is not on the host
+// table a dispatched action handler runs under, so the only calls that reach
+// this function are the ones allowed to. See capability.inAction and
+// trigger.hostView.
 func hostHTTPGet(L *lua.LState, client *http.Client, cfg httpConfig) int {
 	raw := L.CheckString(1)
-
-	if err := refuseInAction(L); err != nil {
-		L.RaiseError("indri.http.get: %s", err.Error())
-	}
 
 	res, err := fetch(callContext(L), client, cfg, raw)
 	if err != nil {
@@ -149,31 +151,6 @@ func hostHTTPGet(L *lua.LState, client *http.Client, cfg httpConfig) int {
 	L.Push(tbl)
 
 	return 1
-}
-
-// refuseInAction reports why indri.http may not be used right now, or nil when
-// it may.
-//
-// This is the constraint the capability exists under, not a detail of it. An
-// invocation is installed on the state for exactly the length of one dispatched
-// action, so its presence is how this call knows it is on a player's request
-// path — where a script's reach is indri.mutate, whose callback runs inside the
-// store's apply closure with the game's distributed lock held and re-runs on
-// every version-fence retry. A blocking fetch there would hold the lock for the
-// whole timeout, and would pay it again on each of mutation.Run's retries.
-//
-// Nothing sets an invocation outside Invoke, so load time and any future
-// scheduled callback pass. That is the intended home for http.
-func refuseInAction(L *lua.LState) error {
-	if _, err := currentInvocation(L); err != nil {
-		return nil
-	}
-
-	return errors.New(
-		"this capability is not available while a dispatched action is running, " +
-			"because a blocking fetch inside indri.mutate would hold the game lock " +
-			"and be repeated on every retry; http belongs to a scheduled script",
-	)
 }
 
 // callContext is the deadline this call inherits: the invocation's when there is

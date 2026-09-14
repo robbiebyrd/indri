@@ -67,6 +67,12 @@ type invocation struct {
 	// refuse.
 	timers GameScheduler
 
+	// lifecycle is where an event this call *caused* is raised — as opposed to
+	// the trigger above, which is why it is running. The only one a script can
+	// cause is scene:changed, by writing stage.currentScene through indri.mutate;
+	// see queueSceneChange.
+	lifecycle lifecycleEmitter
+
 	// effects is everything this call asked the host to do outside the game
 	// document, held until it is known whether the write it belonged to
 	// happened. See effects.go for why nothing is performed inline.
@@ -250,8 +256,82 @@ func applyThroughLua(L *lua.LState, inv *invocation, fn *lua.LFunction) func(*mo
 			return mutation.ErrAbort
 		}
 
+		return inv.queueSceneChange(before, after)
+	}
+}
+
+// queueSceneChange raises scene:changed when this attempt moved the game to
+// another scene.
+//
+// This is where the event comes from. The Go call site the plan named
+// (stage.Service.SetCurrentScene) is constructed nowhere and reachable by
+// nothing, so the live way a game moves scene is a script writing
+// stage.currentScene through indri.mutate — which is what this watches.
+//
+// The two document views are the ones the diff is taken on rather than the
+// struct, because that is both the view the script edited and the view the delta
+// is published from: "stage.currentScene" is the same path in all three, so the
+// event cannot describe a move the broadcast does not.
+//
+// Nothing is raised here. The event is queued on the ledger like every other
+// deferred effect, so the attempt that loses the version fence takes its scene
+// change with it: applyThroughLua runs once per attempt and only one of them is
+// what was stored.
+func (inv *invocation) queueSceneChange(before, after map[string]interface{}) error {
+	// An event nobody subscribed to costs nothing, and — because the depth below
+	// only ever grows through a subscriber — a server with no subscriber can
+	// never reach the cap either.
+	if inv.lifecycle == nil || !inv.lifecycle.subscribedTo(LifecycleSceneChanged) {
 		return nil
 	}
+
+	previous, current := currentScene(before), currentScene(after)
+	if previous == current {
+		return nil
+	}
+
+	depth := sceneDepthFrom(inv.ctx)
+
+	// The chain stops by refusing the write, not by dropping the event. A
+	// scene:changed handler that moves the scene again is a loop, and letting the
+	// last move through while silently not telling anybody would leave the game
+	// somewhere no subscriber ever heard about — the one outcome worse than the
+	// move failing. Returned rather than raised, so mutation.Run unwinds without
+	// writing and hostMutate re-raises it at the script's own line once the store
+	// has let go.
+	if depth >= maxSceneChangeDepth {
+		return fmt.Errorf(
+			"%s depth %d exceeded: a handler that moves the scene again has to stop itself, "+
+				"because nothing else will",
+			LifecycleSceneChanged, maxSceneChangeDepth,
+		)
+	}
+
+	inv.effects.queue(sceneChangedEffect{
+		emitter:  inv.lifecycle,
+		gameID:   inv.gameID,
+		sceneID:  current,
+		previous: previous,
+		depth:    depth + 1,
+	})
+
+	return nil
+}
+
+// currentScene reads stage.currentScene out of a game's document view.
+//
+// Defensive about both levels rather than asserting the shape: the map is
+// whatever json.Unmarshal made of the game, and a missing or oddly typed field
+// means "no scene", which compares equal to itself and raises nothing.
+func currentScene(doc map[string]interface{}) string {
+	stage, ok := doc["stage"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	scene, _ := stage["currentScene"].(string)
+
+	return scene
 }
 
 // callLua invokes fn with one argument and returns its single result.

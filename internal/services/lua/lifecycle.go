@@ -64,6 +64,103 @@ const lifecycleTimeout = 100 * time.Millisecond
 // loud: the whole point of the queue is that an event is somebody's to log.
 const maxPendingLifecycle = 256
 
+// maxSceneChangeDepth bounds a chain of scene changes.
+//
+// scene:changed is the one event a handler can cause again by doing the very
+// thing that raised it: the live way a game moves scene is a script's own
+// indri.mutate writing stage.currentScene (internal/services/lua/host_mutate.go,
+// invocation.queueSceneChange), so a subscriber that moves the game on raises
+// another scene:changed, whose subscriber may move it on again.
+//
+// Nothing else stops that, and it is worth saying which two candidates do not.
+// The deadline does not: emit gives every event a fresh lifecycleTimeout on
+// purpose, because a lifecycle event is not part of the call that raised it, so
+// the shared budget that bounds the indri.send tree has no equivalent here.
+// maxPendingLifecycle does not either: a chain one link wide never grows the
+// queue, so an A→B→A ping-pong sits at a single pending event and drains
+// forever.
+//
+// What bounds it is this count, carried on the event and re-installed into the
+// invocation that handles it — see lifecycleEvent.depth and emit — so every link
+// can read how deep it already is. Ten matches maxEventDepth, and for the same
+// reason: deeper than any honest game needs.
+const maxSceneChangeDepth = 10
+
+// sceneDepthKey is where one chain of scene changes carries its depth.
+//
+// On the context, like the send depth in host_io.go, and for the same reason: it
+// is the only thing both a handler's invocation and the effects that invocation
+// queues can see. It cannot ride on the invocation itself, because every link of
+// the chain is a separate invocation on its own pooled state, reached through
+// the queue rather than by a call.
+//
+// Keeping it apart from eventDepthKey is what keeps each error honest about
+// which budget was spent. The two still bound each other's cycles: a scene
+// change made by an action a handler sent carries the scene depth forward,
+// because sendEffect.deliver dispatches under the context it was flushed with.
+type sceneDepthKey struct{}
+
+// sceneDepthFrom reports how many scene changes deep this call is. A request
+// that arrived from a client carries no depth and is zero.
+func sceneDepthFrom(ctx context.Context) int {
+	depth, _ := ctx.Value(sceneDepthKey{}).(int)
+
+	return depth
+}
+
+// withSceneDepth marks ctx as being depth scene changes below the event that
+// started the chain.
+func withSceneDepth(ctx context.Context, depth int) context.Context {
+	return context.WithValue(ctx, sceneDepthKey{}, depth)
+}
+
+// lifecycleEmitter is how a queued effect raises an event.
+//
+// The engine is the only implementation, and the methods are unexported so it
+// stays that way: an event has to be held to the manifest and to the depth the
+// chain is already at, and both live on the engine. It is an interface at all so
+// that the invocation carrying it says what it needs — raise an event, and ask
+// whether anybody is listening — rather than carrying the whole engine.
+type lifecycleEmitter interface {
+	// subscribedTo reports whether any loaded script subscribed to event.
+	subscribedTo(event string) bool
+
+	// emitLifecycleAt raises event at a given depth in its chain.
+	emitLifecycleAt(event, gameID string, subject LifecycleSubject, depth int)
+}
+
+var _ lifecycleEmitter = (*Engine)(nil)
+
+// sceneChangedEffect is the scene:changed a script's own indri.mutate caused.
+//
+// It is an effect rather than a call at the point the change was noticed, so it
+// goes on the ledger with everything else a mutate queued: the apply closure may
+// run up to mutation's retry budget, and only the attempt that won the version
+// fence describes a scene the store actually holds. An attempt that lost takes
+// its scene change with it.
+type sceneChangedEffect struct {
+	emitter  lifecycleEmitter
+	gameID   string
+	sceneID  string
+	previous string
+
+	// depth is how deep in a chain of scene changes the event being raised is:
+	// one more than the invocation that queued it was running at.
+	depth int
+}
+
+// deliver raises the event. It returns nil in every case for the reason
+// EmitLifecycle returns nothing: the write this describes has committed, and a
+// subscriber's failure is not the mutating script's to answer for.
+func (s sceneChangedEffect) deliver(_ context.Context, _ *actions.Result) error {
+	s.emitter.emitLifecycleAt(LifecycleSceneChanged, s.gameID, LifecycleSubject{
+		"sceneId":  s.sceneID,
+		"previous": s.previous,
+	}, s.depth)
+
+	return nil
+}
+
 // LifecycleSubject is what one event says about the thing it happened to.
 //
 // A map rather than a type per event because it is converted to a Lua table
@@ -77,6 +174,13 @@ type lifecycleEvent struct {
 	event   string
 	gameID  string
 	subject LifecycleSubject
+
+	// depth is how many events deep in one causal chain this is. Zero for
+	// everything the Go call sites raise — a join, a create and a leave are
+	// caused by a client and not by another event — and more only for a scene
+	// change a script made from inside a handler of the event before it. See
+	// maxSceneChangeDepth.
+	depth int
 }
 
 // lifecycleQueue is the deferred queue every lifecycle event passes through.
@@ -154,6 +258,26 @@ func (q *lifecycleQueue) next() (lifecycleEvent, bool) {
 // costs a slice scan and no Lua state at all, which is what keeps this
 // affordable on the path every player takes.
 func (e *Engine) EmitLifecycle(event, gameID string, subject LifecycleSubject) {
+	e.emitLifecycleAt(event, gameID, subject, 0)
+}
+
+// subscribedTo reports whether any loaded script subscribed to event.
+//
+// It is what lets a caller skip the work of describing an event nobody is
+// listening for — the case on a server whose scripts care about one event out of
+// four — rather than building it and having emitLifecycleAt drop it.
+func (e *Engine) subscribedTo(event string) bool {
+	return slices.Contains(e.lifecycle, event)
+}
+
+// emitLifecycleAt is EmitLifecycle with the depth this event sits at in its
+// chain.
+//
+// Only a scene change caused from inside a lifecycle handler arrives with more
+// than zero, and that number is the whole of what stops such a chain: it is
+// installed into the handling invocation by emit and read back by whatever that
+// handler causes. See maxSceneChangeDepth.
+func (e *Engine) emitLifecycleAt(event, gameID string, subject LifecycleSubject, depth int) {
 	if !slices.Contains(lifecycleEvents, event) {
 		// A caller inside this repo, not a script: the name is a Go constant.
 		log.Printf("refusing to emit the unknown lifecycle event %q for game %q", event, gameID)
@@ -161,7 +285,7 @@ func (e *Engine) EmitLifecycle(event, gameID string, subject LifecycleSubject) {
 		return
 	}
 
-	if !slices.Contains(e.lifecycle, event) {
+	if !e.subscribedTo(event) {
 		return
 	}
 
@@ -174,7 +298,12 @@ func (e *Engine) EmitLifecycle(event, gameID string, subject LifecycleSubject) {
 		return
 	}
 
-	own, dropped := e.events.enqueue(lifecycleEvent{event: event, gameID: gameID, subject: subject})
+	own, dropped := e.events.enqueue(lifecycleEvent{
+		event:   event,
+		gameID:  gameID,
+		subject: subject,
+		depth:   depth,
+	})
 
 	if dropped {
 		log.Printf(
@@ -221,6 +350,14 @@ func (e *Engine) drainLifecycle() {
 func (e *Engine) emit(ev lifecycleEvent) error {
 	ctx, cancel := context.WithTimeout(context.Background(), lifecycleTimeout)
 	defer cancel()
+
+	// How deep this chain already is, carried into the handler's own invocation
+	// so that whatever it causes is queued one link further on rather than back
+	// at zero. This line is the bound on a scene:changed chain: the deadline
+	// above is deliberately fresh, so without it every link would look like the
+	// first and an A→B→A handler would drain forever. See maxSceneChangeDepth,
+	// and TestSceneChanged_CarriesTheChainDepthIntoTheHandler.
+	ctx = withSceneDepth(ctx, ev.depth)
 
 	// No session, on purpose and permanently — the same contract a timer fires
 	// under. Nobody is connected when a game is created or a player drops, and
@@ -287,6 +424,12 @@ type trigger interface {
 	// failed renders a script's own failure — as opposed to a host failure —
 	// for whoever is owed it.
 	failed(err error) (actions.Result, error)
+
+	// hostView picks the view of a script's host table this kind of call runs
+	// under. It is the difference described above made concrete: a capability
+	// the returned table does not carry is *absent* for the length of this call,
+	// rather than present and refusing.
+	hostView(views hostViews) *lua.LTable
 }
 
 // actionTrigger is a dispatched action: a name a client reached through the
@@ -310,6 +453,15 @@ func (t actionTrigger) failed(err error) (actions.Result, error) {
 	return scriptFailure(t.describe(), err), nil
 }
 
+// hostView hands back the narrowed view. A dispatched action is a player
+// waiting on a request, and the only way a script changes anything from here is
+// indri.mutate, whose callback holds the game's lock and is re-run on every
+// version-fence miss — so a capability that blocks on somebody else's server is
+// not on this table at all.
+func (t actionTrigger) hostView(views hostViews) *lua.LTable {
+	return views.action
+}
+
 // lifecycleTrigger is a game lifecycle event: a name only the server raises.
 type lifecycleTrigger struct {
 	event string
@@ -329,6 +481,14 @@ func (t lifecycleTrigger) lookup(h *stateHandlers) (*lua.LFunction, bool) {
 // traceback a frame would have dropped.
 func (t lifecycleTrigger) failed(err error) (actions.Result, error) {
 	return actions.Result{}, fmt.Errorf("%s raised: %w", t.describe(), err)
+}
+
+// hostView hands back everything the script was granted. A lifecycle handler
+// runs on the queue's own goroutine, holds no game lock of its own and has
+// nobody waiting on it, so a call that blocks costs this handler its deadline
+// and nothing else.
+func (t lifecycleTrigger) hostView(views hostViews) *lua.LTable {
+	return views.full
 }
 
 // lifecycleReason explains why name is not a lifecycle event this server

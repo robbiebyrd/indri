@@ -683,7 +683,11 @@ body := io.LimitReader(resp.Body, cfg.MaxBytes+1)
 ```
 - **Constraint:** security — `http` is **not** injected into action-handler context. Blocking network
   I/O inside `indri.mutate` holds the game lock and re-runs on every CAS retry. Grant it only to
-  scheduled/lifecycle scripts, and assert that in the capability test.
+  lifecycle callbacks, and assert that in the capability test.
+  **Correction (as implemented, 067-a0a4):** a *timer-fired* action does not get it either. The
+  scheduler dispatches through the router into `Engine.Invoke`, so it is an `actionTrigger` — the same
+  registered handler a client can dispatch, holding the same game lock inside `indri.mutate`. Granting
+  it there would make the capability depend on who called rather than on what the call can do.
 - **Depends on:** Step 13
 - **Validation:** `go test ./internal/services/lua/`
 

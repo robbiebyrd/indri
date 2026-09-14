@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -578,103 +577,10 @@ func TestValidatePath(t *testing.T) {
 	}
 }
 
-// recordingEmitter records the lifecycle events this service raises, and what
-// the store had been asked to write by the time each one was raised.
+// There is nothing here about scene:changed, and that is the point.
 //
-// The second half is the assertion that matters: a subscriber reading the game
-// at that instant must find the scene already moved, so the event has to come
-// after the write rather than beside it.
-type recordingEmitter struct {
-	store *recordingStore
-
-	events  []string
-	games   []string
-	subject []map[string]interface{}
-	written [][]string
-}
-
-func (r *recordingEmitter) EmitLifecycle(event, gameID string, subject map[string]interface{}) {
-	r.events = append(r.events, event)
-	r.games = append(r.games, gameID)
-	r.subject = append(r.subject, subject)
-	r.written = append(r.written, append([]string{}, r.store.written...))
-}
-
-// Moving a game to another scene raises scene:changed, carrying the game, the
-// scene it moved to and the one it came from, and raises it only after the
-// write.
-func TestSetCurrentSceneRaisesSceneChangedAfterTheWrite(t *testing.T) {
-	store := &recordingStore{}
-	ss := newService(store)
-
-	const previousScene = "lobby"
-
-	store.game.Stage.CurrentScene = previousScene
-	store.game.Stage.Scenes[previousScene] = models.Scene{}
-
-	events := &recordingEmitter{store: store}
-	ss.Lifecycle = events
-
-	if err := ss.SetCurrentScene("game", sceneId); err != nil {
-		t.Fatalf("setting the current scene: %v", err)
-	}
-
-	if len(events.events) != 1 || events.events[0] != "scene:changed" {
-		t.Fatalf("raised %v, want one scene:changed", events.events)
-	}
-
-	if got := events.games[0]; got != store.game.ID.Hex() {
-		t.Fatalf("scene:changed carried game %q, want %q", got, store.game.ID.Hex())
-	}
-
-	if got := events.subject[0]["sceneId"]; got != sceneId {
-		t.Fatalf("scene:changed carried sceneId %v, want %q", got, sceneId)
-	}
-
-	if got := events.subject[0]["previous"]; got != previousScene {
-		t.Fatalf("scene:changed carried previous %v, want %q", got, previousScene)
-	}
-
-	// The write the event describes had already happened when it was raised.
-	if got := events.written[0]; !slices.Contains(got, "stage.currentScene") {
-		t.Fatalf("scene:changed was raised before the write; written so far: %v", got)
-	}
-}
-
-// Setting the scene a game is already on writes the same value back and moves
-// nothing, so it is not a scene change and nothing is raised. A subscriber that
-// dealt a new round on scene:changed would otherwise deal one for a no-op.
-func TestSetCurrentSceneRaisesNothingWhenTheSceneDoesNotMove(t *testing.T) {
-	store := &recordingStore{}
-	ss := newService(store)
-
-	store.game.Stage.CurrentScene = sceneId
-
-	events := &recordingEmitter{store: store}
-	ss.Lifecycle = events
-
-	if err := ss.SetCurrentScene("game", sceneId); err != nil {
-		t.Fatalf("setting the current scene: %v", err)
-	}
-
-	if len(events.events) != 0 {
-		t.Fatalf("setting the scene a game is already on raised %v, want nothing", events.events)
-	}
-}
-
-// A rejected scene never reaches the store, so it never raises either.
-func TestSetCurrentSceneRaisesNothingWhenTheSceneIsRejected(t *testing.T) {
-	store := &recordingStore{}
-	ss := newService(store)
-
-	events := &recordingEmitter{store: store}
-	ss.Lifecycle = events
-
-	if err := ss.SetCurrentScene("game", "not-a-scene"); err == nil {
-		t.Fatal("setting an unknown scene succeeded")
-	}
-
-	if len(events.events) != 0 {
-		t.Fatalf("a rejected scene raised %v, want nothing", events.events)
-	}
-}
+// Story 063 raised it from SetCurrentScene and tested it here, but this service
+// is constructed nowhere, so the tests proved a path production never took. The
+// event is now raised where a game's scene actually moves — a script's own
+// indri.mutate — and is tested against a real store and a real subscriber in
+// internal/services/lua/scene_changed_test.go.
