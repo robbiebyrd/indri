@@ -28,7 +28,7 @@ go test ./internal/services/mutation/                 # one package
 go test -run TestAddPlayer_ConcurrentNoLostUpdates ./internal/repo/game/   # one test
 
 go run ./cmd/server -script ./config.json             # run (defaults to ./config.json)
-go run ./example/tictactoe -script ./config.json      # run the tic-tac-toe example
+go run ./cmd/server -script ./example/tictactoe/config.json   # run the tic-tac-toe example
 air                                                    # hot reload (.air.toml)
 
 # Infrastructure (MongoDB + Redis) — requires a populated .env
@@ -131,8 +131,9 @@ GraphQL mutations call `router.Dispatch` directly with the mutation name as the 
 
 Handlers are a flat, ordered `[]Handler` registry (`register.go`) — multiple handlers may share one
 action, and all matching handlers run. `boot.registerHandlers` installs the built-ins; a game adds its
-own with `router.RegisterHandler(name, action, handler)` **after** `boot.Boot` and before `boot.Serve`
-(see `example/tictactoe/main.go`).
+own with `router.RegisterHandler(name, action, handler)` **after** `boot.Boot` and before `boot.Serve`.
+That is the Go escape hatch, and nothing ships using it: `example/tictactoe` is config plus a Lua
+script and runs on the stock `cmd/server` binary with no main of its own.
 
 ### Outbound: keyframes and deltas
 

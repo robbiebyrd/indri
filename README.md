@@ -29,10 +29,10 @@ so deltas reach players connected to other instances.
 Everything a specific game needs to define is:
 
 1. **A script** — a JSON file describing the starting teams, stage, and scenes (`config.json`).
-2. **Action handlers** — one Go package per verb your game understands.
+2. **Action handlers** — one Lua handler per verb your game understands, in a script the config lists.
 
-`example/tictactoe/` is a complete game in two files: a script, one `move` handler, and one
-`router.RegisterHandler` call in `main.go`.
+`example/tictactoe/` is a complete game in two files: `config.json` and `game.lua`. It has no Go code
+of its own and runs on the stock `cmd/server` binary.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ deltas are computed and published by the application, not tailed from a change s
 To run the example game instead:
 
 ```bash
-go run ./example/tictactoe -script ./config.json
+go run ./cmd/server -script ./example/tictactoe/config.json
 ```
 
 ### Reference client

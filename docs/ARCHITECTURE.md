@@ -46,8 +46,8 @@ requirement.
 ### `cmd/server`
 
 Thin `main`: parse `-script`, install a SIGINT/SIGTERM-cancelled root context, `boot.Boot`, `boot.Serve`.
-`example/tictactoe/main.go` is the same, plus one `router.RegisterHandler` call — that is the entire
-delta between "the framework" and "a game".
+It is the only `main` in the repo. `example/tictactoe` has none: a game is its `config.json` and the
+Lua scripts that config lists, and `-script` is the entire delta between "the framework" and "a game".
 
 ### `internal/injector`
 
