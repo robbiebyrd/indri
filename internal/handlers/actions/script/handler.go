@@ -16,12 +16,38 @@ import (
 	"github.com/robbiebyrd/indri/internal/injector"
 )
 
-// InvocationTimeout bounds one script invocation.
+// InvocationTimeout bounds one script invocation — and, because every
+// invocation below a client message derives its context from that message's,
+// the whole tree of invocations it sets off.
 //
 // It is deliberately far below the 10s lease a Redis lock holds: a script that
 // outlived its game's lock could run beside another instance's attempt on the
 // same game, and while the version fence would still keep the write safe, both
 // scripts would have run. The margin is what keeps that from happening at all.
+//
+// # Why this is what bounds the dispatch tree
+//
+// A script answers an action by sending more actions (indri.send), each of which
+// runs a script that may send more again. The per-invocation caps on that — ten
+// deep and thirty-two wide, in internal/services/lua/host_io.go — do not bound
+// the tree they build: thirty-two at each of ten levels is 32^10, about 1.1e15
+// dispatches. Reading the caps as the bound is a false comfort.
+//
+// The bound is this timeout together with the one line in invoke below that
+// derives it from req.Ctx(). Every queued event is dispatched *inside* the
+// invocation that queued it — internal/services/lua/host_io.go's
+// sendEffect.deliver runs from the ledger flush in
+// internal/services/lua/invoke.go's Engine.Invoke, before that call returns — so
+// each hop lays context.WithTimeout over a context that already carries the root
+// message's deadline, and context.WithDeadline keeps whichever of the two is
+// earlier. Every dispatch in the tree therefore runs under one budget and
+// unwinds together when it expires.
+//
+// Deriving from context.Background() here instead would give every hop a fresh
+// budget and take that bound away, in an edit that reads like a cancellation fix.
+// TestInvoke_DerivesTheInvocationContextFromItsCaller fails on exactly that
+// substitution, and TestSend_MaximumFanOutAtEveryDepthStopsOnTheSharedBudget
+// drives the pathological tree through it.
 const InvocationTimeout = 100 * time.Millisecond
 
 // engine is the only capability this handler needs: run the script registered
