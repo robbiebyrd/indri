@@ -1,0 +1,3 @@
+This directory deliberately holds no fixture files, so that "the harness found
+nothing to run" is proven to be an error rather than a run of zero cases
+reporting success.

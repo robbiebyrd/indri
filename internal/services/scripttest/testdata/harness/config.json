@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "scripts": [
+    {
+      "path": "game.lua"
+    }
+  ],
+  "config": {
+    "pvp": true,
+    "maxTeams": 1,
+    "maxPlayersPerTeam": 1
+  },
+  "teams": {
+    "Team 1": {
+      "name": "Team 1",
+      "playerIds": []
+    }
+  },
+  "stage": {
+    "currentScene": "main",
+    "sceneOrder": ["main"],
+    "scenes": {
+      "main": {
+        "data": {}
+      }
+    }
+  },
+  "data": {}
+}

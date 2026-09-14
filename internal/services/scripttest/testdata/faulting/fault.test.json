@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "name": "a script that faults",
+      "event": {
+        "action": "fault",
+        "session": { "userId": "player-1", "teamId": "Team 1" }
+      },
+      "expected": { "published": {} }
+    }
+  ]
+}

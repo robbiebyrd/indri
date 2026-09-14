@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "scripts": [
+    {
+      "path": "../harness/game.lua",
+      "grants": ["no-such-capability"]
+    }
+  ]
+}

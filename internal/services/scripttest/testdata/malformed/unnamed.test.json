@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "event": { "action": "idle" },
+      "expected": { "published": {} }
+    }
+  ]
+}

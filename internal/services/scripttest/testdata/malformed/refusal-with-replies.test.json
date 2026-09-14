@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {
+      "name": "a refusal that also replies",
+      "event": { "action": "fault" },
+      "expected": { "error": "boom", "replies": [{ "hello": "world" }] }
+    }
+  ]
+}

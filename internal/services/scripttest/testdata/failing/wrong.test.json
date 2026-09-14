@@ -1,0 +1,54 @@
+{
+  "cases": [
+    {
+      "name": "a wrong expected value",
+      "state": {
+        "teams": { "Team 1": { "name": "Team 1", "playerIds": [] } },
+        "stage": { "currentScene": "main", "sceneOrder": ["main"], "scenes": { "main": {} } },
+        "data": { "note": "before" }
+      },
+      "event": {
+        "action": "note",
+        "session": { "userId": "player-1", "teamId": "Team 1" },
+        "payload": { "text": "written" }
+      },
+      "expected": {
+        "published": { "data.note": "something else" }
+      }
+    },
+    {
+      "name": "a delta expected from a handler that writes nothing",
+      "event": {
+        "action": "idle",
+        "session": { "userId": "player-1", "teamId": "Team 1" }
+      },
+      "expected": {
+        "published": { "data.note": "written" }
+      }
+    },
+    {
+      "name": "a refusal expected from a handler that succeeds",
+      "event": {
+        "action": "idle",
+        "session": { "userId": "player-1", "teamId": "Team 1" }
+      },
+      "expected": { "error": "this handler never refuses" }
+    },
+    {
+      "name": "a refusal that had already written",
+      "event": {
+        "action": "half_done",
+        "session": { "userId": "player-1", "teamId": "Team 1" }
+      },
+      "expected": { "error": "but then it failed" }
+    },
+    {
+      "name": "a reply the case did not expect",
+      "event": {
+        "action": "greet",
+        "session": { "userId": "player-1", "teamId": "Team 1" }
+      },
+      "expected": { "published": {} }
+    }
+  ]
+}

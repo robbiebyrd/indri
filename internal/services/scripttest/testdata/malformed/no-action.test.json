@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {
+      "name": "dispatches nothing",
+      "event": { "payload": { "text": "written" } },
+      "expected": { "published": {} }
+    }
+  ]
+}

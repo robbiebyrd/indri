@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "name": "a handler that writes nothing publishes nothing",
+      "event": {
+        "action": "idle",
+        "session": { "userId": "player-1", "teamId": "Team 1" }
+      },
+      "expected": { "published": {} }
+    },
+    {
+      "name": "a handler answers its caller",
+      "event": {
+        "action": "greet",
+        "session": { "userId": "player-1", "teamId": "Team 1" }
+      },
+      "expected": {
+        "published": {},
+        "replies": [{ "hello": "world" }]
+      }
+    },
+    {
+      "name": "a handler writes one field",
+      "state": {
+        "teams": { "Team 1": { "name": "Team 1", "playerIds": [] } },
+        "stage": { "currentScene": "main", "sceneOrder": ["main"], "scenes": { "main": {} } },
+        "data": { "note": "before" }
+      },
+      "event": {
+        "action": "note",
+        "session": { "userId": "player-1", "teamId": "Team 1" },
+        "payload": { "text": "written" }
+      },
+      "expected": {
+        "published": { "data.note": "written" }
+      }
+    }
+  ]
+}

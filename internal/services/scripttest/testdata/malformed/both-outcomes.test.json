@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {
+      "name": "refused and wrote",
+      "event": { "action": "idle" },
+      "expected": { "published": {}, "error": "boom" }
+    }
+  ]
+}

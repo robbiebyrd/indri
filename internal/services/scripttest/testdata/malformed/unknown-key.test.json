@@ -1,0 +1,9 @@
+{
+  "case": [
+    {
+      "name": "a key that is not a key",
+      "event": { "action": "idle" },
+      "expected": { "published": {} }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "name": "the same name twice",
+      "event": { "action": "idle" },
+      "expected": { "published": {} }
+    },
+    {
+      "name": "the same name twice",
+      "event": { "action": "greet" },
+      "expected": { "published": {} }
+    }
+  ]
+}

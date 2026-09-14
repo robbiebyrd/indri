@@ -1,0 +1,300 @@
+{
+  "state": {
+    "teams": {
+      "Player 1": {
+        "name": "Player 1",
+        "playerIds": [],
+        "data": { "marker": "X", "turn": true }
+      },
+      "Player 2": {
+        "name": "Player 2",
+        "playerIds": [],
+        "data": { "marker": "O", "turn": false }
+      }
+    },
+    "stage": {
+      "currentScene": "board",
+      "sceneOrder": ["board"],
+      "scenes": {
+        "board": {
+          "data": {
+            "board": [
+              ["", "", ""],
+              ["", "", ""],
+              ["", "", ""]
+            ]
+          }
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "places the marker at row then column",
+      "event": {
+        "action": "move",
+        "session": { "userId": "player-1", "teamId": "Player 1" },
+        "payload": { "move": "1,2" }
+      },
+      "expected": {
+        "published": {
+          "stage.scenes.board.data.board": [
+            ["", "", ""],
+            ["", "", "X"],
+            ["", "", ""]
+          ],
+          "teams.Player 1.data.turn": false,
+          "teams.Player 2.data.turn": true
+        }
+      }
+    },
+    {
+      "name": "completing the main diagonal wins",
+      "state": {
+        "teams": {
+          "Player 1": {
+            "name": "Player 1",
+            "playerIds": [],
+            "data": { "marker": "X", "turn": true }
+          },
+          "Player 2": {
+            "name": "Player 2",
+            "playerIds": [],
+            "data": { "marker": "O", "turn": false }
+          }
+        },
+        "stage": {
+          "currentScene": "board",
+          "sceneOrder": ["board"],
+          "scenes": {
+            "board": {
+              "data": {
+                "board": [
+                  ["X", "O", ""],
+                  ["O", "X", ""],
+                  ["", "", ""]
+                ]
+              }
+            }
+          }
+        }
+      },
+      "event": {
+        "action": "move",
+        "session": { "userId": "player-1", "teamId": "Player 1" },
+        "payload": { "move": "2,2" }
+      },
+      "expected": {
+        "published": {
+          "stage.scenes.board.data.board": [
+            ["X", "O", ""],
+            ["O", "X", ""],
+            ["", "", "X"]
+          ],
+          "stage.scenes.board.data.winningTeam": "Player 1",
+          "teams.Player 1.data.turn": false,
+          "teams.Player 2.data.turn": true
+        }
+      }
+    },
+    {
+      "name": "filling the board with no line draws",
+      "state": {
+        "teams": {
+          "Player 1": {
+            "name": "Player 1",
+            "playerIds": [],
+            "data": { "marker": "X", "turn": false }
+          },
+          "Player 2": {
+            "name": "Player 2",
+            "playerIds": [],
+            "data": { "marker": "O", "turn": true }
+          }
+        },
+        "stage": {
+          "currentScene": "board",
+          "sceneOrder": ["board"],
+          "scenes": {
+            "board": {
+              "data": {
+                "board": [
+                  ["X", "O", "X"],
+                  ["O", "X", "O"],
+                  ["O", "X", ""]
+                ]
+              }
+            }
+          }
+        }
+      },
+      "event": {
+        "action": "move",
+        "session": { "userId": "player-2", "teamId": "Player 2" },
+        "payload": { "move": "2,2" }
+      },
+      "expected": {
+        "published": {
+          "stage.scenes.board.data.board": [
+            ["X", "O", "X"],
+            ["O", "X", "O"],
+            ["O", "X", "O"]
+          ],
+          "stage.scenes.board.data.winningTeam": "draw",
+          "teams.Player 1.data.turn": true,
+          "teams.Player 2.data.turn": false
+        }
+      }
+    },
+    {
+      "name": "a nearly full board is not a draw",
+      "state": {
+        "teams": {
+          "Player 1": {
+            "name": "Player 1",
+            "playerIds": [],
+            "data": { "marker": "X", "turn": false }
+          },
+          "Player 2": {
+            "name": "Player 2",
+            "playerIds": [],
+            "data": { "marker": "O", "turn": true }
+          }
+        },
+        "stage": {
+          "currentScene": "board",
+          "sceneOrder": ["board"],
+          "scenes": {
+            "board": {
+              "data": {
+                "board": [
+                  ["X", "O", "X"],
+                  ["O", "X", "O"],
+                  ["", "X", ""]
+                ]
+              }
+            }
+          }
+        }
+      },
+      "event": {
+        "action": "move",
+        "session": { "userId": "player-2", "teamId": "Player 2" },
+        "payload": { "move": "2,0" }
+      },
+      "expected": {
+        "published": {
+          "stage.scenes.board.data.board": [
+            ["X", "O", "X"],
+            ["O", "X", "O"],
+            ["O", "X", ""]
+          ],
+          "teams.Player 1.data.turn": true,
+          "teams.Player 2.data.turn": false
+        }
+      }
+    },
+    {
+      "name": "refuses a player out of turn",
+      "event": {
+        "action": "move",
+        "session": { "userId": "player-2", "teamId": "Player 2" },
+        "payload": { "move": "1,1" }
+      },
+      "expected": { "error": "it is not your turn" }
+    },
+    {
+      "name": "refuses an occupied cell",
+      "state": {
+        "teams": {
+          "Player 1": {
+            "name": "Player 1",
+            "playerIds": [],
+            "data": { "marker": "X", "turn": false }
+          },
+          "Player 2": {
+            "name": "Player 2",
+            "playerIds": [],
+            "data": { "marker": "O", "turn": true }
+          }
+        },
+        "stage": {
+          "currentScene": "board",
+          "sceneOrder": ["board"],
+          "scenes": {
+            "board": {
+              "data": {
+                "board": [
+                  ["", "", ""],
+                  ["", "X", ""],
+                  ["", "", ""]
+                ]
+              }
+            }
+          }
+        }
+      },
+      "event": {
+        "action": "move",
+        "session": { "userId": "player-2", "teamId": "Player 2" },
+        "payload": { "move": "1,1" }
+      },
+      "expected": { "error": "spot is taken" }
+    },
+    {
+      "name": "refuses a hexadecimal coordinate",
+      "event": {
+        "action": "move",
+        "session": { "userId": "player-1", "teamId": "Player 1" },
+        "payload": { "move": "0x2,2" }
+      },
+      "expected": { "error": "error converting" }
+    },
+    {
+      "name": "refuses an unauthenticated caller",
+      "event": {
+        "action": "move",
+        "payload": { "move": "1,1" }
+      },
+      "expected": { "error": "not authenticated" }
+    },
+    {
+      "name": "bounds follow a three by two board",
+      "state": {
+        "teams": {
+          "Player 1": {
+            "name": "Player 1",
+            "playerIds": [],
+            "data": { "marker": "X", "turn": true }
+          },
+          "Player 2": {
+            "name": "Player 2",
+            "playerIds": [],
+            "data": { "marker": "O", "turn": false }
+          }
+        },
+        "stage": {
+          "currentScene": "board",
+          "sceneOrder": ["board"],
+          "scenes": {
+            "board": {
+              "data": {
+                "board": [
+                  ["", ""],
+                  ["", ""],
+                  ["", ""]
+                ]
+              }
+            }
+          }
+        }
+      },
+      "event": {
+        "action": "move",
+        "session": { "userId": "player-1", "teamId": "Player 1" },
+        "payload": { "move": "1,2" }
+      },
+      "expected": { "error": "move out of bounds" }
+    }
+  ]
+}
