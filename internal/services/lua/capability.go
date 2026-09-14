@@ -126,12 +126,12 @@ func newEngine(scripts []models.ScriptFile, games GameMutator, caps capabilitySe
 		return nil, err
 	}
 
-	actions, err := collectActions(chunks)
+	actions, lifecycle, err := collectRegistrations(chunks)
 	if err != nil {
 		return nil, err
 	}
 
-	e := &Engine{chunks: chunks, actions: actions, games: games}
+	e := &Engine{chunks: chunks, actions: actions, lifecycle: lifecycle, games: games}
 
 	pool, err := newPool(defaultMaxIdleStates, e.prepare)
 	if err != nil {
@@ -218,8 +218,9 @@ func loadChunk(L *lua.LState, h *stateHandlers, shared *lua.LTable, chunk script
 	}
 
 	// Taken before the chunk runs, so what it registers can be told apart from
-	// what the scripts before it did.
-	before := h.names()
+	// what the scripts before it did. Both namespaces, because a lifecycle
+	// handler needs its script's capabilities exactly as an action handler does.
+	before := h.registered()
 
 	L.Push(L.NewFunctionFromProto(chunk.proto))
 
@@ -304,12 +305,21 @@ func freezeScope(L *lua.LState, scoped *lua.LTable) {
 // before is the manifest as it stood when the chunk started, so a handler
 // another script registered is left alone.
 func bindScope(L *lua.LState, h *stateHandlers, scoped *lua.LTable, before []string) {
-	for action, fn := range h.fns {
-		if slices.Contains(before, action) {
+	for _, name := range h.registered() {
+		if slices.Contains(before, name) {
 			continue
 		}
 
-		h.fns[action] = scopedHandler(L, fn, scoped)
+		fn, ok := h.lookup(name)
+		if !ok {
+			fn, ok = h.lookupLifecycle(name)
+		}
+
+		if !ok {
+			continue
+		}
+
+		h.rebind(name, scopedHandler(L, fn, scoped))
 	}
 }
 

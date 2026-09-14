@@ -11,6 +11,17 @@ import (
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
 )
 
+// censor is the display-name filter, built once at package initialisation.
+//
+// goaway's package-level Censor builds its detector lazily on first use and
+// does so without a lock, so two players joining different games at the same
+// moment race on that write — a real race in a server whose whole purpose is
+// concurrent joins, and one the -race detector reports the first time two
+// joins overlap. A detector built here is written once before anything runs and
+// only read afterwards: Censor takes no lock because it needs none, reading the
+// word lists and mutating nothing.
+var censor = goaway.NewProfanityDetector()
+
 // HasPlayer determines if a given userId is in a game.
 func (s *core) HasPlayer(id string, userId string) bool {
 	g, err := s.Get(id)
@@ -49,11 +60,27 @@ func (s *core) PlayerOnATeam(id string, userId string) bool {
 
 // AddPlayer adds a player to the game.
 func (s *core) AddPlayer(id string, userId string, displayName string) error {
+	_, err := s.AddPlayerResult(id, userId, displayName)
+
+	return err
+}
+
+// AddPlayerResult is AddPlayer, reporting whether the player was actually
+// added.
+//
+// It exists for the same reason MutateResult does, and the caller is the same
+// kind of caller: something with a side effect that may only happen if the
+// write did. GameService.ConnectPlayer raises player:joined from here, and a
+// player rejoining a game they are already in must not raise it a second time
+// — a subscriber that dealt them a hand would deal a second one on every
+// reconnect. A nil error does not answer that question on its own, which is
+// precisely why the flag is threaded out rather than inferred.
+func (s *core) AddPlayerResult(id string, userId string, displayName string) (bool, error) {
 	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
-		return err
+		return false, err
 	}
 
-	return s.Mutate(s.ctx, id, func(g *models.Game) error {
+	return s.MutateResult(s.ctx, id, func(g *models.Game) error {
 		if _, ok := g.Players[userId]; ok {
 			return fmt.Errorf("player with id %v already exists in game %v", userId, id)
 		}
@@ -63,7 +90,7 @@ func (s *core) AddPlayer(id string, userId string, displayName string) error {
 		}
 
 		g.Players[userId] = models.Player{
-			Name:      goaway.Censor(displayName),
+			Name:      censor.Censor(displayName),
 			Host:      !gameHasHost(g),
 			Connected: false,
 		}
@@ -74,16 +101,41 @@ func (s *core) AddPlayer(id string, userId string, displayName string) error {
 
 // RemovePlayer removes a player from a game and any team it was on, atomically.
 func (s *core) RemovePlayer(id string, userId string) error {
+	_, err := s.RemovePlayerResult(id, userId)
+
+	return err
+}
+
+// RemovePlayerResult is RemovePlayer, reporting whether this call is why the
+// player is no longer in the game.
+//
+// Two conditions, and both are needed. The player has to have been there when
+// the winning attempt ran — removing somebody who already left writes an
+// unchanged document and would otherwise look identical to a real removal — and
+// that attempt has to have committed. GameService.RemovePlayer raises
+// player:left from this, and a leave, a kick and a second leave racing each
+// other must between them raise it exactly once.
+//
+// present is assigned on every run of apply rather than only the first, because
+// mutation re-runs apply against the game that actually won each version fence:
+// the answer belongs to the attempt that committed, not to the one that lost.
+func (s *core) RemovePlayerResult(id string, userId string) (bool, error) {
 	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
-		return err
+		return false, err
 	}
 
-	return s.Mutate(s.ctx, id, func(g *models.Game) error {
+	var present bool
+
+	committed, err := s.MutateResult(s.ctx, id, func(g *models.Game) error {
+		_, present = g.Players[userId]
+
 		removePlayerFromTeams(g, userId)
 		delete(g.Players, userId)
 
 		return nil
 	})
+
+	return present && committed, err
 }
 
 // gameHasHost reports whether any player in the in-memory game is the host.

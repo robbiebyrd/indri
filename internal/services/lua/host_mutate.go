@@ -40,7 +40,14 @@ type GameMutator interface {
 // threaded and the pool hands one out to exactly one invocation at a time, so
 // the only goroutine that can read or write this is the one running the call.
 type invocation struct {
-	ctx    context.Context
+	ctx context.Context
+
+	// trigger is why this call is running: a dispatched action, or a lifecycle
+	// event the server raised. It is a value of a closed interface rather than a
+	// flag, so a host function that must behave differently for one kind asks
+	// the trigger rather than testing a boolean — see trigger.
+	trigger trigger
+
 	gameID string
 	games  GameMutator
 

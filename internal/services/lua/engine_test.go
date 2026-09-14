@@ -437,7 +437,9 @@ func TestStateHandlers_AgreesWith(t *testing.T) {
 	tests := []struct {
 		name       string
 		registered []string
+		subscribed []string
 		manifest   []string
+		lifecycle  []string
 		wantErr    bool
 	}{
 		{name: "same actions", registered: []string{"move", "say"}, manifest: []string{"move", "say"}},
@@ -445,6 +447,26 @@ func TestStateHandlers_AgreesWith(t *testing.T) {
 		{name: "one missing", registered: []string{"move"}, manifest: []string{"move", "say"}, wantErr: true},
 		{name: "one extra", registered: []string{"move", "say", "undo"}, manifest: []string{"move", "say"}, wantErr: true},
 		{name: "different name", registered: []string{"jump"}, manifest: []string{"move"}, wantErr: true},
+		{
+			name:       "same lifecycle events",
+			subscribed: []string{LifecyclePlayerJoined},
+			lifecycle:  []string{LifecyclePlayerJoined},
+		},
+		{
+			// The namespaces are compared separately, so a state that subscribed
+			// to nothing must not be excused by having registered the actions.
+			name:       "lifecycle event missing",
+			registered: []string{"move"},
+			manifest:   []string{"move"},
+			lifecycle:  []string{LifecyclePlayerLeft},
+			wantErr:    true,
+		},
+		{
+			name:       "lifecycle event extra",
+			subscribed: []string{LifecycleGameCreated, LifecycleSceneChanged},
+			lifecycle:  []string{LifecycleGameCreated},
+			wantErr:    true,
+		},
 	}
 
 	for _, test := range tests {
@@ -456,10 +478,14 @@ func TestStateHandlers_AgreesWith(t *testing.T) {
 				h.fns[action] = &lua.LFunction{}
 			}
 
-			err := h.agreesWith(test.manifest)
+			for _, event := range test.subscribed {
+				h.lifecycle[event] = &lua.LFunction{}
+			}
+
+			err := h.agreesWith(test.manifest, test.lifecycle)
 			if gotErr := err != nil; gotErr != test.wantErr {
-				t.Fatalf("agreesWith(%v) with %v registered returned %v, wantErr %v",
-					test.manifest, test.registered, err, test.wantErr)
+				t.Fatalf("agreesWith(%v, %v) with %v/%v registered returned %v, wantErr %v",
+					test.manifest, test.lifecycle, test.registered, test.subscribed, err, test.wantErr)
 			}
 		})
 	}

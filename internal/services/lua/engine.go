@@ -79,6 +79,18 @@ type Engine struct {
 	chunks  []scriptChunk
 	actions []string
 
+	// lifecycle is the other half of the manifest: the game lifecycle events
+	// the scripts subscribed to. It is kept apart from actions because the two
+	// namespaces are reached from opposite directions — an action is dispatched
+	// by the router, an event is raised by the server — and everything built
+	// from Actions() (the router registrations, the REST route table, the
+	// scheduler's dispatchable set) must never see one of these.
+	lifecycle []string
+
+	// events is the deferred queue every lifecycle event passes through. See
+	// lifecycleQueue: nothing is dispatched inline by the call that raised it.
+	events lifecycleQueue
+
 	// games is what indri.mutate edits through. It is held here rather than
 	// passed to Invoke because it is a property of the server, not of a
 	// request: every invocation on every state edits the same store.
@@ -135,8 +147,16 @@ func NewEngine(paths []string, games GameMutator) (*Engine, error) {
 
 // Actions returns the declared action names, sorted. The caller gets a copy:
 // the manifest is frozen, and the router is not allowed to disagree with it.
+//
+// Lifecycle events are deliberately not here. An action is dispatchable — by a
+// client, by a timer, over three transports — and an event is not.
 func (e *Engine) Actions() []string {
 	return slices.Clone(e.actions)
+}
+
+// Lifecycle returns the lifecycle events some script subscribed to, sorted.
+func (e *Engine) Lifecycle() []string {
+	return slices.Clone(e.lifecycle)
 }
 
 // Close releases every state the engine is holding.
@@ -158,7 +178,7 @@ func (e *Engine) prepare(L *lua.LState) error {
 		return err
 	}
 
-	return h.agreesWith(e.actions)
+	return h.agreesWith(e.actions, e.lifecycle)
 }
 
 // compileScripts reads and compiles each path, in the order given.
@@ -192,26 +212,27 @@ func compileScripts(paths []string) ([]scriptChunk, error) {
 	return chunks, nil
 }
 
-// collectActions loads the chunks on a state built for the purpose and returns
-// the actions they registered.
+// collectRegistrations loads the chunks on a state built for the purpose and
+// returns both halves of what they registered: the actions, and the lifecycle
+// events they subscribed to.
 //
 // The state is closed again immediately. Nothing it produced can outlive it —
 // the handlers it built are bound to it — so the names are all that is kept,
 // and they are what every other state is then held to.
-func collectActions(chunks []scriptChunk) ([]string, error) {
+func collectRegistrations(chunks []scriptChunk) (actions, lifecycle []string, err error) {
 	L, err := defaultState()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	defer L.Close()
 
 	h, err := installScripts(L, chunks)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return h.names(), nil
+	return h.names(), h.lifecycleNames(), nil
 }
 
 // installScripts installs the host API on L, runs every chunk, and leaves the
@@ -346,8 +367,17 @@ func freezeHostTable(L *lua.LState) {
 type stateHandlers struct {
 	fns map[string]*lua.LFunction
 
-	// sources records the file and line each action was registered from, so a
-	// duplicate can name both halves of the collision.
+	// lifecycle holds the subscriptions, in a map of their own rather than
+	// alongside the actions. Two registries is what makes "an action never
+	// resolves to a lifecycle handler" true by construction instead of by a
+	// check somebody has to remember: the lookup a dispatch performs cannot
+	// reach this map at all.
+	lifecycle map[string]*lua.LFunction
+
+	// sources records the file and line each name was registered from, so a
+	// duplicate can name both halves of the collision. One map covers both
+	// registries because the two namespaces cannot collide — a lifecycle name
+	// carries a colon and an action name may not.
 	sources map[string]string
 
 	// sealed closes registration once loading is over.
@@ -356,36 +386,50 @@ type stateHandlers struct {
 
 func newStateHandlers() *stateHandlers {
 	return &stateHandlers{
-		fns:     make(map[string]*lua.LFunction),
-		sources: make(map[string]string),
+		fns:       make(map[string]*lua.LFunction),
+		lifecycle: make(map[string]*lua.LFunction),
+		sources:   make(map[string]string),
 	}
 }
 
-// register is indri.on(action, fn).
+// register is indri.on(name, fn), for both an action and a lifecycle event.
+//
+// One host function rather than two because a script author registers a handler
+// either way, and the name says which registry it lands in. What that does not
+// mean is one namespace: the name is validated against the rules of whichever
+// kind it claims to be, and lands in that kind's own map.
 //
 // Every refusal here is an L.RaiseError rather than a returned error, so it
 // surfaces as an ordinary Lua error prefixed with the offending script's file
 // and line, and unwinds the PCall that installScripts is running the chunk
 // under. The load then fails, which is the point: a script that cannot register
-// what it asked for must not start.
+// what it asked for must not start. That is what makes a misspelled lifecycle
+// event a boot failure rather than a handler that quietly never runs.
 func (h *stateHandlers) register(L *lua.LState) int {
-	action := L.CheckString(1)
+	name := L.CheckString(1)
 	fn := L.CheckFunction(2)
 
 	if h.sealed {
-		L.RaiseError("indri.on(%q): handlers can only be registered while a script is loading", action)
+		L.RaiseError("indri.on(%q): handlers can only be registered while a script is loading", name)
 	}
 
-	if err := validateAction(action); err != nil {
+	if err := validateRegistration(name); err != nil {
 		L.RaiseError("indri.on: %s", err.Error())
 	}
 
-	if where, dup := h.sources[action]; dup {
-		L.RaiseError("indri.on: the action %q is already registered at %s", action, where)
+	if where, dup := h.sources[name]; dup {
+		L.RaiseError("indri.on: %q is already registered at %s", name, where)
 	}
 
-	h.fns[action] = fn
-	h.sources[action] = strings.TrimSuffix(L.Where(1), ":")
+	h.sources[name] = strings.TrimSuffix(L.Where(1), ":")
+
+	if isLifecycleName(name) {
+		h.lifecycle[name] = fn
+
+		return 0
+	}
+
+	h.fns[name] = fn
 
 	return 0
 }
@@ -401,6 +445,18 @@ func (h *stateHandlers) names() []string {
 	return slices.Sorted(maps.Keys(h.fns))
 }
 
+// lifecycleNames lists the subscribed lifecycle events, sorted.
+func (h *stateHandlers) lifecycleNames() []string {
+	return slices.Sorted(maps.Keys(h.lifecycle))
+}
+
+// registered lists every name this state bound, across both registries. It is
+// what tells a handler a chunk has just registered from one an earlier chunk
+// did — see bindScope.
+func (h *stateHandlers) registered() []string {
+	return append(h.names(), h.lifecycleNames()...)
+}
+
 // lookup returns the closure registered for action on this state.
 func (h *stateHandlers) lookup(action string) (*lua.LFunction, bool) {
 	fn, ok := h.fns[action]
@@ -408,25 +464,59 @@ func (h *stateHandlers) lookup(action string) (*lua.LFunction, bool) {
 	return fn, ok
 }
 
-// agreesWith reports whether this state registered exactly the manifest.
+// lookupLifecycle returns the closure subscribed to event on this state.
+func (h *stateHandlers) lookupLifecycle(event string) (*lua.LFunction, bool) {
+	fn, ok := h.lifecycle[event]
+
+	return fn, ok
+}
+
+// rebind replaces the closure registered under name, in whichever registry
+// holds it. Used by bindScope, which wraps a handler in its script's own host
+// table after the chunk that registered it has run.
+func (h *stateHandlers) rebind(name string, fn *lua.LFunction) {
+	if isLifecycleName(name) {
+		h.lifecycle[name] = fn
+
+		return
+	}
+
+	h.fns[name] = fn
+}
+
+// agreesWith reports whether this state registered exactly the manifest, in
+// both namespaces.
 //
 // A disagreement is a boot failure, not something to paper over. Registration
 // is expected to be deterministic; a script that derives an action name from
 // anything that varies between states — a table address through tostring, a
 // random number — would otherwise give every pooled state a different action
 // set, and which actions a player could reach would depend on which state their
-// message happened to land on.
-func (h *stateHandlers) agreesWith(manifest []string) error {
-	got := h.names()
+// message happened to land on. A lifecycle subscription that varied would be
+// worse, because nothing dispatches it: the event would simply not be told to
+// some of the states, and a game would behave differently depending on which
+// one the emission landed on.
+func (h *stateHandlers) agreesWith(actions, lifecycle []string) error {
+	for _, manifest := range []struct {
+		kind string
+		got  []string
+		want []string
+	}{
+		{kind: "actions", got: h.names(), want: actions},
+		{kind: "lifecycle events", got: h.lifecycleNames(), want: lifecycle},
+	} {
+		if slices.Equal(manifest.got, manifest.want) {
+			continue
+		}
 
-	if slices.Equal(got, manifest) {
-		return nil
+		return fmt.Errorf(
+			"lua script registration is not deterministic: this state registered the %s %v, "+
+				"but the manifest collected at boot says %v",
+			manifest.kind, manifest.got, manifest.want,
+		)
 	}
 
-	return fmt.Errorf(
-		"lua script registration is not deterministic: this state registered %v, but the manifest collected at boot says %v",
-		got, manifest,
-	)
+	return nil
 }
 
 // handlersFor returns the handler map a prepared state owns.
@@ -444,14 +534,34 @@ func handlersFor(L *lua.LState) (*stateHandlers, error) {
 	return h, nil
 }
 
-// validateAction refuses an action name a script may not claim.
-func validateAction(action string) error {
-	if strings.TrimSpace(action) == "" {
-		return errors.New("an action name cannot be empty")
+// isLifecycleName reports whether a registered name claims to be a lifecycle
+// event rather than an action. It says nothing about whether it is one this
+// server raises — validateRegistration decides that.
+func isLifecycleName(name string) bool {
+	return strings.Contains(name, lifecycleMark)
+}
+
+// validateRegistration refuses a name a script may not register under.
+//
+// The two namespaces have different rules and each name is held to the rules of
+// the one it claims. A name carrying the lifecycle mark must be an event this
+// server raises; anything else is an action, and may not be a dispatch phase or
+// a built-in.
+func validateRegistration(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("a name cannot be empty")
 	}
 
-	if reason := reservedReason(action); reason != "" {
-		return fmt.Errorf("the action name %q is reserved: %s", action, reason)
+	if isLifecycleName(name) {
+		if reason := lifecycleReason(name); reason != "" {
+			return errors.New(reason)
+		}
+
+		return nil
+	}
+
+	if reason := reservedReason(name); reason != "" {
+		return fmt.Errorf("the action name %q is reserved: %s", name, reason)
 	}
 
 	return nil

@@ -43,6 +43,35 @@ import (
 // Responses is the one channel every transport writes back, which makes it the
 // only place a script error reaches every player the same way.
 func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request) (actions.Result, error) {
+	// The game id comes from the session the transport authenticated, or — for a
+	// timer, which has no session — from the entry the scheduler stamped it on;
+	// a script never names the game it edits.
+	return e.run(ctx, actionTrigger{action: action}, req.Session, req.GameID(), func(L *lua.LState) (lua.LValue, error) {
+		return requestToLua(L, action, req)
+	})
+}
+
+// argument builds the single table a handler is called with, on the state that
+// will run it.
+//
+// A closure rather than a prepared value because nothing built on one state is
+// portable to another: the state is borrowed inside run, so the table can only
+// be made once run knows which one it got.
+type argument func(L *lua.LState) (lua.LValue, error)
+
+// run is one call to a script handler, whatever kind of call it is.
+//
+// Everything that differs between an action and a lifecycle event is asked of
+// the trigger — which registry holds the handler, what to call this in a
+// message, who is owed a script's failure — so that adding a kind is a type
+// here rather than a condition in the middle of this function. See trigger.
+func (e *Engine) run(
+	ctx context.Context,
+	t trigger,
+	session *models.Session,
+	gameID string,
+	arg argument,
+) (actions.Result, error) {
 	s, err := e.pool.acquire()
 	if err != nil {
 		return actions.Result{}, err
@@ -55,29 +84,29 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 		return actions.Result{}, err
 	}
 
-	fn, ok := h.lookup(action)
+	fn, ok := t.lookup(h)
 	if !ok {
-		// The router is only ever given the actions Actions() declared, and
-		// every state is held to that same manifest, so reaching this is a
-		// wiring failure and not a client's mistake.
-		return actions.Result{}, fmt.Errorf("no lua handler is registered for the action %q", action)
+		// The router is only ever given the actions Actions() declared, every
+		// state is held to that same manifest, and an event is only raised when
+		// the manifest says something subscribed — so reaching this is a wiring
+		// failure and not a client's mistake.
+		return actions.Result{}, fmt.Errorf("no lua handler is registered for %s", t.describe())
 	}
 
-	arg, err := requestToLua(s.L, action, req)
+	value, err := arg(s.L)
 	if err != nil {
-		return actions.Result{}, fmt.Errorf("preparing the %q request for lua: %w", action, err)
+		return actions.Result{}, fmt.Errorf("preparing %s for lua: %w", t.describe(), err)
 	}
 
 	// Installed before the call and cleared after it, so indri.mutate can find
 	// this caller's game, deadline and store, and so the next invocation on this
-	// pooled state cannot find them. The game id comes from the session the
-	// transport authenticated, or — for a timer, which has no session — from the
-	// entry the scheduler stamped it on; a script never names the game it edits.
+	// pooled state cannot find them.
 	inv := &invocation{
 		ctx:      ctx,
-		gameID:   req.GameID(),
+		trigger:  t,
+		gameID:   gameID,
 		games:    e.games,
-		session:  req.Session,
+		session:  session,
 		dispatch: e.Dispatch,
 		timers:   e.Timers,
 	}
@@ -87,12 +116,12 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 
 	// call installs the per-invocation environment, applies ctx and marks the
 	// state spoiled if the interpreter was interrupted rather than unwound.
-	if _, err := s.call(ctx, fn, arg); err != nil {
+	if _, err := s.call(ctx, fn, value); err != nil {
 		// The ledger is dropped with the invocation. A handler that unwound left
 		// the game as it found it — indri.mutate returns its callback's error
 		// rather than writing — so the effects it queued describe a move that
 		// never happened, and the failure is the only honest answer to its caller.
-		return scriptFailure(action, err), nil
+		return t.failed(err)
 	}
 
 	// The handler has returned, so everything it queued is now owed to somebody.
@@ -105,7 +134,7 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 		// write this invocation made has already committed, and a delivery hiccup
 		// must not report the move itself as failed. What the caller loses is the
 		// frame, which the next refresh keyframe replaces.
-		log.Printf("delivering the effects of the lua handler for %q: %v", action, err)
+		log.Printf("delivering the effects of the lua handler for %s: %v", t.describe(), err)
 	}
 
 	return result, nil
@@ -113,6 +142,9 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 
 // scriptFailure renders a script's own failure as the frame its caller is
 // answered with, and logs the whole of it for the operator.
+//
+// what is the trigger's own description of the call, so the log line names both
+// the kind and the name.
 //
 // The frame carries the script's file, line and message. Leaking a server-side
 // path to a client would normally be out of the question; here it is the right
@@ -125,10 +157,10 @@ func (e *Engine) Invoke(ctx context.Context, action string, req actions.Request)
 // The Lua stack traceback is not in the frame. It names the host functions the
 // call passed through as well as the script's own frames, so it is detail for
 // the log, which the id ties the two together with.
-func scriptFailure(action string, err error) actions.Result {
+func scriptFailure(what string, err error) actions.Result {
 	id := correlationID()
 
-	log.Printf("lua script error [%s] running the handler for %q: %v", id, action, err)
+	log.Printf("lua script error [%s] running the handler for %s: %v", id, what, err)
 
 	failure := models.ErrScriptFailed
 	failure.Message = fmt.Sprintf("%s [%s]", raisedMessage(err), id)

@@ -105,6 +105,13 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 	// script's events silently stop working on a server that loaded fine.
 	le.Dispatch = router.Dispatch
 
+	// The other direction: the game service raises a lifecycle event when a
+	// game is created or a player joins or leaves, and the engine is what tells
+	// the scripts. Set here for the same reason Dispatch is — the engine is
+	// built after the services it edits through — and without it a subscribed
+	// script would simply never hear anything.
+	gs.Lifecycle = le
+
 	// Both halves of the timer feature, wired to the same store. The assignment
 	// is also the compile-time check that the adapter still satisfies what the
 	// lua package asks for.

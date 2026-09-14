@@ -34,7 +34,9 @@ type Storer interface {
 	HasPlayer(id string, userId string) bool
 	PlayerOnATeam(id string, userId string) bool
 	AddPlayer(id string, userId string, displayName string) error
+	AddPlayerResult(id string, userId string, displayName string) (added bool, err error)
 	RemovePlayer(id string, userId string) error
+	RemovePlayerResult(id string, userId string) (removed bool, err error)
 	ConnectPlayer(id string, userId string) error
 	DisconnectPlayer(id string, userId string) error
 	HasHost(id string) bool

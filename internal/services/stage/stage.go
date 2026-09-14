@@ -9,6 +9,7 @@ import (
 	"github.com/robbiebyrd/indri/internal/models"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
+	luaService "github.com/robbiebyrd/indri/internal/services/lua"
 )
 
 // sceneStore is the narrow part of the game store this service writes through:
@@ -24,13 +25,18 @@ type sceneStore interface {
 type Service struct {
 	gameRepo    sceneStore
 	gameService *gameService.Service
+
+	// Lifecycle is where scene:changed goes. An exported field set at boot, for
+	// the reason gameService.Service.Lifecycle is one: the script engine is
+	// built after the services it edits through. A nil one raises nothing.
+	Lifecycle gameService.LifecycleEmitter
 }
 
 // NewService creates a new repository for accessing game data.
 func NewService(gameRepo *gameRepo.Store, gameService *gameService.Service) *Service {
 	return &Service{
-		gameRepo,
-		gameService,
+		gameRepo:    gameRepo,
+		gameService: gameService,
 	}
 }
 
@@ -332,9 +338,22 @@ func (ss *Service) SetCurrentScene(gameId string, sceneId string) error {
 		return fmt.Errorf("scene %s is not a valid scene", sceneId)
 	}
 
+	previous := g.Stage.CurrentScene
+
 	err = ss.gameRepo.UpdateField(g.ID.Hex(), "stage.currentScene", sceneId)
 	if err != nil {
 		return err
+	}
+
+	// After the write, and only when the scene actually moved. UpdateField is a
+	// single conditional write with no version fence to lose, so its nil error
+	// is the commit; setting the scene a game is already on changes nothing and
+	// is not a scene change.
+	if previous != sceneId && ss.Lifecycle != nil {
+		ss.Lifecycle.EmitLifecycle(luaService.LifecycleSceneChanged, g.ID.Hex(), map[string]interface{}{
+			"sceneId":  sceneId,
+			"previous": previous,
+		})
 	}
 
 	return nil

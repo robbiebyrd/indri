@@ -12,15 +12,38 @@ import (
 	"github.com/robbiebyrd/indri/internal/models"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	scriptRepo "github.com/robbiebyrd/indri/internal/repo/script"
+	luaService "github.com/robbiebyrd/indri/internal/services/lua"
 )
 
+// LifecycleEmitter tells a game script that something happened to a game.
+//
+// It returns nothing, and that is the contract rather than an oversight: a
+// lifecycle event is raised after the write that caused it has committed, so a
+// subscriber's bug must not be able to fail a create, a join or a leave. The
+// emitter logs what goes wrong and the originating action carries on.
+//
+// Narrow and free of Lua for the same reason lua.GameMutator is narrow and free
+// of MongoDB: *lua.Engine satisfies it, and this package does not import the
+// script engine to say so.
+type LifecycleEmitter interface {
+	EmitLifecycle(event, gameID string, subject map[string]interface{})
+}
+
 type Service struct {
-	gameRepo *gameRepo.Store
+	gameRepo gameRepo.Storer
 	Script   *models.Script
+
+	// Lifecycle is where this service's events go. It is an exported field set
+	// at boot rather than a constructor argument, the same shape as
+	// lua.Engine.Dispatch and for the same reason: the script engine is built
+	// after the services it edits through, so the two are tied together once
+	// both exist. A nil one raises nothing, which is what a server running no
+	// scripts wants.
+	Lifecycle LifecycleEmitter
 }
 
 // NewService creates a new repository for accessing game data.
-func NewService(gameRepo *gameRepo.Store, scriptRepo *scriptRepo.Store) (*Service, error) {
+func NewService(gameRepo gameRepo.Storer, scriptRepo *scriptRepo.Store) (*Service, error) {
 	if gameRepo == nil {
 		return nil, errors.New("the game service did not receive a game repo")
 	}
@@ -29,6 +52,20 @@ func NewService(gameRepo *gameRepo.Store, scriptRepo *scriptRepo.Store) (*Servic
 		gameRepo: gameRepo,
 		Script:   scriptRepo.Get(),
 	}, nil
+}
+
+// emit raises one lifecycle event, if anything is there to hear it.
+//
+// Called only after the write it describes has committed. Every call site pairs
+// it with a committed flag the store reported rather than with a nil error,
+// because a mutation that aborted also returns nil and an event about a write
+// that did not happen is worse than no event at all.
+func (gs *Service) emit(event, gameID string, subject map[string]interface{}) {
+	if gs.Lifecycle == nil {
+		return
+	}
+
+	gs.Lifecycle.EmitLifecycle(event, gameID, subject)
 }
 
 // New creates a new game, with or without a Code.
@@ -53,6 +90,15 @@ func (gs *Service) New(gameCode string, private bool) (*models.Game, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// After the insert, never before it: a subscriber's first act is usually to
+	// read or edit the game it was told about, and a game that is not stored yet
+	// is a game it cannot find. An insert has no version fence to lose, so its
+	// nil error is the commit.
+	gs.emit(luaService.LifecycleGameCreated, g.ID.Hex(), map[string]interface{}{
+		"code":    g.Code,
+		"private": g.Private,
+	})
 
 	return g, nil
 }
@@ -190,11 +236,33 @@ func (gs *Service) Sanitize(game *models.Game) *models.Game {
 func (gs *Service) ConnectPlayer(id string, teamId string, userId string, displayName string) error {
 	log.Printf("Adding player %v to game lobby\n", userId)
 
-	err := gs.gameRepo.AddPlayer(id, userId, displayName)
+	// The flag, not the error: a player who is already in the game joined once
+	// and must not raise player:joined again on every reconnect.
+	added, err := gs.gameRepo.AddPlayerResult(id, userId, displayName)
 	if err != nil {
 		log.Printf("Error adding player %v to game lobby: %v\n", userId, err)
 	}
 
+	if err := gs.placeOnTeam(id, teamId, userId); err != nil {
+		return err
+	}
+
+	// Raised here rather than beside AddPlayerResult so that a subscriber
+	// reading the game finds the player where the join left them — on their
+	// team — rather than half-joined.
+	if added {
+		gs.emit(luaService.LifecyclePlayerJoined, id, map[string]interface{}{
+			"userId": userId,
+			"teamId": teamId,
+		})
+	}
+
+	return nil
+}
+
+// placeOnTeam puts a joining player on the team they asked for, whichever of
+// the four cases they are in.
+func (gs *Service) placeOnTeam(id string, teamId string, userId string) error {
 	switch {
 	case gs.gameRepo.HasPlayerOnTeam(id, teamId, userId):
 		log.Printf("Player %v is on team %v\n", userId, teamId)
@@ -219,7 +287,19 @@ func (gs *Service) DisconnectPlayer(id string, userId string) error {
 }
 
 func (gs *Service) RemovePlayer(id string, userId string) error {
-	return gs.gameRepo.RemovePlayer(id, userId)
+	// Removing somebody who is not in the game writes an unchanged document and
+	// is not a departure; the store answers which it was. A leave and a kick
+	// racing therefore raise player:left once between them, not twice.
+	removed, err := gs.gameRepo.RemovePlayerResult(id, userId)
+	if err != nil {
+		return err
+	}
+
+	if removed {
+		gs.emit(luaService.LifecyclePlayerLeft, id, map[string]interface{}{"userId": userId})
+	}
+
+	return nil
 }
 
 func (gs *Service) getAutoGeneratedGameCode() (string, error) {
