@@ -87,6 +87,12 @@ type Engine struct {
 	// scheduler's dispatchable set) must never see one of these.
 	lifecycle []string
 
+	// hooks is the third manifest: the built-in actions the scripts wrapped
+	// with indri.before or indri.after_action. It is a type of its own rather
+	// than a slice because it is settled by the first state the pool builds
+	// instead of by collectRegistrations — see hookManifest.
+	hooks hookManifest
+
 	// events is the deferred queue every lifecycle event passes through. See
 	// lifecycleQueue: nothing is dispatched inline by the call that raised it.
 	events lifecycleQueue
@@ -178,7 +184,16 @@ func (e *Engine) prepare(L *lua.LState) error {
 		return err
 	}
 
-	return h.agreesWith(e.actions, e.lifecycle)
+	if err := h.agreesWith(e.actions, e.lifecycle); err != nil {
+		return err
+	}
+
+	// The hook manifest is settled here rather than in collectRegistrations,
+	// which is where the other two come from. The first state through this is
+	// the one newPool builds inside newEngine, so the manifest is complete
+	// before any caller can hold the engine; every state after it is held to
+	// what that one registered. See hookManifest.
+	return e.hooks.agree(h.hooks.names())
 }
 
 // compileScripts reads and compiles each path, in the order given.
@@ -322,6 +337,13 @@ func installHostAPI(L *lua.LState, h *stateHandlers) error {
 	indri.RawSetString("at", L.NewFunction(hostAt))
 	indri.RawSetString("cancel", L.NewFunction(hostCancel))
 
+	// The two ways a script extends a built-in action rather than declaring one
+	// of its own. They land in a registry no dispatch can reach, so hooking
+	// "join" is not a way to acquire the name "join" — see hooks.go.
+	for kind, name := range hostHookNames {
+		indri.RawSetString(name, L.NewFunction(hookRegistrar(h, kind)))
+	}
+
 	return nil
 }
 
@@ -374,6 +396,12 @@ type stateHandlers struct {
 	// reach this map at all.
 	lifecycle map[string]*lua.LFunction
 
+	// hooks is the third registry: what indri.before and indri.after_action
+	// wrapped around a built-in action. A third map and not an entry in either
+	// of the two above, because those two are what a dispatch resolves against
+	// and a hook must never be reachable that way. See stateHooks.
+	hooks *stateHooks
+
 	// sources records the file and line each name was registered from, so a
 	// duplicate can name both halves of the collision. One map covers both
 	// registries because the two namespaces cannot collide — a lifecycle name
@@ -388,6 +416,7 @@ func newStateHandlers() *stateHandlers {
 	return &stateHandlers{
 		fns:       make(map[string]*lua.LFunction),
 		lifecycle: make(map[string]*lua.LFunction),
+		hooks:     newStateHooks(),
 		sources:   make(map[string]string),
 	}
 }

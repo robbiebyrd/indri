@@ -253,6 +253,11 @@ func loadChunk(L *lua.LState, h *stateHandlers, shared *lua.LTable, chunk script
 	// handler needs its script's capabilities exactly as an action handler does.
 	before := h.registered()
 
+	// The third registry is snapshotted separately because it is keyed by kind
+	// and action rather than by name, and because registered() must stay the
+	// dispatchable namespaces alone — see bindHooks.
+	beforeHooks := h.hooks.names()
+
 	L.Push(L.NewFunctionFromProto(chunk.proto))
 
 	if err := L.PCall(0, 0, nil); err != nil {
@@ -262,6 +267,7 @@ func loadChunk(L *lua.LState, h *stateHandlers, shared *lua.LTable, chunk script
 	if scoped {
 		freezeScope(L, views)
 		bindScope(L, h, views, before)
+		bindHooks(L, h, views, beforeHooks)
 	}
 
 	return nil
