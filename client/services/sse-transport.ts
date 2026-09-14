@@ -18,8 +18,10 @@
 // rejects without a token, and why the supervisor's candidate list is a
 // function rather than a fixed array.
 import {endpoints} from "./endpoints.ts"
+import {openEventStream} from "./sse-stream.ts"
 import {Handlers} from "./transport.ts"
 
+import type {EventStream, StreamFactory} from "./sse-stream.ts"
 import type {ClientTransport} from "./transport.ts"
 
 /** Reads the current session token, or null when there is no session. */
@@ -74,8 +76,9 @@ export class SseRestTransport implements ClientTransport {
     readonly name = "sse-rest"
 
     private readonly token: TokenSource
+    private readonly openStream: StreamFactory
 
-    private stream?: EventSource = undefined
+    private stream?: EventStream = undefined
     private apiBase = ""
 
     private readonly messageHandlers = new Handlers<(data: string) => void>()
@@ -84,8 +87,9 @@ export class SseRestTransport implements ClientTransport {
 
     private pending?: {resolve: () => void, reject: (err: Error) => void} = undefined
 
-    constructor(token: TokenSource) {
+    constructor(token: TokenSource, openStream: StreamFactory = openEventStream) {
         this.token = token
+        this.openStream = openStream
     }
 
     connect(url: string): Promise<void> {
@@ -96,13 +100,6 @@ export class SseRestTransport implements ClientTransport {
             ))
         }
 
-        // react-native ships no EventSource. Rejecting keeps this channel out
-        // of the rotation on a platform that cannot run it, rather than
-        // throwing a ReferenceError up through the supervisor.
-        if (typeof EventSource === "undefined") {
-            return Promise.reject(new Error("sse-rest: this platform has no EventSource"))
-        }
-
         const routes = endpoints(url)
         this.apiBase = routes.api
 
@@ -110,27 +107,40 @@ export class SseRestTransport implements ClientTransport {
             this.pending = {resolve, reject}
         })
 
-        // NEVER LOG THIS URL, or anything derived from it: the token is a
-        // bearer credential and it travels in the query string because
-        // EventSource cannot set an Authorization header.
-        const stream = new EventSource(`${routes.events}?token=${encodeURIComponent(token)}`)
+        let stream: EventStream
+        try {
+            // The token is handed over separately from the url, never
+            // interpolated into it here: web has to append it as a query
+            // parameter, native sends it as a header, and only the
+            // implementation knows which.
+            stream = this.openStream(routes.events, token)
+        } catch (err) {
+            // A platform with no stream implementation at all. Rejecting keeps
+            // the channel out of the rotation rather than throwing up through
+            // the supervisor.
+            this.settle(false, err instanceof Error ? err.message : String(err))
+
+            return connected
+        }
+
         this.stream = stream
 
-        stream.onopen = () => {
+        stream.onOpen(() => {
             this.settle(true, "")
             this.openHandlers.emit()
-        }
+        })
 
-        stream.onmessage = (e: MessageEvent) => {
-            this.messageHandlers.emit(e.data as string)
-        }
+        stream.onMessage((data) => {
+            this.messageHandlers.emit(data)
+        })
 
-        stream.onerror = () => {
+        stream.onError(() => {
             const reason = "sse-rest: event stream error"
 
-            // EventSource reconnects on its own. That is a SECOND reconnection
-            // policy competing with the supervisor's, so the stream is closed
-            // here and the decision handed upward — one owner, one backoff.
+            // Both implementations can reconnect on their own. That is a
+            // SECOND reconnection policy competing with the supervisor's, so
+            // the stream is closed here and the decision handed upward — one
+            // owner, one backoff.
             this.closeStream()
 
             if (this.settle(false, reason)) {
@@ -138,7 +148,7 @@ export class SseRestTransport implements ClientTransport {
             }
 
             this.closeHandlers.emit(reason)
-        }
+        })
 
         return connected
     }
@@ -240,10 +250,10 @@ export class SseRestTransport implements ClientTransport {
             return
         }
 
-        this.stream.onopen = null
-        this.stream.onmessage = null
-        this.stream.onerror = null
-        this.stream.close()
+        // The implementation detaches its own handlers; close() must not
+        // surface as a failure (see EventStream.close in sse-stream.ts).
+        const stream = this.stream
         this.stream = undefined
+        stream.close()
     }
 }
