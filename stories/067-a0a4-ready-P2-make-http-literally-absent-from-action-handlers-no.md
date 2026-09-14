@@ -1,11 +1,11 @@
 ---
 id: 067-a0a4
 title: Make http literally absent from action handlers, not refused at call time
-status: pending
+status: ready
 priority: P2
 type: refactor
 created: "2026-09-13T18:45:08.719Z"
-updated: "2026-09-13T18:45:24.081Z"
+updated: "2026-09-14T00:46:32.327Z"
 dependencies: ["063"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 14

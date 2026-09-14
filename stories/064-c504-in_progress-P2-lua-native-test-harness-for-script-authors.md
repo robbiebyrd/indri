@@ -1,15 +1,16 @@
 ---
 id: 064-c504
 title: Lua-native test harness for script authors
-status: pending
+status: in_progress
 priority: P2
 type: feature
 created: "2026-09-12T01:28:39.045Z"
-updated: "2026-09-12T01:29:08.785Z"
+updated: "2026-09-14T00:48:25.735Z"
 dependencies: ["060"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 20
 depends_on: ["stories/060-905f-pending-P2-port-tic-tac-toe-to-lua-and-delete-its-go-handlers.md"]
+started_at: "2026-09-14T00:48:25.734Z"
 ---
 
 # Lua-native test harness for script authors

@@ -1,15 +1,16 @@
 ---
 id: 061-3ade
 title: Lua hooks on built-in actions
-status: pending
+status: in_progress
 priority: P2
 type: feature
 created: "2026-09-12T01:28:39.039Z"
-updated: "2026-09-12T01:29:08.568Z"
+updated: "2026-09-14T00:48:25.587Z"
 dependencies: ["060", "045"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 16
 depends_on: ["stories/060-905f-pending-P2-port-tic-tac-toe-to-lua-and-delete-its-go-handlers.md", "stories/045-795e-pending-P1-thread-context-and-action-name-through-dispatch-mu.md"]
+started_at: "2026-09-14T00:48:25.586Z"
 ---
 
 # Lua hooks on built-in actions
