@@ -1,15 +1,16 @@
 ---
 id: 062-e7ab
 title: Transport parity and observability for script actions
-status: pending
+status: in_progress
 priority: P2
 type: feature
 created: "2026-09-12T01:28:39.042Z"
-updated: "2026-09-12T01:29:08.643Z"
+updated: "2026-09-14T01:22:42.096Z"
 dependencies: ["061"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 17
 depends_on: ["stories/061-3ade-pending-P2-lua-hooks-on-built-in-actions.md"]
+started_at: "2026-09-14T01:22:42.095Z"
 ---
 
 # Transport parity and observability for script actions

@@ -1,15 +1,16 @@
 ---
 id: 066-e99f
 title: Document server-side Lua scripting
-status: pending
+status: in_progress
 priority: P3
 type: chore
 created: "2026-09-12T01:28:39.048Z"
-updated: "2026-09-12T01:29:08.931Z"
+updated: "2026-09-14T01:22:42.209Z"
 dependencies: ["062"]
 plan: plans/lua-game-scripting.md
 plan_step: Step 18
 depends_on: ["stories/062-e7ab-pending-P2-transport-parity-and-observability-for-script-acti.md"]
+started_at: "2026-09-14T01:22:42.208Z"
 ---
 
 # Document server-side Lua scripting
