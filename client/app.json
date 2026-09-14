@@ -46,7 +46,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "./plugins/with-fmt-consteval-fix"
     ],
     "experiments": {
       "typedRoutes": true
