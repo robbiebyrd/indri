@@ -654,6 +654,20 @@ for (const n of [1, 10, 100, 500]) { /* push n deltas, time the final reapply, l
   settled deltas into the base is a follow-up, deliberately out of scope here.
 - **Validation:** `pnpm test`, then record the figures in this file.
 
+**Measured results (Node 22, MacBook M-series, 2026-09-15):**
+
+| Accumulated deltas | reapply cost |
+|---|---|
+| 1 | ~0.21 ms |
+| 10 | ~0.19 ms |
+| 100 | ~0.29 ms |
+| 500 | ~0.49 ms |
+
+**Recommendation:** The deep-clone-and-replay approach is fast enough at PoC scale. Even at 500
+accumulated deltas the per-message cost is under 0.5 ms. Optimisation (folding settled deltas into the
+base on keyframe) is not warranted until widget counts exceed ~1000 or delta accumulation grows past
+~1000 between reconnects.
+
 ## Acceptance Criteria
 
 - [ ] A layout at `game.data.layout` renders on web **and** a native device, with the widget set selected by
