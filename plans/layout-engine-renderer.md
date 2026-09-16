@@ -670,27 +670,27 @@ base on keyframe) is not warranted until widget counts exceed ~1000 or delta acc
 
 ## Acceptance Criteria
 
-- [ ] A layout at `game.data.layout` renders on web **and** a native device, with the widget set selected by
+- [x] A layout at `game.data.layout` renders on web **and** a native device, with the widget set selected by
       `stage.currentScene`.
-- [ ] Grid accepts 8×8 through 4096×4096 with no cell materialisation at any size.
-- [ ] Non-absolute widgets are reported as an issue when they overlap; absolute widgets position in `%` only
+- [x] Grid accepts 8×8 through 4096×4096 with no cell materialisation at any size.
+- [x] Non-absolute widgets are reported as an issue when they overlap; absolute widgets position in `%` only
       and may overlap freely.
-- [ ] Text, image and sub-grid widgets render, each with background colour, background image, linear
+- [x] Text, image and sub-grid widgets render, each with background colour, background image, linear
       gradient, and borders.
-- [ ] Malformed layout data (overlap, out-of-bounds, zero-size, unknown type, excess depth) degrades to a
+- [x] Malformed layout data (overlap, out-of-bounds, zero-size, unknown type, excess depth) degrades to a
       dev-visible issue and still renders — never a crash, never a blank board.
-- [ ] Lua at game/scene/widget level runs sandboxed (`io`/`os`/`require`/`load` all `nil`), survives errors
+- [x] Lua at game/scene/widget level runs sandboxed (`io`/`os`/`require`/`load` all `nil`), survives errors
       without breaking render, and reaches the server only through `indri.send`.
-- [ ] A Lua-driven interaction completes the loop: press → `indri.send` → server → delta → every client.
-- [ ] Tic-tac-toe is playable end-to-end with zero hardcoded board markup in `app/index.tsx`.
-- [ ] `pnpm test` runs every `*.node-test.ts` and passes.
+- [x] A Lua-driven interaction completes the loop: press → `indri.send` → server → delta → every client.
+- [x] Tic-tac-toe is playable end-to-end with zero hardcoded board markup in `app/index.tsx`.
+- [x] `pnpm test` runs every `*.node-test.ts` and passes.
 
 ## Checklist (non-TDD cleanup)
 
-- [ ] `pnpm run lint` and `pnpm run typecheck` clean
-- [ ] Step 2's fengari/Hermes result written down — it is the one finding nobody can cheaply rederive
-- [ ] Step 13's benchmark numbers recorded in this file
-- [ ] `docs/ARCHITECTURE.md` gains a layout-engine section; `CLAUDE.md` notes `game.data.layout` as the
+- [x] `pnpm run lint` and `pnpm run typecheck` clean
+- [x] Step 2's fengari/Hermes result written down — it is the one finding nobody can cheaply rederive
+- [x] Step 13's benchmark numbers recorded in this file
+- [x] `docs/ARCHITECTURE.md` gains a layout-engine section; `CLAUDE.md` notes `game.data.layout` as the
       canonical location and `privateData` as reserved
-- [ ] `client/app/board/spike.tsx` deleted
-- [ ] `client/services/players.ts` is a 0-byte placeholder — delete it or fill it, don't leave it
+- [x] `client/app/board/spike.tsx` deleted
+- [x] `client/services/players.ts` is a 0-byte placeholder — delete it or fill it, don't leave it
