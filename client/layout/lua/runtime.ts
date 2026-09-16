@@ -3,7 +3,7 @@ import type {lua_State} from "fengari"
 
 import {createSandboxedState} from "./state.ts"
 
-export type LuaResult = {ok: true} | {ok: false; error: string}
+export type LuaResult = {ok: true; value?: string} | {ok: false; error: string}
 
 /**
  * Maximum Lua VM instructions before the budget hook fires.
