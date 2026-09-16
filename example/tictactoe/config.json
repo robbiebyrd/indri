@@ -55,6 +55,26 @@
       }
     }
   },
-  "data": {},
+  "data": {
+    "layout": {
+      "grid": {"cols": 12, "rows": 12},
+      "scenes": {
+        "board": {
+          "script": "indri.on(\"stateChanged\", function()\n  local g = indri.state()\n  local b = g.stage.scenes.board.data.board\n  for r = 0, 2 do for c = 0, 2 do\n    widget(string.format(\"c%d%d\", r, c)).setConfig({ text = b[r][c] })\n  end end\nend)\n\nindri.on(\"widgetPress\", function(id)\n  indri.send(\"move\", { move = string.sub(id,2,2) .. \",\" .. string.sub(id,3,3) })\nend)\n",
+          "widgets": {
+            "c00": {"type": "text", "placement": {"kind": "grid", "col": 0, "row": 0, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
+            "c01": {"type": "text", "placement": {"kind": "grid", "col": 4, "row": 0, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
+            "c02": {"type": "text", "placement": {"kind": "grid", "col": 8, "row": 0, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
+            "c10": {"type": "text", "placement": {"kind": "grid", "col": 0, "row": 4, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
+            "c11": {"type": "text", "placement": {"kind": "grid", "col": 4, "row": 4, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
+            "c12": {"type": "text", "placement": {"kind": "grid", "col": 8, "row": 4, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
+            "c20": {"type": "text", "placement": {"kind": "grid", "col": 0, "row": 8, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
+            "c21": {"type": "text", "placement": {"kind": "grid", "col": 4, "row": 8, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
+            "c22": {"type": "text", "placement": {"kind": "grid", "col": 8, "row": 8, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}}
+          }
+        }
+      }
+    }
+  },
   "privateData": {}
 }

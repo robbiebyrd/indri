@@ -53,6 +53,8 @@ type FengariLuaExt = {
     lua_toboolean(L: lua_State, idx: number): boolean
     lua_isnil(L: lua_State, idx: number): boolean
     lua_next(L: lua_State, idx: number): number
+    lua_toproxy(L: lua_State, idx: number): (L: lua_State) => void
+    lua_gettable(L: lua_State, idx: number): number
     LUA_TNIL: number
     LUA_TBOOLEAN: number
     LUA_TNUMBER: number
@@ -294,11 +296,37 @@ export class LuaSession implements HostApi {
         luaExt.lua_setfield(L, tblIdx, to_luastring("state"))
 
         // indri.on(event, fn)
+        // We save a Lua proxy reference and call the function directly via lua_pcall
+        // rather than through fengari-interop's JS→Lua calling convention, which
+        // prepends `this` as the first argument and would shift all intended parameters.
         luaExt.lua_pushcfunction(L, (innerL) => {
             try {
                 const event = luaExt.lua_tojsstring(innerL, 1) as LuaEvent
-                const fn = fengariInterop.tojs(innerL, 2) as LuaHandler
-                self.events.on("game", event, fn)
+                const fnProxy = luaExt.lua_toproxy(innerL, 2)
+                self.events.on("game", event, (...args: unknown[]) => {
+                    const callL = self.L
+                    fnProxy(callL)
+                    let nargs = 0
+                    for (const arg of args) {
+                        if (typeof arg === "string") {
+                            luaExt.lua_pushstring(callL, to_luastring(arg))
+                        } else if (typeof arg === "number") {
+                            luaExt.lua_pushnumber(callL, arg)
+                        } else if (arg === null || arg === undefined) {
+                            lua.lua_pushnil(callL)
+                        } else {
+                            fengariInterop.push(callL, arg)
+                        }
+                        nargs++
+                    }
+                    const status = lua.lua_pcall(callL, nargs, 0, 0)
+                    if (status !== lua.LUA_OK) {
+                        const raw = lua.lua_tostring(callL, -1)
+                        const err = raw ? to_jsstring(raw) : "(unknown error)"
+                        lua.lua_pop(callL, 1)
+                        console.warn("[LuaSession] indri.on handler error:", err)
+                    }
+                })
             } catch (_) {
                 // ignore
             }
@@ -311,7 +339,7 @@ export class LuaSession implements HostApi {
             const n = lua.lua_gettop(innerL)
             const parts: unknown[] = []
             for (let i = 1; i <= n; i++) {
-                parts.push(tojs(innerL, i))
+                parts.push(luaValueToJs(innerL, i))
             }
             console.log(...parts)
             return 0

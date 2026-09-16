@@ -44,10 +44,12 @@ export class EventRegistry {
         if (widgetId !== null) scopes.push(widgetId)
         scopes.push("scene", "game")
 
+        // Pass widgetId as the first argument so handlers can identify the source widget.
+        const handlerArgs = widgetId !== null ? [widgetId, ...args] : args
         for (const scope of scopes) {
             const fn = this.handlers.get(key(scope, event))
             if (fn) {
-                const result = fn(...args)
+                const result = fn(...handlerArgs)
                 if (result === false) break
             }
         }
