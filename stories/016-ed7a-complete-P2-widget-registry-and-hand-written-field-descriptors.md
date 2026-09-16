@@ -1,0 +1,54 @@
+---
+id: 016-ed7a
+title: Widget registry and hand-written field descriptors
+status: complete
+priority: P2
+type: feature
+created: "2026-09-09T19:04:59.221Z"
+updated: "2026-09-16T03:58:38.943Z"
+dependencies: ["015"]
+plan: plans/layout-engine-renderer.md
+plan_step: Step 6
+depends_on: ["stories/015-dd9e-pending-P2-layout-schema-with-defensive-non-throwing-parse.md"]
+completed_at: "2026-09-16T03:58:38.942Z"
+---
+
+# Widget registry and hand-written field descriptors
+
+## Problem Statement
+
+Each widget must declare its config shape so a dashboard can auto-draw a configuration panel. Zod introspection is not viable: v4 moved ._def to ._zod.def and broke real consumers, and zod's own library-author guidance forbids reaching into internals. Descriptors are therefore hand-written, and a bidirectional test is what keeps them in sync with the validation schema.
+
+## Acceptance Criteria
+
+- [x] VERIFY: cd client && pnpm test
+- [x] FieldDescriptor is a discriminated union over kinds: text, number, color, boolean, date, select, multiselect, uri
+- [x] WidgetDefinition carries type, zod schema, fields, defaults, Component and an api() returning the functions Lua may call
+- [x] A test asserts bidirectionally that every key in a widget's config schema has a matching field descriptor AND every descriptor has a matching schema key
+- [x] Registering a duplicate widget type throws
+- [x] Each widget's defaults validate against its own schema
+- [x] No code introspects zod internals (._def or ._zod.def) anywhere
+- [x] The uri field kind accepts an accept discriminator of image or video, so adding a video widget later needs no schema change
+
+## Files
+
+- client/layout/registry/fields.ts
+- client/layout/registry/registry.ts
+- client/layout/registry/registry.node-test.ts
+
+## Proof
+
+- [x] [completeness] Completeness
+- [x] [feature-availability] Feature availability
+- [x] [robustness] Robustness
+- [x] [resilience] Resilience
+- [x] [security] Security
+- [x] [defense-in-depth] Defense in depth
+- [x] [input-validation] Input validation
+- [x] [thread-safety] Thread safety
+- [x] [configurability] Configurability
+
+## Work Log
+
+### 2026-09-16T03:58:35.040Z - Implemented FieldDescriptor types, WidgetDefinition interface, and widget registry with duplicate guard and reset. All tests pass.
+

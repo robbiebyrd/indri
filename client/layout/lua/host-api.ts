@@ -1,7 +1,14 @@
+import {createRequire} from "node:module"
 import {lauxlib, lua, to_jsstring, to_luastring} from "fengari"
-import {push as fengariPush, tojs, luaopen_js} from "fengari-interop"
 
 import type {lua_State} from "fengari"
+
+const _require = createRequire(import.meta.url)
+const fengariInterop = _require("fengari-interop") as {
+    push(L: lua_State, v: unknown): void
+    tojs(L: lua_State, idx: number): unknown
+    luaopen_js(L: lua_State): number
+}
 
 import {createRuntimeState, runChunk} from "./runtime.ts"
 import type {LuaResult} from "./runtime.ts"
@@ -43,11 +50,47 @@ type FengariLuaExt = {
     lua_pushnumber(L: lua_State, n: number): void
     lua_tojsstring(L: lua_State, idx: number): string
     lua_tonumber(L: lua_State, idx: number): number
+    lua_toboolean(L: lua_State, idx: number): boolean
     lua_isnil(L: lua_State, idx: number): boolean
+    lua_next(L: lua_State, idx: number): number
+    LUA_TNIL: number
+    LUA_TBOOLEAN: number
+    LUA_TNUMBER: number
+    LUA_TSTRING: number
+    LUA_TTABLE: number
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const luaExt = lua as unknown as FengariLuaExt
+
+// ---------------------------------------------------------------------------
+// Lua table → plain JS object (avoids fengari-interop proxy's ownKeys issue)
+// ---------------------------------------------------------------------------
+
+function luaValueToJs(L: lua_State, idx: number): unknown {
+    const t = lua.lua_type(L, idx)
+    if (t === luaExt.LUA_TBOOLEAN) return luaExt.lua_toboolean(L, idx)
+    if (t === luaExt.LUA_TNUMBER)  return luaExt.lua_tonumber(L, idx)
+    if (t === luaExt.LUA_TSTRING)  { const r = lua.lua_tostring(L, idx); return r ? to_jsstring(r) : "" }
+    if (t === luaExt.LUA_TTABLE)   return luaTableToJs(L, idx)
+    return null
+}
+
+function luaTableToJs(L: lua_State, tableIdx: number): Record<string, unknown> {
+    const top = lua.lua_gettop(L)
+    const absIdx = tableIdx > 0 ? tableIdx : top + tableIdx + 1
+    const result: Record<string, unknown> = {}
+    lua.lua_pushnil(L)
+    while (luaExt.lua_next(L, absIdx) !== 0) {
+        const keyType = lua.lua_type(L, -2)
+        let k: string | undefined
+        if (keyType === luaExt.LUA_TSTRING) { const r = lua.lua_tostring(L, -2); k = r ? to_jsstring(r) : undefined }
+        else if (keyType === luaExt.LUA_TNUMBER) k = String(luaExt.lua_tonumber(L, -2))
+        if (k !== undefined) result[k] = luaValueToJs(L, -1)
+        lua.lua_pop(L, 1)
+    }
+    return result
+}
 
 // ---------------------------------------------------------------------------
 // HostApi interface
@@ -217,8 +260,8 @@ export class LuaSession implements HostApi {
     installHostApi(sendFn: (action: string, payload: Record<string, unknown>) => void): void {
         const L = this.L
 
-        // Initialise JS interop so fengariPush / tojs work in this state.
-        lauxlib.luaL_requiref(L, to_luastring("js"), luaopen_js, 0)
+        // Initialise JS interop so fengariInterop.push works in this state.
+        lauxlib.luaL_requiref(L, to_luastring("js"), fengariInterop.luaopen_js, 0)
         lua.lua_pop(L, 1)
 
         // Build the `indri` table
@@ -229,16 +272,14 @@ export class LuaSession implements HostApi {
         const self = this
         luaExt.lua_pushcfunction(L, (innerL) => {
             try {
-                const action = luaExt.lua_tojsstring(innerL, 1)
-                const rawPayload = tojs(innerL, 2)
-                // Convert Lua table to a plain JS object via JSON round-trip
-                const payload =
-                    rawPayload !== null && typeof rawPayload === "object"
-                        ? (JSON.parse(JSON.stringify(rawPayload)) as Record<string, unknown>)
-                        : {}
+                const actionRaw = lua.lua_tostring(innerL, 1)
+                const action = actionRaw ? to_jsstring(actionRaw) : ""
+                const payload = lua.lua_type(innerL, 2) === luaExt.LUA_TTABLE
+                    ? luaTableToJs(innerL, 2)
+                    : {}
                 sendFn(action, payload)
-            } catch (_) {
-                // send errors must not crash the Lua runtime
+            } catch (e) {
+                console.warn("[LuaSession] indri.send dropped:", e)
             }
             return 0
         })
@@ -247,7 +288,7 @@ export class LuaSession implements HostApi {
         // indri.state()
         luaExt.lua_pushcfunction(L, (innerL) => {
             const snap = self.state()
-            fengariPush(innerL, snap)
+            fengariInterop.push(innerL, snap)
             return 1
         })
         luaExt.lua_setfield(L, tblIdx, to_luastring("state"))
@@ -256,7 +297,7 @@ export class LuaSession implements HostApi {
         luaExt.lua_pushcfunction(L, (innerL) => {
             try {
                 const event = luaExt.lua_tojsstring(innerL, 1) as LuaEvent
-                const fn = tojs(innerL, 2) as LuaHandler
+                const fn = fengariInterop.tojs(innerL, 2) as LuaHandler
                 self.events.on("game", event, fn)
             } catch (_) {
                 // ignore
