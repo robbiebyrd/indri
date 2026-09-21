@@ -270,7 +270,7 @@ The server enforces rules 1–3 at boot and panics with a descriptive message if
 ### Server (Go)
 | File | Change |
 |---|---|
-| `internal/services/events/events.go` | `OpCode uint8` type + constants; `ChangeEvent` fields `UpdatedFields` → `[][2]interface{}`, `RemovedFields` → `[]interface{}`, short json tags |
+| `internal/services/events/events.go` | `OpCode uint8` type + constants; `ChangeEvent` fields `UpdatedFields` → `[][]interface{}`, `RemovedFields` → `[]interface{}`, short json tags |
 | `internal/services/events/delta.go` | `diffInto` gains array-index branch; `SanitizeDelta` strips metadata paths and adapts to new pair-array types; `HasChanges` updated; `Diff` returns pair-array |
 | `internal/services/events/inprocess.go` | Adapt to new `ChangeEvent` field types |
 | `internal/services/events/redis.go` | Adapt serialization/deserialization to new `ChangeEvent` shape |
