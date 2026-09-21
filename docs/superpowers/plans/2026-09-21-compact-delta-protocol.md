@@ -6,7 +6,7 @@
 
 **Architecture:** The server computes diffs as before but now emits `ChangeEvent` as pair-arrays `[[path, value], ...]` with positional integer paths; at join time the server sends a one-time layout frame (`o:4`) followed by a slim keyframe wrapper (`{sv, game}`); all server→client messages are MessagePack by default with JSON fallback on `?debug=1`.
 
-**Tech Stack:** Go (server) with a MessagePack library (verify exact import path before use — look for `github.com/vmihaiela/msgpack/v5` or similar in the ecosystem), TypeScript client with `@msgpack/msgpack`.
+**Tech Stack:** Go (server) with a MessagePack library — verify the exact module path via `go get` before using (see Task 8 Step 1; do NOT hardcode a guessed path); TypeScript client with `@msgpack/msgpack`.
 
 **Spec:** `docs/superpowers/specs/2026-09-21-compact-delta-protocol-design.md`
 
@@ -666,7 +666,7 @@ git commit -m "feat(models): add UserID field to Player for slot→user resoluti
 - Modify: `internal/repo/game/team.go`
 - Modify: `internal/repo/game/host.go`
 - Modify: `internal/repo/game/interface.go`
-- Modify: `internal/services/game/game.go`
+- Modify: `internal/services/game/game.go` (delete `ConnectPlayer`; update `RemovePlayer`/`DisconnectPlayer`)
 - Modify: `internal/handlers/actions/join/handler.go`
 - Modify: `internal/handlers/actions/create/handler.go`
 - Modify: `internal/handlers/actions/kick/handler.go`
@@ -969,18 +969,22 @@ DisconnectPlayer(id string, slotId string) error
 
 The `var _ Storer = (*Store)(nil)` compile-time assertion will fail until `AssignSlot` is added here and the deleted methods are removed from both the interface and the Store.
 
-- [ ] **Step 10: Update `GameService.RemovePlayer` and `DisconnectPlayer` in `internal/services/game/game.go`**
+- [ ] **Step 10: Update `GameService` in `internal/services/game/game.go`**
 
-These functions delegate to `gameRepo`; their parameter names follow the new naming:
+**Delete `ConnectPlayer`** entirely. It calls `AddPlayer`, `HasPlayerOnTeam`, `ChangePlayerTeam`, `AddPlayerToTeam`, and `ConnectPlayer` on the game repo — all of which are removed from the Storer interface in Step 9. After Step 9, `ConnectPlayer` will produce a compile error. It is superseded by `AssignSlot` (called directly from handlers). Check that no handler still calls `GameService.ConnectPlayer` after Steps 6 and 7 migrate `join`/`create` to `AssignSlot` — if any remain, update them.
+
+**Update `RemovePlayer` and `DisconnectPlayer`** — change parameter name to `slotId`:
 ```go
 func (gs *Service) RemovePlayer(id string, slotId string) error {
-    return gs.GameRepo.RemovePlayer(id, slotId)
+    return gs.gameRepo.RemovePlayer(id, slotId)
 }
 
 func (gs *Service) DisconnectPlayer(id string, slotId string) error {
-    return gs.GameRepo.DisconnectPlayer(id, slotId)
+    return gs.gameRepo.DisconnectPlayer(id, slotId)
 }
 ```
+
+Note: the field name is `gs.gameRepo` (lowercase), not `gs.GameRepo` — check the actual struct field name in `game.go` before writing.
 
 - [ ] **Step 11: Update `leave` handler to use `SlotID`**
 
@@ -1413,6 +1417,7 @@ import (
     "encoding/json"
     "github.com/robbiebyrd/indri/internal/transport"
     "github.com/robbiebyrd/indri/internal/services/events"
+    ws "github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
 // slimKeyframe returns a sanitized, layout-stripped copy of the game wrapped
@@ -1435,8 +1440,10 @@ func (svc *Service) slimKeyframe(g *models.Game) (events.KeyframeWrapper, error)
     }
 
     slimMap, _ := events.ToMap(slim)
-    posMap := events.BuildPositionalMap(slimMap)
-    svRaw, _ := json.Marshal(posMap)
+    // Hash the slim keyframe's JSON directly. encoding/json sorts map keys
+    // deterministically, so the same schema always produces the same sv hash.
+    // Do NOT hash posMap (map[string]int) — Go maps have non-deterministic iteration.
+    svRaw, _ := json.Marshal(slimMap)
     svHash := sha256.Sum256(svRaw)
     sv := hex.EncodeToString(svHash[:8])
 
@@ -1497,14 +1504,23 @@ git commit -m "feat(protocol): layout frame + slim keyframe wrapper with schema 
 - Modify: `internal/transport/ws/ws.go`
 - Modify: `go.mod` / `go.sum`
 
-- [ ] **Step 1: Verify the MessagePack library import path**
+- [ ] **Step 1: Verify and add the MessagePack library**
+
+Do not guess the import path. Run the following to find and install the correct module:
 
 ```bash
-cd /Users/robbiebyrd/Projects/indri && go get github.com/vmihailab/msgpack/v5 2>&1 | head -5 || \
-go get github.com/vmihaiela/msgpack/v5 2>&1 | head -5
+cd /Users/robbiebyrd/Projects/indri && \
+go get github.com/vmihailab/msgpack/v5@latest 2>&1 | head -3
 ```
 
-Use whichever resolves. The import path must be verified before writing any code.
+If that fails (module not found), search for the correct path:
+```bash
+curl -s "https://pkg.go.dev/search?q=msgpack&m=package&limit=5" | grep -o 'vmihailab[^"]*\|vmihaiela[^"]*\|shamaton[^"]*' | head -5
+```
+
+Or run: `go search github.com/... msgpack` in the project.
+
+**Do not write any import path into source code until `go get` succeeds and the module appears in `go.sum`.** Use whatever import path `go get` confirms. The rest of this task uses `msgpack "VERIFIED_IMPORT_PATH"` as a placeholder — replace with the actual path found in Step 1.
 
 - [ ] **Step 2: Add debug-flag detection in `ws.go` HandleConnect**
 
@@ -1527,7 +1543,7 @@ Add an exported helper that any package can call with a `transport.Conn`:
 ```go
 import (
     "encoding/json"
-    msgpack "github.com/vmihailab/msgpack/v5" // use verified import path
+    msgpack "VERIFIED_IMPORT_PATH" // replace with the path confirmed by go get in Step 1
     "github.com/robbiebyrd/indri/internal/transport"
 )
 
@@ -1556,27 +1572,48 @@ The `WriteKeyframe` and `WriteSlimKeyframe` helpers added in Task 7 already call
 
 - [ ] **Step 5: Update `broadcast.go` — encode delta per-connection**
 
-The broadcast path for deltas goes through `internal/services/broadcast/broadcast.go`. Look for the function that calls `Transport.Broadcast` or `Transport.BroadcastFilter` with a JSON-encoded `ChangeEvent`. Because different connections may have different `debug` flags, use `BroadcastFilter` to encode per-connection:
+The broadcast path for deltas goes through `internal/services/broadcast/broadcast.go`. The existing `broadcastToSessions(sessionIds []string, jsonData []byte)` method calls `bs.t.BroadcastFilter(jsonData, ...)` which sends the same bytes to all matched sessions. Per-connection encoding requires iterating connections individually.
+
+Replace `broadcastToSessions` with a version that uses `bs.t.Conns()` and `ws.WriteEncoded`:
 
 ```go
 import (
+    "slices"
     ws "github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
-// Replace the existing Broadcast call with per-connection encoding.
-// Read the actual broadcast.go first to match the exact existing signature.
-// The key change: wherever json.Marshal(event) + Broadcast(data) is called,
-// replace with BroadcastFilter that calls ws.WriteEncoded(conn, event) per-conn.
-return bs.Transport.BroadcastFilter(nil, func(conn transport.Conn) bool {
-    if !isSessionInGame(conn, gameID) {
-        return false
+// broadcastToSessions sends payload to connections whose "sessionId" key is in sessionIds.
+// Encoding is per-connection so debug-mode connections receive JSON while others receive MessagePack.
+func (bs *Service) broadcastToSessions(sessionIds []string, payload interface{}) error {
+    if len(sessionIds) == 0 {
+        return nil
     }
-    _ = ws.WriteEncoded(conn, event) // non-fatal; log the error if needed
-    return false // return false so BroadcastFilter skips its own write
-})
+
+    conns, err := bs.t.Conns()
+    if err != nil {
+        return err
+    }
+
+    for _, conn := range conns {
+        value, ok := conn.Get("sessionId")
+        if !ok {
+            continue
+        }
+        id, ok := value.(string)
+        if !ok || !slices.Contains(sessionIds, id) {
+            continue
+        }
+        if err := ws.WriteEncoded(conn, payload); err != nil {
+            log.Printf("broadcast write error to session %s: %v", id, err)
+        }
+    }
+    return nil
+}
 ```
 
-Also keep error writes in handlers as plain JSON — errors are always human-readable and don't need binary encoding.
+Because `broadcastToSessions`'s parameter changes from `jsonData []byte` to `payload interface{}`, also update all call sites — `sendToGame`, `sendToTeam`, `sendToPlayer`, `sendToPlayers` — to pass the raw payload instead of pre-marshaling. Remove the `json.Marshal(data)` calls in `Broadcast`, `BroadcastToPlayer`, and `BroadcastToPlayers`; pass `data` directly instead of `jsonData`. The `sendToAll` (which calls `bs.t.Broadcast`) still needs to marshal — keep it as-is.
+
+Keep error writes in handlers as plain JSON — errors are always human-readable and don't need binary encoding.
 
 - [ ] **Step 6: Build and run**
 
@@ -1892,16 +1929,29 @@ function delta(ts: number, updated?: [PathSegment, unknown][], removed?: PathSeg
 }
 ```
 
-Then update every existing test call site that uses the old `delta(ts, {key: val})` map format. The `delta()` helper is called with a key-value map in the current tests. Replace each call with:
-```typescript
-// Old:  delta(1000, {"n": 2})
-// New:  delta(1000, [["n", 2]])   ← string path, valid in both modes
+Then update every existing test call site that uses the old `delta(ts, {key: val})` map format. The existing test file (`game-state-parser.node-test.ts`) has exactly 5 calls to update:
 
-// Old:  delta(1000, undefined, ["b"])
-// New:  delta(1000, undefined, ["b"])   ← removed paths are strings here, no change needed
+```typescript
+// Line 17: delta(2000, {n: 2})
+delta(2000, [["n", 2]])
+
+// Line 24: delta(3000, {x: "new"})
+delta(3000, [["x", "new"]])
+
+// Line 31: delta(5000, {a: 1})
+delta(5000, [["a", 1]])
+
+// Line 40: delta(2000, {"__proto__.polluted": "yes"})
+delta(2000, [["__proto__.polluted", "yes"]])
+
+// Line 47: delta(2000, {"board.0.1": "X"})
+delta(2000, [["board.0.1", "X"]])
+
+// Line 55: delta(2000, undefined, ["b"])  — no change needed
+// removed paths are already strings; they remain strings in the new format
 ```
 
-The parser's `toDotPath` handles plain string paths (non-numeric) as pass-through, so existing tests remain correct without any positional-map changes.
+The parser's `toDotPath` handles plain string paths (non-numeric) as pass-through, so these string-path tests remain correct after the parser is updated.
 
 - [ ] **Step 2: Run to verify they fail**
 
