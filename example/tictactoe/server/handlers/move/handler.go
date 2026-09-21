@@ -85,6 +85,10 @@ func (h *TicTacToeMoveHandler) Handle(
 
 		updateSceneData := *sceneData.PublicData
 
+		if sceneHasWinner(updateSceneData) {
+			return fmt.Errorf("game is over")
+		}
+
 		var boardData [][]string
 
 		for _, item := range updateSceneData["board"].(bson.A) {
@@ -122,7 +126,7 @@ func (h *TicTacToeMoveHandler) Handle(
 					return err
 				}
 
-				updateSceneData["winningTeam"] = winningTeam
+				updateSceneData["winningTeam"] = *winningTeam
 			}
 		}
 
@@ -273,6 +277,11 @@ func (h *TicTacToeMoveHandler) findWinner(boardData [][]string) (string, bool) {
 	}
 
 	return "draw", true
+}
+
+func sceneHasWinner(sceneData map[string]interface{}) bool {
+	_, ok := sceneData["winningTeam"]
+	return ok
 }
 
 func (h *TicTacToeMoveHandler) getUniqueStrings(data [][]string, includeEmpty bool) []string {

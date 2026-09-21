@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/robbiebyrd/indri/example/tictactoe/server/handlers/move"
+	"github.com/robbiebyrd/indri/example/tictactoe/server/handlers/restart"
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/services/boot"
 )
@@ -35,6 +36,7 @@ func main() {
 	}
 
 	router.RegisterHandler("ttt_move", "move", move.New(i))
+	router.RegisterHandler("ttt_restart", "restart", restart.New(i))
 
 	if err := boot.Serve(i); err != nil {
 		log.Fatalf("server exited with error: %v", err)

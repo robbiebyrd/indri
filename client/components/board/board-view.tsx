@@ -140,7 +140,7 @@ export function BoardView({game, onSend}: Props) {
 }
 
 const styles = StyleSheet.create({
-    container: {flex: 1},
+    container: {flex: 1, alignSelf: 'stretch'},
     board: {flex: 1},
     issuesOverlay: {
         position: "absolute",

@@ -1,10 +1,9 @@
-import {createRequire} from "node:module"
 import {lauxlib, lua, to_jsstring, to_luastring} from "fengari"
+import fengariInterop_ from "fengari-interop"
 
 import type {lua_State} from "fengari"
 
-const _require = createRequire(import.meta.url)
-const fengariInterop = _require("fengari-interop") as {
+const fengariInterop = fengariInterop_ as {
     push(L: lua_State, v: unknown): void
     tojs(L: lua_State, idx: number): unknown
     luaopen_js(L: lua_State): number

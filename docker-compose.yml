@@ -1,6 +1,6 @@
 services:
   mongodb:
-    image: mongo:latest
+    image: mongo:8.0.11
     env_file:
       - .env
     ports:

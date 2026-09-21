@@ -34,21 +34,9 @@
       "board": {
         "data": {
           "board": [
-            [
-              "",
-              "",
-              ""
-            ],
-            [
-              "",
-              "",
-              ""
-            ],
-            [
-              "",
-              "",
-              ""
-            ]
+            ["", "", ""],
+            ["", "", ""],
+            ["", "", ""]
           ]
         },
         "privateData": {}
@@ -57,10 +45,10 @@
   },
   "data": {
     "layout": {
-      "grid": {"cols": 12, "rows": 12},
+      "grid": {"cols": 12, "rows": 16},
       "scenes": {
         "board": {
-          "script": "indri.on(\"stateChanged\", function()\n  local g = indri.state()\n  local b = g.stage.scenes.board.data.board\n  for r = 0, 2 do for c = 0, 2 do\n    widget(string.format(\"c%d%d\", r, c)).setConfig({ text = b[r][c] })\n  end end\nend)\n\nindri.on(\"widgetPress\", function(id)\n  indri.send(\"move\", { move = string.sub(id,2,2) .. \",\" .. string.sub(id,3,3) })\nend)\n",
+          "script": "indri.on(\"stateChanged\", function()\n  local g = indri.state()\n  local b = g.stage.scenes.board.data.board\n  for r = 0, 2 do for c = 0, 2 do\n    widget(string.format(\"c%d%d\", r, c)).setConfig({ text = b[r][c] })\n  end end\n  local winner = g.stage.scenes.board.data.winningTeam\n  if winner == nil then\n    widget(\"result\").setConfig({ text = \"\" })\n    widget(\"restart\").setConfig({ text = \"\" })\n  elseif winner == \"draw\" then\n    widget(\"result\").setConfig({ text = \"It's a Draw!\" })\n    widget(\"restart\").setConfig({ text = \"Play Again\" })\n  else\n    local teams = g.teams\n    local name = winner\n    if teams[winner] ~= nil then\n      name = teams[winner].name\n    end\n    widget(\"result\").setConfig({ text = name .. \" Wins!\" })\n    widget(\"restart\").setConfig({ text = \"Play Again\" })\n  end\nend)\n\nindri.on(\"widgetPress\", function(id)\n  if id == \"restart\" then\n    indri.send(\"restart\", {})\n  elseif string.sub(id, 1, 1) == \"c\" then\n    indri.send(\"move\", { move = string.sub(id,2,2) .. \",\" .. string.sub(id,3,3) })\n  end\nend)\n",
           "widgets": {
             "c00": {"type": "text", "placement": {"kind": "grid", "col": 0, "row": 0, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
             "c01": {"type": "text", "placement": {"kind": "grid", "col": 4, "row": 0, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
@@ -70,7 +58,9 @@
             "c12": {"type": "text", "placement": {"kind": "grid", "col": 8, "row": 4, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
             "c20": {"type": "text", "placement": {"kind": "grid", "col": 0, "row": 8, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
             "c21": {"type": "text", "placement": {"kind": "grid", "col": 4, "row": 8, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
-            "c22": {"type": "text", "placement": {"kind": "grid", "col": 8, "row": 8, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}}
+            "c22": {"type": "text", "placement": {"kind": "grid", "col": 8, "row": 8, "w": 4, "h": 4}, "config": {"text": "", "fontSize": 72, "align": "center"}},
+            "result":  {"type": "text", "placement": {"kind": "grid", "col": 0, "row": 12, "w": 12, "h": 2}, "config": {"text": "", "fontSize": 28, "align": "center"}},
+            "restart": {"type": "text", "placement": {"kind": "grid", "col": 0, "row": 14, "w": 12, "h": 2}, "config": {"text": "", "fontSize": 24, "align": "center"}}
           }
         }
       }

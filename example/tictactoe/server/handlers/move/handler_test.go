@@ -444,6 +444,27 @@ func TestGetBoardSize_OneRowBoard(t *testing.T) {
 	}
 }
 
+func TestSceneHasWinner_WinnerSet(t *testing.T) {
+	data := map[string]interface{}{"board": nil, "winningTeam": "Player 1"}
+	if !sceneHasWinner(data) {
+		t.Error("expected sceneHasWinner to return true when winningTeam is set")
+	}
+}
+
+func TestSceneHasWinner_DrawSet(t *testing.T) {
+	data := map[string]interface{}{"board": nil, "winningTeam": "draw"}
+	if !sceneHasWinner(data) {
+		t.Error("expected sceneHasWinner to return true when winningTeam is 'draw'")
+	}
+}
+
+func TestSceneHasWinner_NoWinner(t *testing.T) {
+	data := map[string]interface{}{"board": nil}
+	if sceneHasWinner(data) {
+		t.Error("expected sceneHasWinner to return false when winningTeam is absent")
+	}
+}
+
 func TestGetBoardSize_OneColumnBoard(t *testing.T) {
 	board := [][]string{
 		{"X"},
