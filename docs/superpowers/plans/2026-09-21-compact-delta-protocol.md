@@ -1506,19 +1506,18 @@ git commit -m "feat(protocol): layout frame + slim keyframe wrapper with schema 
 
 - [ ] **Step 1: Verify and add the MessagePack library**
 
-Do not guess the import path. Run the following to find and install the correct module:
+Do not guess the import path. Search pkg.go.dev for a Go MessagePack library first:
 
 ```bash
-cd /Users/robbiebyrd/Projects/indri && \
-go get github.com/vmihailab/msgpack/v5@latest 2>&1 | head -3
+open "https://pkg.go.dev/search?q=msgpack&m=package" 2>/dev/null || \
+  echo "Open https://pkg.go.dev/search?q=msgpack&m=package in a browser"
 ```
 
-If that fails (module not found), search for the correct path:
+Pick a well-maintained library (check stars, recent commits, and Go module compatibility). Then install it:
+
 ```bash
-curl -s "https://pkg.go.dev/search?q=msgpack&m=package&limit=5" | grep -o 'vmihailab[^"]*\|vmihaiela[^"]*\|shamaton[^"]*' | head -5
+cd /Users/robbiebyrd/Projects/indri && go get <confirmed-import-path>@latest
 ```
-
-Or run: `go search github.com/... msgpack` in the project.
 
 **Do not write any import path into source code until `go get` succeeds and the module appears in `go.sum`.** Use whatever import path `go get` confirms. The rest of this task uses `msgpack "VERIFIED_IMPORT_PATH"` as a placeholder — replace with the actual path found in Step 1.
 
@@ -1929,7 +1928,7 @@ function delta(ts: number, updated?: [PathSegment, unknown][], removed?: PathSeg
 }
 ```
 
-Then update every existing test call site that uses the old `delta(ts, {key: val})` map format. The existing test file (`game-state-parser.node-test.ts`) has exactly 5 calls to update:
+Then update every existing test call site that uses the old `delta(ts, {key: val})` map format. The existing test file (`game-state-parser.node-test.ts`) has 6 call sites; 5 need to change (line 55 is already correct):
 
 ```typescript
 // Line 17: delta(2000, {n: 2})
