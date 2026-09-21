@@ -49,6 +49,7 @@
 | `internal/handlers/actions/leave/handler.go` | Pass `*session.SlotID` to RemovePlayer |
 | `internal/entrypoints/websocket.go` | Pass `*session.SlotID` to DisconnectPlayer |
 | `internal/transport/ws/ws.go` | Detect `?debug=1` at connect; expose `WriteEncoded` |
+| `internal/services/broadcast/broadcast.go` | Encode delta per-connection using `ws.WriteEncoded` |
 | `internal/services/boot/boot.go` | Boot validation: maxTeams == len(teams), maxPlayersPerTeam > 0 |
 | `example/tictactoe/server/handlers/move/handler.go` | Update player lookup to use session SlotID |
 | `example/tictactoe/server/handlers/restart/handler.go` | Update player lookup to use session SlotID |
@@ -75,7 +76,11 @@
 - Modify: `internal/services/events/events.go`
 - Modify: `internal/services/events/delta_test.go`
 
-- [ ] **Step 1: Write failing test for new ChangeEvent shape**
+- [ ] **Step 1: Remove old `TestSanitizeDelta_*` tests that use the old map/slice signature**
+
+In `internal/services/events/delta_test.go`, delete `TestSanitizeDelta_DropsPrivatePaths` and `TestSanitizeDelta_StripsNestedPrivateFromValue`. Both call `events.SanitizeDelta(map[string]interface{}, []string)`. When Step 4 changes that signature they will produce a compile error of the wrong kind (type mismatch instead of the expected "failing test"). Step 6 adds their replacements using the new signature.
+
+- [ ] **Step 2: Write failing test for new ChangeEvent shape**
 
 Add to `internal/services/events/delta_test.go`:
 ```go
@@ -97,14 +102,14 @@ func TestSanitizeDelta_PairArrayFormat(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 3: Run test to verify it fails**
 
 ```bash
 go test ./internal/services/events/ -run TestSanitizeDelta_PairArrayFormat -v
 ```
 Expected: compile error — `SanitizeDelta` not yet accepting new types.
 
-- [ ] **Step 3: Update `events.go`**
+- [ ] **Step 4: Update `events.go`**
 
 Replace the file contents:
 ```go
@@ -146,7 +151,7 @@ type Publisher interface {
 }
 ```
 
-- [ ] **Step 4: Update `SanitizeDelta` in `delta.go`**
+- [ ] **Step 5: Update `SanitizeDelta` in `delta.go`**
 
 Replace the `SanitizeDelta` function and its helper signature:
 ```go
@@ -176,7 +181,7 @@ func SanitizeDelta(updated [][]interface{}, removed []interface{}) ([][]interfac
 }
 ```
 
-- [ ] **Step 5: Update `game.go:publish` to use new types**
+- [ ] **Step 6: Update `game.go:publish` to use new types**
 
 In `internal/repo/game/game.go`, update the `publish` method signature and body:
 ```go
@@ -206,7 +211,7 @@ func (s *Store) publish(id string, op events.OpCode, updated [][]interface{}, re
 }
 ```
 
-Update `publishDiff` to convert `Diff` output to pair-array format:
+Update `publishDiff` to convert `Diff` output to pair-array format. Do **not** strip metadata keys here — that is `SanitizeDelta`'s responsibility (added in Task 3). `publish()` already calls `SanitizeDelta`:
 ```go
 func (s *Store) publishDiff(id string, before map[string]interface{}, after *models.Game) {
     if s.publisher == nil {
@@ -221,12 +226,9 @@ func (s *Store) publishDiff(id string, before map[string]interface{}, after *mod
 
     updatedMap, removedSlice := events.Diff(before, afterMap)
 
-    // Convert to pair-array format, stripping metadata fields.
+    // Convert to pair-array format; SanitizeDelta (called inside publish) strips private/metadata.
     var updated [][]interface{}
     for k, v := range updatedMap {
-        if k == "updatedAt" || k == "createdAt" || k == "version" {
-            continue
-        }
         updated = append(updated, []interface{}{k, v})
     }
     var removed []interface{}
@@ -255,7 +257,7 @@ For `markPlayerConnected` in `player.go`:
 s.publish(id, events.OpUpdate, [][]interface{}{{playerKey + ".connected", connected}}, nil)
 ```
 
-- [ ] **Step 6: Update old delta tests to compile with new SanitizeDelta signature**
+- [ ] **Step 7: Update old delta tests to compile with new SanitizeDelta signature**
 
 The existing `TestSanitizeDelta_*` tests use the old map/slice signature. Replace them:
 
@@ -947,21 +949,25 @@ func (s *Store) ConnectPlayer(id string, slotId string) error {
 
 The `markPlayerConnected` function body already uses `"players." + userId` as the field path — since slot IDs are now the map keys, this path is still correct (`players.p0.connected`).
 
-- [ ] **Step 9: Update `interface.go` (Storer) for `AssignSlot`**
+- [ ] **Step 9: Update `interface.go` (Storer) — add `AssignSlot`, remove now-invalid slot-keyed methods**
 
-In `internal/repo/game/interface.go`, add `AssignSlot` to the interface:
+In `internal/repo/game/interface.go`:
+
+1. Add `AssignSlot`:
 ```go
 AssignSlot(id string, teamId string, userId string, displayName string) (string, error)
 ```
 
-Also update the signatures for `RemovePlayer`, `ConnectPlayer`, and `DisconnectPlayer` — the parameter name changes from `userId` to `slotId` (same type, so no compile failure without this, but the interface comment should be correct):
+2. Update the parameter names for `RemovePlayer`, `ConnectPlayer`, and `DisconnectPlayer`:
 ```go
 RemovePlayer(id string, slotId string) error
 ConnectPlayer(id string, slotId string) error
 DisconnectPlayer(id string, slotId string) error
 ```
 
-The `var _ Storer = (*Store)(nil)` compile-time assertion will fail until `AssignSlot` is added here.
+3. Remove `AddPlayer`, `AddPlayerToTeam`, `RemovePlayerFromTeam`, `ChangePlayerTeam`, `HasPlayerOnTeam`, `PlayerOnWhichTeam`, and `PlayerOnATeam` from the interface. These methods work by inserting `g.Players[userId]` entries with dynamic MongoDB ObjectID keys — after slot pre-declaration, inserting arbitrary new keys corrupts the schema. Replace all callers with `AssignSlot`. Delete the corresponding `Store` method bodies in `player.go` and `team.go` (or panic-guard them if external game code still calls them — but none does in the built-in handlers after this task). The `var _ Storer = (*Store)(nil)` assertion will fail at compile time until the interface and implementation are in sync.
+
+The `var _ Storer = (*Store)(nil)` compile-time assertion will fail until `AssignSlot` is added here and the deleted methods are removed from both the interface and the Store.
 
 - [ ] **Step 10: Update `GameService.RemovePlayer` and `DisconnectPlayer` in `internal/services/game/game.go`**
 
@@ -1011,14 +1017,9 @@ In `internal/repo/game/team.go`, any function that does `g.Players[userId]` must
 
 In `internal/repo/game/host.go`, `PlayerIsHost(id string, playerId string)` does `g.Players[playerId]` — this is correct as-is if the caller passes a slotId; verify all callers pass slotId after the auth migration.
 
-- [ ] **Step 14: Update example tictactoe handlers**
+- [ ] **Step 14: Verify example tictactoe handlers for slot-model compatibility**
 
-In `example/tictactoe/server/handlers/move/handler.go`:
-- Replace `*session.UserID` with `*session.SlotID` wherever it's used to look up the player in `g.Players` or determine team membership.
-- Nil-guard `session.SlotID` before dereferencing.
-
-In `example/tictactoe/server/handlers/restart/handler.go`:
-- Same: replace `*session.UserID` with `*session.SlotID`.
+The move and restart handlers resolve the acting player via `GetGameIDAndTeamID` which returns `(gameId, teamId)` — they do not access `g.Players` directly by UserId or SlotId. Read both handlers before making any changes. If either accesses `session.UserID` directly for player lookup (not just for session resolution), replace with `session.SlotID`. In most cases no change is needed here for authorization — the `winningTeam` and key-deletion fixes are handled in Task 9, which covers the substantive changes to these files.
 
 - [ ] **Step 15: Build and run all tests**
 
@@ -1373,7 +1374,7 @@ type Injector struct {
 }
 ```
 
-Add a helper function in `internal/injector/injector.go` (or a new `internal/injector/layout.go`):
+Add an exported helper function in `internal/injector/injector.go` (must be exported so `boot.go` in the `boot` package can call it). `script.PublicData` is a `map[string]interface{}` (not a pointer), so access it directly without dereferencing:
 ```go
 import (
     "crypto/sha256"
@@ -1381,11 +1382,13 @@ import (
     "encoding/json"
 )
 
-func computeLayoutHash(script *models.Script) (string, map[string]interface{}) {
+// ComputeLayoutHash extracts the layout data from the script's public data,
+// computes a short stable hash, and returns both. Called once at boot time.
+func ComputeLayoutHash(script *models.Script) (string, map[string]interface{}) {
     if script == nil || script.PublicData == nil {
         return "", nil
     }
-    layout, _ := (*script.PublicData)["layout"].(map[string]interface{})
+    layout, _ := script.PublicData["layout"].(map[string]interface{})
     raw, _ := json.Marshal(layout)
     hash := sha256.Sum256(raw)
     return hex.EncodeToString(hash[:8]), layout
@@ -1394,14 +1397,14 @@ func computeLayoutHash(script *models.Script) (string, map[string]interface{}) {
 
 In `internal/services/boot/boot.go`, after `i.Script` is set, add:
 ```go
-i.LayoutHash, i.LayoutData = computeLayoutHash(i.Script)
+i.LayoutHash, i.LayoutData = injector.ComputeLayoutHash(i.Script)
 ```
 
 - [ ] **Step 3: Add `WriteKeyframe` helper to `GameService`**
 
 `GameService` will import the `transport` package for `transport.Conn`. This is a one-directional dependency (service → transport interface), which is acceptable — `transport` contains only interfaces and no concrete implementations, so no cycle results.
 
-Add to `internal/services/game/service.go`:
+Add to `internal/services/game/game.go`:
 ```go
 import (
     // existing imports...
@@ -1412,64 +1415,56 @@ import (
     "github.com/robbiebyrd/indri/internal/services/events"
 )
 
-// WriteKeyframe sends a layout frame (if not already sent this connection) then
-// a slim keyframe wrapper. Call on join, create, and reconnect.
-func (svc *Service) WriteKeyframe(conn transport.Conn, g *models.Game, layoutHash string, layoutData map[string]interface{}) error {
-    // Layout frame
-    layoutFrame := events.LayoutFrame{
-        O:    events.OpLayout,
-        V:    layoutHash,
-        Data: layoutData,
-    }
-    layoutBytes, err := json.Marshal(layoutFrame)
+// slimKeyframe returns a sanitized, layout-stripped copy of the game wrapped
+// with a schema-version hash. It deep-clones via JSON round-trip before
+// mutating so the caller's *models.Game is never modified.
+func (svc *Service) slimKeyframe(g *models.Game) (events.KeyframeWrapper, error) {
+    // Deep-clone through JSON so Sanitize and delete cannot mutate the live game.
+    raw, err := json.Marshal(g)
     if err != nil {
-        return err
+        return events.KeyframeWrapper{}, err
     }
-    if err := conn.Write(layoutBytes); err != nil {
-        return err
+    var clone models.Game
+    if err := json.Unmarshal(raw, &clone); err != nil {
+        return events.KeyframeWrapper{}, err
     }
 
-    // Slim keyframe: strip data.layout then wrap with sv
-    slim := svc.Sanitize(g)
+    slim := svc.Sanitize(&clone)
     if slim.PublicData != nil {
-        delete(slim.PublicData, "layout")
+        delete(*slim.PublicData, "layout")
     }
 
-    // Compute sv from the slim keyframe's key structure
     slimMap, _ := events.ToMap(slim)
     posMap := events.BuildPositionalMap(slimMap)
     svRaw, _ := json.Marshal(posMap)
     svHash := sha256.Sum256(svRaw)
     sv := hex.EncodeToString(svHash[:8])
 
-    wrapper := events.KeyframeWrapper{SV: sv, Game: slim}
-    wrapperBytes, err := json.Marshal(wrapper)
+    return events.KeyframeWrapper{SV: sv, Game: slim}, nil
+}
+
+// WriteKeyframe sends a layout frame then a slim keyframe wrapper.
+// Call on join, create, and reconnect.
+func (svc *Service) WriteKeyframe(conn transport.Conn, g *models.Game, layoutHash string, layoutData map[string]interface{}) error {
+    layoutFrame := events.LayoutFrame{O: events.OpLayout, V: layoutHash, Data: layoutData}
+    if err := ws.WriteEncoded(conn, layoutFrame); err != nil {
+        return err
+    }
+    wrapper, err := svc.slimKeyframe(g)
     if err != nil {
         return err
     }
-    return conn.Write(wrapperBytes)
+    return ws.WriteEncoded(conn, wrapper)
 }
 
 // WriteSlimKeyframe sends only the slim keyframe wrapper (no layout frame).
 // Call on refresh when the client already has the layout.
 func (svc *Service) WriteSlimKeyframe(conn transport.Conn, g *models.Game) error {
-    slim := svc.Sanitize(g)
-    if slim.PublicData != nil {
-        delete(slim.PublicData, "layout")
-    }
-
-    slimMap, _ := events.ToMap(slim)
-    posMap := events.BuildPositionalMap(slimMap)
-    svRaw, _ := json.Marshal(posMap)
-    svHash := sha256.Sum256(svRaw)
-    sv := hex.EncodeToString(svHash[:8])
-
-    wrapper := events.KeyframeWrapper{SV: sv, Game: slim}
-    wrapperBytes, err := json.Marshal(wrapper)
+    wrapper, err := svc.slimKeyframe(g)
     if err != nil {
         return err
     }
-    return conn.Write(wrapperBytes)
+    return ws.WriteEncoded(conn, wrapper)
 }
 ```
 
@@ -1555,24 +1550,45 @@ func WriteEncoded(c transport.Conn, payload interface{}) error {
 }
 ```
 
-- [ ] **Step 4: Update all server→client writes to use `WriteEncoded`**
+- [ ] **Step 4: Direct-write path already covered by `WriteKeyframe`/`WriteSlimKeyframe`**
 
-Replace every `conn.Write(jsonBytes)` in game service keyframe helpers with `ws.WriteEncoded(conn, payload)` where `payload` is the Go struct. Specifically update `WriteKeyframe` and `WriteSlimKeyframe` in `internal/services/game/service.go`:
-- Replace `conn.Write(layoutBytes)` with `ws.WriteEncoded(conn, layoutFrame)` (pass the struct, not pre-marshaled bytes)
-- Replace `conn.Write(wrapperBytes)` with `ws.WriteEncoded(conn, wrapper)`
+The `WriteKeyframe` and `WriteSlimKeyframe` helpers added in Task 7 already call `ws.WriteEncoded`. No further changes needed for the direct-write path — keyframes and layout frames are already encoded correctly.
 
-Also update error writes in handlers that currently call `cs.Write([]byte(...))` with error JSON — these can continue to use JSON (errors are always human-readable) or also use `WriteEncoded`. Keep error writes as-is for now to minimize scope.
+- [ ] **Step 5: Update `broadcast.go` — encode delta per-connection**
 
-- [ ] **Step 5: Build and run**
+The broadcast path for deltas goes through `internal/services/broadcast/broadcast.go`. Look for the function that calls `Transport.Broadcast` or `Transport.BroadcastFilter` with a JSON-encoded `ChangeEvent`. Because different connections may have different `debug` flags, use `BroadcastFilter` to encode per-connection:
+
+```go
+import (
+    ws "github.com/robbiebyrd/indri/internal/transport/ws"
+)
+
+// Replace the existing Broadcast call with per-connection encoding.
+// Read the actual broadcast.go first to match the exact existing signature.
+// The key change: wherever json.Marshal(event) + Broadcast(data) is called,
+// replace with BroadcastFilter that calls ws.WriteEncoded(conn, event) per-conn.
+return bs.Transport.BroadcastFilter(nil, func(conn transport.Conn) bool {
+    if !isSessionInGame(conn, gameID) {
+        return false
+    }
+    _ = ws.WriteEncoded(conn, event) // non-fatal; log the error if needed
+    return false // return false so BroadcastFilter skips its own write
+})
+```
+
+Also keep error writes in handlers as plain JSON — errors are always human-readable and don't need binary encoding.
+
+- [ ] **Step 6: Build and run**
 
 ```bash
 go build ./... && go test ./... -race
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add internal/transport/ws/ws.go internal/services/game/ go.mod go.sum
+git add internal/transport/ws/ws.go internal/services/broadcast/broadcast.go \
+        internal/services/game/ go.mod go.sum
 git commit -m "feat(transport): MessagePack encoding with JSON debug fallback on ?debug=1"
 ```
 
@@ -1583,6 +1599,8 @@ git commit -m "feat(transport): MessagePack encoding with JSON debug fallback on
 **Files:**
 - Modify: `internal/services/boot/boot.go`
 - Modify: `example/tictactoe/config.json`
+- Modify: `example/tictactoe/server/handlers/move/handler.go`
+- Modify: `example/tictactoe/server/handlers/restart/handler.go`
 
 - [ ] **Step 1: Add `winningTeam: null` to tictactoe config**
 
@@ -1594,7 +1612,39 @@ In `example/tictactoe/config.json`, update `stage.scenes.board.data`:
 }
 ```
 
-- [ ] **Step 2: Add boot validation**
+- [ ] **Step 2: Fix `sceneHasWinner` in the move handler**
+
+`sceneHasWinner` currently does `_, ok := sceneData["winningTeam"]` which returns `true` when the key is present even with a `nil` value — after Step 1 adds the key with `null`, every move would incorrectly report "game over" before any piece is placed.
+
+In `example/tictactoe/server/handlers/move/handler.go`, change:
+```go
+// Before:
+func sceneHasWinner(sceneData map[string]interface{}) bool {
+    _, ok := sceneData["winningTeam"]
+    return ok
+}
+
+// After:
+func sceneHasWinner(sceneData map[string]interface{}) bool {
+    v, ok := sceneData["winningTeam"]
+    return ok && v != nil
+}
+```
+
+- [ ] **Step 3: Fix restart handler to clear `winningTeam` without deleting the key**
+
+`restart/handler.go` calls `delete(updated, "winningTeam")`. After the schema-stability requirement, deleting a key emits a `removed` delta which breaks the client's positional map.
+
+In `example/tictactoe/server/handlers/restart/handler.go`, change:
+```go
+// Before:
+delete(updated, "winningTeam")
+
+// After:
+updated["winningTeam"] = nil
+```
+
+- [ ] **Step 4: Add boot validation**
 
 In `internal/services/boot/boot.go`, after the script is loaded, add:
 ```go
@@ -1614,18 +1664,20 @@ func validateScript(script *models.Script) error {
 
 Call `validateScript(script)` and `log.Fatal` on error.
 
-- [ ] **Step 3: Build and run the server briefly to verify it starts**
+- [ ] **Step 5: Build and run the server briefly to verify it starts**
 
 ```bash
 go build ./example/tictactoe && echo "Build OK"
 ```
 Expected: `Build OK`.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add internal/services/boot/boot.go example/tictactoe/config.json
-git commit -m "feat(boot): validate script config at startup; add winningTeam default to tictactoe"
+git add internal/services/boot/boot.go example/tictactoe/config.json \
+        example/tictactoe/server/handlers/move/handler.go \
+        example/tictactoe/server/handlers/restart/handler.go
+git commit -m "feat(boot): validate script config at startup; fix winningTeam handling for schema stability"
 ```
 
 ---
@@ -2039,12 +2091,16 @@ handleLayout(msg: any) {
 
 keyframe(wrapperData: any) {
     const g = wrapperData.game as Game
+    // Build the positional schema from the SLIM keyframe (no layout).
+    // The server strips layout before computing the positional map, so the
+    // client must do the same — layout keys must not be in the positional map.
+    this.stateList.setSchema(g as Record<string, unknown>)
+
+    // Now merge layout back into the game object for rendering.
     if (this.cachedLayout) {
         if (!g.data) g.data = {}
         g.data.layout = this.cachedLayout.data as any
     }
-    // Update schema on sv change
-    this.stateList.setSchema(g as Record<string, unknown>)
     this.stateList.set(g as JsonObject, new Date(g.updatedAt ?? new Date().toISOString()))
     this.updateGameState()
 }
