@@ -12,6 +12,10 @@ func Register(i *injector.Injector) {
 		return
 	}
 	for action, script := range i.Script.Handlers {
-		router.RegisterHandler("script:"+action, action, New(i, script))
+		if action == "inquire" {
+			router.RegisterHandler("script:"+action, action, NewInquireNotificationHandler(script))
+		} else {
+			router.RegisterHandler("script:"+action, action, New(i, script))
+		}
 	}
 }
