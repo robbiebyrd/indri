@@ -89,7 +89,10 @@ func (h *Handler) gameAndTeamFromSession(s transport.Conn) (gameId, teamId, user
 	if err != nil {
 		return "", "", "", err
 	}
-	if session.GameID == nil || session.TeamID == nil || session.UserID == nil {
+	if session.UserID == nil {
+		return "", "", "", fmt.Errorf("session has no user")
+	}
+	if session.GameID == nil || session.TeamID == nil {
 		return "", "", "", fmt.Errorf("session is not in a game/team")
 	}
 
