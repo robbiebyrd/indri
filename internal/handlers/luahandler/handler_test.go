@@ -76,3 +76,33 @@ func TestBuildCallerTable_AllFieldsPresent(t *testing.T) {
 		}
 	}
 }
+
+func TestInquireNotificationHandler_MsgIsAccessible(t *testing.T) {
+	h := &InquireNotificationHandler{
+		script: `assert(msg.inquiryType == "game", "wrong inquiry type: " .. tostring(msg.inquiryType))`,
+	}
+	err := h.Handle(newFakeConn(), map[string]interface{}{"inquiryType": "game"})
+	if err != nil {
+		t.Fatalf("Handle returned unexpected error: %v", err)
+	}
+}
+
+func TestInquireNotificationHandler_ScriptErrorPropagates(t *testing.T) {
+	h := &InquireNotificationHandler{
+		script: `error("deliberate error")`,
+	}
+	err := h.Handle(newFakeConn(), map[string]interface{}{})
+	if err == nil {
+		t.Error("expected error from script, got nil")
+	}
+}
+
+func TestInquireNotificationHandler_NoGameGlobal(t *testing.T) {
+	h := &InquireNotificationHandler{
+		script: `assert(game == nil, "game should not be set")`,
+	}
+	err := h.Handle(newFakeConn(), map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("expected game to be nil but got error: %v", err)
+	}
+}
