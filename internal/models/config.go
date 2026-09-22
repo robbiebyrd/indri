@@ -5,6 +5,7 @@ type Script struct {
 	Teams       map[string]Team        `bson:"teams"            json:"teams,omitempty"`
 	Stage       Stage                  `bson:"stage"            json:"stage,omitempty"`
 	PublicData  map[string]interface{} `bson:"data"             json:"data,omitempty"`
+	Handlers    map[string]string      `bson:"handlers"         json:"handlers,omitempty"`
 	PrivateData map[string]interface{} `bson:"privateData"      json:"privateData,omitempty"`
 }
 
