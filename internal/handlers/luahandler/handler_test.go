@@ -23,6 +23,42 @@ func (f *fakeConn) Write(msg []byte) error      { f.written = append(f.written, 
 func (f *fakeConn) Close() error                { f.closed = true; return nil }
 func (f *fakeConn) IsClosed() bool              { return f.closed }
 
+func TestRegisterIndriTable_RefreshAllFlag(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+
+	pma := &postMutateActions{}
+	registerIndriTable(L, pma)
+
+	if err := L.DoString(`indri.refresh()`); err != nil {
+		t.Fatalf("indri.refresh(): %v", err)
+	}
+	if !pma.refreshAll {
+		t.Error("expected refreshAll=true after indri.refresh()")
+	}
+	if pma.refreshSelf {
+		t.Error("expected refreshSelf unchanged (false)")
+	}
+}
+
+func TestRegisterIndriTable_RefreshSelfFlag(t *testing.T) {
+	L := lua.NewState()
+	defer L.Close()
+
+	pma := &postMutateActions{}
+	registerIndriTable(L, pma)
+
+	if err := L.DoString(`indri.refreshSelf()`); err != nil {
+		t.Fatalf("indri.refreshSelf(): %v", err)
+	}
+	if !pma.refreshSelf {
+		t.Error("expected refreshSelf=true after indri.refreshSelf()")
+	}
+	if pma.refreshAll {
+		t.Error("expected refreshAll unchanged (false)")
+	}
+}
+
 func TestBuildCallerTable_AllFieldsPresent(t *testing.T) {
 	L := lua.NewState()
 	defer L.Close()
