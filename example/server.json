@@ -1,0 +1,18 @@
+{
+  "listenAddress": "localhost",
+  "listenPort": 5002,
+  "allowedOrigins": "",
+  "lockBackend": "inprocess",
+  "mongoUri": "mongodb+srv://test:test@localhost/",
+  "mongoDatabase": "indri",
+  "mongoAuthDatabase": "admin",
+  "redisHost": "localhost",
+  "redisPort": 6379,
+  "redisPassword": "",
+  "redisDatabase": 0,
+  "wsWriteTimeout": 10,
+  "wsPingPeriod": 54,
+  "wsPongTimeout": 60,
+  "wsMaxMessageSize": 32768,
+  "wsMessageBufferSize": 1024
+}

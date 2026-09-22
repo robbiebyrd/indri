@@ -66,5 +66,9 @@
       }
     }
   },
-  "privateData": {}
+  "privateData": {},
+  "handlers": {
+    "move": "local myTeam = game.teams[caller.teamId]\nif not myTeam then error(\"team not found\") end\nif not myTeam.data.turn then error(\"it is not your turn\") end\nif game.scene.data.winningTeam ~= nil then error(\"game is over\") end\nlocal move = parseMove(msg.move)\nlocal board = game.scene.data.board\nlocal rows, cols = #board, #board[1]\nif move.row < 1 or move.row > rows or move.col < 1 or move.col > cols then\n  error(\"move out of bounds: \" .. tostring(msg.move))\nend\nif board[move.row][move.col] ~= \"\" then error(\"spot is taken\") end\nboard[move.row][move.col] = myTeam.data.marker\nlocal winner = boardWinner(board)\nif winner then\n  for teamId, team in pairs(game.teams) do\n    if team.data.marker == winner then\n      game.scene.data.winningTeam = teamId\n      break\n    end\n  end\nelseif boardFull(board) then\n  game.scene.data.winningTeam = \"draw\"\nend\nfor teamId, team in pairs(game.teams) do\n  team.data.turn = (teamId ~= caller.teamId)\nend\n",
+    "restart": "local board = game.scene.data.board\nfor r = 1, #board do\n  for c = 1, #board[r] do\n    board[r][c] = \"\"\n  end\nend\ngame.scene.data.winningTeam = nil\nfor teamId, team in pairs(game.teams) do\n  if initial.teams[teamId] then\n    team.data.turn = initial.teams[teamId].data.turn\n  else\n    team.data.turn = false\n  end\nend\n"
+  }
 }

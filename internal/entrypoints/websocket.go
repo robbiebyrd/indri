@@ -9,7 +9,12 @@ import (
 	"github.com/robbiebyrd/indri/internal/transport"
 )
 
-func HandleConnect(s transport.Conn, t transport.Transport, gs *gameService.Service, ss *sessionService.Service) {
+func HandleConnect(
+	s transport.Conn,
+	t transport.Transport,
+	gs *gameService.Service,
+	ss *sessionService.Service,
+) {
 	cs := connection.NewService(s, t)
 
 	err := cs.Write([]byte(`{ "stage": { "currentScene": "login"} }`))
@@ -19,7 +24,12 @@ func HandleConnect(s transport.Conn, t transport.Transport, gs *gameService.Serv
 	}
 }
 
-func HandleDisconnect(s transport.Conn, t transport.Transport, gs *gameService.Service, ss *sessionService.Service) {
+func HandleDisconnect(
+	s transport.Conn,
+	t transport.Transport,
+	gs *gameService.Service,
+	ss *sessionService.Service,
+) {
 	cs := connection.NewService(s, t)
 
 	sessionId, err := cs.GetKeyAsString("sessionId")

@@ -6,14 +6,14 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/robbiebyrd/indri/internal/entrypoints/http"
+	"github.com/robbiebyrd/indri/internal/entrypoints"
 	"github.com/robbiebyrd/indri/internal/injector"
 )
 
 func Serve(i *injector.Injector) error {
 	g, ctx := errgroup.WithContext(i.GlobalContext)
 
-	g.Go(func() error { return http.Serve(ctx, i) })
+	g.Go(func() error { return entrypoints.Serve(ctx, i) })
 	g.Go(func() error { return monitorGameChanges(ctx, i) })
 
 	err := g.Wait()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/robbiebyrd/indri/internal/handlers/luahandler"
 	"github.com/robbiebyrd/indri/internal/injector"
 )
 
@@ -43,6 +44,7 @@ func Boot(ctx context.Context, scriptFilePath *string) (*injector.Injector, erro
 	}
 
 	registerHandlers(i)
+	luahandler.Register(i)
 
 	return i, nil
 }

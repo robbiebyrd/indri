@@ -1,6 +1,9 @@
 package env
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -145,6 +148,138 @@ func TestGetEnv_CachesResult(t *testing.T) {
 		WSMessageBufferSize:   2048,
 	}
 	assertVarsEqual(t, second, want)
+}
+
+// clearEnvVars unsets all INDRI_ env vars for the duration of the test and
+// restores them on cleanup.
+func clearEnvVars(t *testing.T) {
+	t.Helper()
+	keys := []string{
+		"INDRI_LISTEN_ADDRESS", "INDRI_LISTEN_PORT",
+		"INDRI_ALLOWED_ORIGINS",
+		"INDRI_REDIS_HOST", "INDRI_REDIS_PORT",
+		"INDRI_REDIS_PASSWORD", "INDRI_REDIS_DATABASE",
+		"INDRI_LOCK_BACKEND",
+		"INDRI_MONGO_URI", "INDRI_MONGO_DATABASE", "INDRI_MONGO_AUTH_DATABASE",
+		"INDRI_WS_WRITE_TIMEOUT", "INDRI_WS_PING_PERIOD",
+		"INDRI_WS_PONG_TIMEOUT", "INDRI_WS_MAX_MESSAGE_SIZE",
+		"INDRI_WS_MESSAGE_BUFFER_SIZE",
+	}
+	saved := make(map[string]string, len(keys))
+	wasSet := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		if v, ok := os.LookupEnv(k); ok {
+			saved[k] = v
+			wasSet[k] = true
+		}
+		os.Unsetenv(k)
+	}
+	t.Cleanup(func() {
+		for _, k := range keys {
+			if wasSet[k] {
+				os.Setenv(k, saved[k])
+			} else {
+				os.Unsetenv(k)
+			}
+		}
+	})
+}
+
+// writeJSONConfig writes a JSON file to a temp dir and returns its path.
+func writeJSONConfig(t *testing.T, data map[string]any) string {
+	t.Helper()
+	b, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal JSON config: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, b, 0600); err != nil {
+		t.Fatalf("write JSON config: %v", err)
+	}
+	return path
+}
+
+func TestLoad_JSONFallback(t *testing.T) {
+	globalClient = nil
+	clearEnvVars(t)
+
+	configPath := writeJSONConfig(t, map[string]any{
+		"listenAddress": "1.2.3.4",
+		"listenPort":    9000,
+		"mongoUri":      "mongodb://json-host:27017",
+	})
+
+	got, err := Load(configPath, nil)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.ListenAddress != "1.2.3.4" {
+		t.Errorf("ListenAddress = %q, want %q", got.ListenAddress, "1.2.3.4")
+	}
+	if got.ListenPort != 9000 {
+		t.Errorf("ListenPort = %d, want %d", got.ListenPort, 9000)
+	}
+	if got.MongoURI != "mongodb://json-host:27017" {
+		t.Errorf("MongoURI = %q, want %q", got.MongoURI, "mongodb://json-host:27017")
+	}
+}
+
+func TestLoad_EnvOverridesJSON(t *testing.T) {
+	globalClient = nil
+	clearEnvVars(t)
+	t.Setenv("INDRI_LISTEN_ADDRESS", "env-host")
+
+	configPath := writeJSONConfig(t, map[string]any{
+		"listenAddress": "json-host",
+	})
+
+	got, err := Load(configPath, nil)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.ListenAddress != "env-host" {
+		t.Errorf("ListenAddress = %q, want env-host (env should win over JSON)", got.ListenAddress)
+	}
+}
+
+func TestLoad_CLIOverridesEnv(t *testing.T) {
+	globalClient = nil
+	clearEnvVars(t)
+	t.Setenv("INDRI_LISTEN_ADDRESS", "env-host")
+
+	got, err := Load("", map[string]string{"listen-address": "cli-host"})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.ListenAddress != "cli-host" {
+		t.Errorf("ListenAddress = %q, want cli-host (CLI should win over env)", got.ListenAddress)
+	}
+}
+
+func TestLoad_CLIOverridesJSON(t *testing.T) {
+	globalClient = nil
+	clearEnvVars(t)
+
+	configPath := writeJSONConfig(t, map[string]any{
+		"listenAddress": "json-host",
+	})
+
+	got, err := Load(configPath, map[string]string{"listen-address": "cli-host"})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.ListenAddress != "cli-host" {
+		t.Errorf("ListenAddress = %q, want cli-host (CLI should win over JSON)", got.ListenAddress)
+	}
+}
+
+func TestLoad_MissingJSONFile(t *testing.T) {
+	globalClient = nil
+
+	_, err := Load("/nonexistent/path/config.json", nil)
+	if err == nil {
+		t.Fatal("expected error for missing JSON config file, got nil")
+	}
 }
 
 func TestGetEnv_ResetCache_PicksUpNewEnvironment(t *testing.T) {
