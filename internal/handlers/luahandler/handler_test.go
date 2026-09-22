@@ -9,15 +9,15 @@ import (
 // fakeConn implements transport.Conn for tests that need a connection
 // but don't exercise the real transport.
 type fakeConn struct {
-	keys    map[string]any
+	keys    map[string]interface{}
 	written [][]byte
 	closed  bool
 }
 
-func newFakeConn() *fakeConn { return &fakeConn{keys: make(map[string]any)} }
+func newFakeConn() *fakeConn { return &fakeConn{keys: make(map[string]interface{})} }
 
-func (f *fakeConn) Get(key string) (any, bool)  { v, ok := f.keys[key]; return v, ok }
-func (f *fakeConn) Set(key string, value any)   { f.keys[key] = value }
+func (f *fakeConn) Get(key string) (interface{}, bool) { v, ok := f.keys[key]; return v, ok }
+func (f *fakeConn) Set(key string, value interface{})  { f.keys[key] = value }
 func (f *fakeConn) UnSet(key string)            { delete(f.keys, key) }
 func (f *fakeConn) Write(msg []byte) error      { f.written = append(f.written, msg); return nil }
 func (f *fakeConn) Close() error                { f.closed = true; return nil }

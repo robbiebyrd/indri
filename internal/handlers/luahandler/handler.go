@@ -150,10 +150,6 @@ func (h *Handler) gameAndTeamFromSession(s transport.Conn) (gameId, teamId, user
 	if err != nil {
 		return "", "", "", err
 	}
-	if sessionId == nil {
-		return "", "", "", fmt.Errorf("sessionId is nil")
-	}
-
 	session, err := h.i.SessionService.Get(*sessionId)
 	if err != nil {
 		return "", "", "", err
