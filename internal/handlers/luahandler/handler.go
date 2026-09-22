@@ -47,7 +47,7 @@ func executePostMutateActions(pma *postMutateActions, gameId string, s transport
 
 	g, err := i.GameService.Get(gameId)
 	if err != nil {
-		log.Printf("indri refresh: could not fetch game %v: %v", gameId, err)
+		log.Printf("indri: could not fetch game %v (abandoning: refresh=%v refreshSelf=%v): %v", gameId, pma.refreshAll, pma.refreshSelf, err)
 		return
 	}
 	sanitized := i.GameService.Sanitize(g)
