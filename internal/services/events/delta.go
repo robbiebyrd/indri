@@ -51,25 +51,29 @@ const privateDataKey = "privateData"
 // privateData field is dropped, and privateData is stripped recursively from
 // the values of the remaining updates (e.g. a whole-object update for a newly
 // added player).
-func SanitizeDelta(updated map[string]interface{}, removed []string) (map[string]interface{}, []string) {
-	cleanUpdated := make(map[string]interface{}, len(updated))
+func SanitizeDelta(updated [][]interface{}, removed []interface{}) ([][]interface{}, []interface{}) {
+	cleanUpdated := make([][]interface{}, 0, len(updated))
 
-	for path, value := range updated {
-		if pathHasSegment(path, privateDataKey) {
+	for _, pair := range updated {
+		if len(pair) != 2 {
 			continue
 		}
 
-		cleanUpdated[path] = stripKey(value, privateDataKey)
+		path, ok := pair[0].(string)
+		if !ok || pathHasSegment(path, privateDataKey) {
+			continue
+		}
+
+		cleanUpdated = append(cleanUpdated, []interface{}{path, stripKey(pair[1], privateDataKey)})
 	}
 
-	var cleanRemoved []string
+	var cleanRemoved []interface{}
 
-	for _, path := range removed {
-		if pathHasSegment(path, privateDataKey) {
-			continue
+	for _, item := range removed {
+		path, ok := item.(string)
+		if ok && !pathHasSegment(path, privateDataKey) {
+			cleanRemoved = append(cleanRemoved, path)
 		}
-
-		cleanRemoved = append(cleanRemoved, path)
 	}
 
 	return cleanUpdated, cleanRemoved

@@ -177,7 +177,7 @@ func (s *Store) markPlayerConnected(
 		return fmt.Errorf("no player %v found in game %v", userId, id)
 	}
 
-	s.publish(id, events.OpUpdate, map[string]interface{}{playerKey + ".connected": connected}, nil)
+	s.publish(id, events.OpUpdate, [][]interface{}{{playerKey + ".connected", connected}}, nil)
 
 	return nil
 }

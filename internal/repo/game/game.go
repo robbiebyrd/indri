@@ -194,7 +194,7 @@ func (s *Store) UpdateField(id string, key string, value interface{}) error {
 		return fmt.Errorf("error updating game field: game with id %v does not exists", id)
 	}
 
-	s.publish(id, events.OpUpdate, map[string]interface{}{key: value}, nil)
+	s.publish(id, events.OpUpdate, [][]interface{}{{key, value}}, nil)
 
 	return nil
 }
@@ -227,7 +227,7 @@ func (s *Store) DeleteField(id string, key string) error {
 		return fmt.Errorf("field %v does not exists", key)
 	}
 
-	s.publish(id, events.OpUpdate, nil, []string{key})
+	s.publish(id, events.OpUpdate, nil, []interface{}{key})
 
 	return nil
 }
@@ -288,13 +288,23 @@ func (s *Store) publishDiff(id string, before map[string]interface{}, after *mod
 		return
 	}
 
-	updated, removed := events.Diff(before, afterMap)
+	updatedMap, removedSlice := events.Diff(before, afterMap)
+
+	var updated [][]interface{}
+	for k, v := range updatedMap {
+		updated = append(updated, []interface{}{k, v})
+	}
+
+	var removed []interface{}
+	for _, r := range removedSlice {
+		removed = append(removed, r)
+	}
 
 	s.publish(id, events.OpUpdate, updated, removed)
 }
 
 // publish emits a change event for the game, if a publisher is configured.
-func (s *Store) publish(id string, op events.OperationType, updated map[string]interface{}, removed []string) {
+func (s *Store) publish(id string, op events.OpCode, updated [][]interface{}, removed []interface{}) {
 	if s.publisher == nil {
 		return
 	}
