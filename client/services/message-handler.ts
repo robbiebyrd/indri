@@ -7,6 +7,7 @@ import {GameListDispatchMessage} from "@/providers/game-list/game-list-actions";
 import {GameInfo} from "@/providers/game-list/game-list-context";
 import {parseJsonSafely} from "@/services/json";
 import {JsonObject} from "type-fest";
+import {decode} from "@msgpack/msgpack";
 
 type actionHandler = {
     name: string
@@ -18,6 +19,7 @@ type actionHandler = {
 export class MessageHandler {
     private ws?: WebSocket = undefined
     private stateList: GameStateParser<Game> = new GameStateParser<Game>()
+    private cachedLayout?: { v: string; data: Record<string, unknown> }
     private readonly setGameState: Dispatch<GameDispatchMessage>
     private readonly setPlayerState: Dispatch<UserDispatchMessage>
     private readonly setGameList: Dispatch<GameListDispatchMessage>
@@ -47,6 +49,11 @@ export class MessageHandler {
                 dataKey: "games"
             },
             {
+                name: "indri_layout",
+                action: "layout",
+                parser: (d) => this.handleLayout(d)
+            },
+            {
                 name: "indri_keyframe",
                 action: "keyframe",
                 parser: (d) => this.keyframe(d)
@@ -56,10 +63,16 @@ export class MessageHandler {
                 action: "update",
                 parser: (d) => this.update(d)
             },
+            {
+                name: "indri_disconnect",
+                action: "disconnect",
+                parser: () => { console.warn("server disconnected") }
+            },
             ...parsers
         ]
 
         this.ws = new WebSocket(url)
+        this.ws.binaryType = "arraybuffer"
 
         this.ws.onmessage = (e: MessageEvent) => {
             this.routeIncomingMessage(e)
@@ -79,7 +92,12 @@ export class MessageHandler {
     }
 
     routeIncomingMessage(message: MessageEvent) {
-        const parsed = parseJsonSafely<JsonObject>(message.data)
+        let parsed: unknown
+        if (message.data instanceof ArrayBuffer) {
+            parsed = decode(new Uint8Array(message.data))
+        } else {
+            parsed = parseJsonSafely<JsonObject>(message.data)
+        }
 
         const action = this.messageType(parsed)
         if (!action) {
@@ -88,7 +106,7 @@ export class MessageHandler {
 
         for (const parser of this.parsers.filter(p => p.action === action)) {
             if (parser) {
-                const data = (parser.dataKey && parsed && parsed[parser.dataKey]) ? parsed[parser.dataKey] : parsed
+                const data = (parser.dataKey && parsed && (parsed as any)[parser.dataKey]) ? (parsed as any)[parser.dataKey] : parsed
                 parser.parser(data)
             }
         }
@@ -127,20 +145,15 @@ export class MessageHandler {
     }
 
     messageType(parsedMessage: any): string | undefined {
-        if (typeof parsedMessage !== "object" || parsedMessage === null) {
-            return undefined
-        }
-        if ("authenticated" in parsedMessage && parsedMessage["authenticated"] == true) {
-            return "authenticated"
-        } else if ("op" in parsedMessage && parsedMessage["op"] == "update") {
-            return "update"
-        } else if ("op" in parsedMessage && parsedMessage["op"] == "inquiryResponse") {
-            return "inquiryResponse"
-        } else if ("code" in parsedMessage && "id" in parsedMessage) {
-            return "keyframe"
-        } else if ("op" in parsedMessage) {
-            return parsedMessage["op"]
-        }
+        if (typeof parsedMessage !== "object" || parsedMessage === null) return undefined
+        // sv must be checked before authenticated: a slim keyframe could theoretically
+        // carry both fields, and keyframe routing must take priority.
+        if ("sv" in parsedMessage) return "keyframe"
+        if ("o" in parsedMessage && parsedMessage.o === 4) return "layout"
+        if ("o" in parsedMessage && (parsedMessage.o === 1 || parsedMessage.o === 2 || parsedMessage.o === 3)) return "update"
+        if ("authenticated" in parsedMessage && parsedMessage.authenticated === true) return "authenticated"
+        if ("op" in parsedMessage && parsedMessage.op === "inquiryResponse") return "inquiryResponse"
+        if ("disconnected" in parsedMessage) return "disconnect"
         return undefined
     }
 
@@ -162,8 +175,26 @@ export class MessageHandler {
         } as UserDispatchMessage)
     }
 
-    keyframe(gameData: any) {
-        const g = gameData as Game
+    handleLayout(msg: any) {
+        if (typeof msg?.v !== "string" || !msg.data) return
+        if (!this.cachedLayout || this.cachedLayout.v !== msg.v) {
+            this.cachedLayout = { v: msg.v, data: msg.data }
+        }
+    }
+
+    keyframe(wrapperData: any) {
+        const g = wrapperData.game as Game
+        // setSchema MUST run before the layout merge: the server strips layout from
+        // the keyframe before encoding, so the positional map must be built from the
+        // same layout-free object. Moving setSchema after the merge would add layout
+        // keys to the positional indices and break all subsequent path decoding.
+        this.stateList.setSchema(g as Record<string, unknown>)
+
+        // Merge layout back into game.data for rendering.
+        if (this.cachedLayout) {
+            if (!g.data) g.data = {}
+            g.data.layout = this.cachedLayout.data as any
+        }
         this.stateList.set(g as JsonObject, new Date(g.updatedAt ?? new Date().toISOString()))
         this.updateGameState()
     }
