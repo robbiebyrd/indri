@@ -141,6 +141,8 @@ func isMissing(op *Op, field string) bool {
 	case "source":
 		return op.Source == nil
 	default:
-		return false
+		// Programming error: opRequired references a field name with no case here.
+		// Add the corresponding case when adding a new required field.
+		panic("isMissing: unhandled field name " + field)
 	}
 }
