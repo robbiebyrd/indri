@@ -160,6 +160,41 @@ func TestDiff_MultiplePaths(t *testing.T) {
 	}
 }
 
+func TestSanitizeDelta_StripsMetadataFields(t *testing.T) {
+	updated := [][]interface{}{
+		{"updatedAt", "2026-09-21T00:00:00Z"},
+		{"createdAt", "2026-09-21T00:00:00Z"},
+		{"version", 42},
+		{"stage.currentScene", "board"},
+		{"players.p0.version", 7}, // nested — must NOT be stripped
+	}
+	removed := []interface{}{"updatedAt", "version", "stage.scenes.s1"}
+
+	gotUpdated, gotRemoved := events.SanitizeDelta(updated, removed)
+
+	for _, pair := range gotUpdated {
+		key := pair[0].(string)
+		if key == "updatedAt" || key == "createdAt" || key == "version" {
+			t.Errorf("top-level metadata key %q leaked into sanitized delta", key)
+		}
+	}
+	// stage.currentScene and players.p0.version must survive
+	if len(gotUpdated) != 2 {
+		t.Errorf("expected 2 updated pairs, got %d: %v", len(gotUpdated), gotUpdated)
+	}
+
+	// metadata keys must be stripped from removed too
+	for _, item := range gotRemoved {
+		key := item.(string)
+		if key == "updatedAt" || key == "version" {
+			t.Errorf("metadata key %q leaked into sanitized removed", key)
+		}
+	}
+	if len(gotRemoved) != 1 || gotRemoved[0] != "stage.scenes.s1" {
+		t.Errorf("expected only stage.scenes.s1 in removed, got %v", gotRemoved)
+	}
+}
+
 func TestSanitizeDelta_MalformedPairsDropped(t *testing.T) {
 	updated := [][]interface{}{
 		{"valid.path", true},    // valid

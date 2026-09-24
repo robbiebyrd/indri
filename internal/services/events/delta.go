@@ -83,11 +83,15 @@ func diffSlice(prefix string, before, after []interface{}, updated map[string]in
 
 const privateDataKey = "privateData"
 
-// SanitizeDelta removes private data from a change delta so a broadcast delta
-// has the same visibility as a sanitized keyframe. Any path that refers to a
-// privateData field is dropped, and privateData is stripped recursively from
-// the values of the remaining updates (e.g. a whole-object update for a newly
-// added player).
+var metadataKeys = map[string]bool{
+	"updatedAt": true,
+	"createdAt": true,
+	"version":   true,
+}
+
+// SanitizeDelta removes private data and server-only metadata fields from a
+// change delta so a broadcast delta has the same visibility as a sanitized
+// keyframe.
 func SanitizeDelta(updated [][]interface{}, removed []interface{}) ([][]interface{}, []interface{}) {
 	cleanUpdated := make([][]interface{}, 0, len(updated))
 
@@ -97,7 +101,7 @@ func SanitizeDelta(updated [][]interface{}, removed []interface{}) ([][]interfac
 		}
 
 		path, ok := pair[0].(string)
-		if !ok || pathHasSegment(path, privateDataKey) {
+		if !ok || pathHasSegment(path, privateDataKey) || metadataKeys[path] {
 			continue
 		}
 
@@ -108,7 +112,7 @@ func SanitizeDelta(updated [][]interface{}, removed []interface{}) ([][]interfac
 
 	for _, item := range removed {
 		path, ok := item.(string)
-		if ok && !pathHasSegment(path, privateDataKey) {
+		if ok && !pathHasSegment(path, privateDataKey) && !metadataKeys[path] {
 			cleanRemoved = append(cleanRemoved, path)
 		}
 	}
