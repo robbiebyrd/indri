@@ -181,27 +181,49 @@ func checkAbsolutePlacement(sceneID, widgetID string, placement map[string]inter
 }
 
 func checkPrivateData(v interface{}) error {
-	m, ok := v.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	for k, child := range m {
-		if k == "privateData" {
-			return fmt.Errorf("validating layout: \"privateData\" is a reserved key that the server strips during sanitization")
+	switch val := v.(type) {
+	case map[string]interface{}:
+		for k, child := range val {
+			if k == "privateData" {
+				return fmt.Errorf("validating layout: \"privateData\" is a reserved key that the server strips during sanitization")
+			}
+			if err := checkPrivateData(child); err != nil {
+				return err
+			}
 		}
-		if err := checkPrivateData(child); err != nil {
-			return err
+	case []interface{}:
+		for _, elem := range val {
+			if err := checkPrivateData(elem); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
+// countWidgets counts all widget objects in the layout, including those nested
+// inside subgrid config.widgets at any depth, so the cap applies to the full
+// processing budget of validateSceneWidgets (O(n²) overlap check).
 func countWidgets(scenes map[string]interface{}) int {
 	total := 0
 	for _, sv := range scenes {
 		scene, _ := sv.(map[string]interface{})
 		widgets, _ := scene["widgets"].(map[string]interface{})
-		total += len(widgets)
+		total += countWidgetMap(widgets)
 	}
 	return total
+}
+
+func countWidgetMap(widgets map[string]interface{}) int {
+	count := len(widgets)
+	for _, wv := range widgets {
+		widget, _ := wv.(map[string]interface{})
+		widgetType, _ := widget["type"].(string)
+		if widgetType == "subgrid" {
+			config, _ := widget["config"].(map[string]interface{})
+			nested, _ := config["widgets"].(map[string]interface{})
+			count += countWidgetMap(nested)
+		}
+	}
+	return count
 }

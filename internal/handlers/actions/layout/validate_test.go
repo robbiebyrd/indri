@@ -451,6 +451,29 @@ func TestValidateLayout_PrivateData_ThreeLevelsDeep_Rejected(t *testing.T) {
 	}
 }
 
+func TestValidateLayout_PrivateData_InsideArray_Rejected(t *testing.T) {
+	l := baseLayout()
+	widgets := sceneWidgets(l, "scene1")
+	widgets["w1"] = map[string]interface{}{
+		"type": "text",
+		"placement": map[string]interface{}{
+			"kind": "grid",
+			"col":  float64(0),
+			"row":  float64(0),
+			"w":    float64(2),
+			"h":    float64(2),
+		},
+		"config": map[string]interface{}{
+			"items": []interface{}{
+				map[string]interface{}{"privateData": "secret"},
+			},
+		},
+	}
+	if err := layout.ValidateLayout(l); err == nil {
+		t.Error("expected error for privateData inside an array element, got nil")
+	}
+}
+
 func TestValidateLayout_PrivateData_InScene_Rejected(t *testing.T) {
 	l := baseLayout()
 	scenes := l["scenes"].(map[string]interface{})
