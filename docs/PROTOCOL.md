@@ -151,38 +151,67 @@ inbound message. Nothing is registered on them by default.
 
 ## Server → client
 
-### Keyframe — full game state
+### Transport
 
-A bare `models.Game` object; recognizable because it has both `id` and `code`. `PrivateData` is stripped
-from the stage, every scene, every team, and every player before sending.
+Server→client messages are **MessagePack binary** by default. Connect with `?debug=1` to receive JSON
+text instead, which is useful for human-readable inspection. The WebSocket client must set
+`binaryType = "arraybuffer"`.
+
+### Layout frame
+
+Sent once per new schema version, immediately before the keyframe, on `create`, `join`, and `reconnect`.
+Not sent on `refresh`.
 
 ```json
-{
-  "id": "…", "code": "my-room", "createdAt": "…", "updatedAt": "…",
-  "players": { "<userId>": { "name": "…", "score": 0, "connected": true,
-                             "host": true, "controller": false, "data": {} } },
-  "teams":   { "team1": { "name": "Player 1", "playerIds": ["<userId>"], "data": {"marker": "X"} } },
-  "stage":   { "currentScene": "board", "sceneOrder": ["board"],
-               "scenes": { "board": { "data": { "board": [["","",""],["","",""],["","",""]] } } } },
-  "data": {}
-}
+{ "o": 4, "v": "<8-char hex hash>", "data": { "layout": { … } } }
 ```
 
-Sent on `create`, `join`, `refresh`, and after a `reconnect` into an active game.
+- `o: 4` is the layout opcode.
+- `v` is the layout schema version hash, stable across game instances using the same config.
+- `data` contains the layout object from the script config.
+
+### Slim keyframe wrapper
+
+Follows the layout frame. `PrivateData` and the `layout` key are stripped from `data` before sending.
+
+```json
+{ "sv": "<same hash as v in layout frame>", "game": { … } }
+```
+
+- `sv` is the schema version (matches `v` from the preceding layout frame). Presence of `sv` identifies
+  this message as a keyframe.
+- `game` is a sanitized `models.Game`. The client must build its positional map from `game` before
+  merging the cached layout back for rendering.
 
 ### Delta — change event
 
 Published by the store at each write and broadcast to every session in the affected game.
 
 ```json
-{ "id": "<game object id>", "op": "update", "ts": "2026-09-09T12:00:00Z", "type": "game",
-  "updated": { "stage.scenes.board.data.board": [["X","",""],["","",""],["","",""]] },
-  "removed": ["stage.scenes.board.data.temp"] }
+{ "o": 1, "t": "2024-01-15T12:00:00Z", "u": [[[2, 0, 1], "X"]], "r": [] }
 ```
 
-Keys in `updated` are dotted paths into the game's **JSON** representation — the same field names the
-keyframe uses. Nested objects are walked (`players.<userId>.host`); arrays and scalars are replaced
-whole. Apply them onto the last keyframe.
+Fields:
+- `o` — opcode: `1` = update, `2` = insert, `3` = delete
+- `t` — timestamp. In binary (MessagePack) mode: a Timestamp extension type, decoded to a `Date` by
+  `@msgpack/msgpack`. In debug (JSON) mode: an RFC3339 string. Both are accepted by `new Date(t)`.
+- `u` — array of `[path, value]` pairs; each `path` is a positional integer array
+- `r` — array of paths to remove; each path is a positional integer array
+
+In debug mode (`?debug=1`), paths are numeric-dotted strings instead of integer arrays: `"2.0.1"` is
+equivalent to `[2, 0, 1]`.
+
+**Positional path encoding:** integers index into the slim keyframe's key schema by sorted alphabetical
+position at each object level; arrays use raw numeric indices. For example, if the slim keyframe root
+has sorted keys `[code, data, players, stage, teams, updatedAt, …]` then `players` is at index `2`. If
+a player object has sorted keys `[connected, controller, data, host, name, score, userId]` then `host`
+is at index `3`. So the string path `players.p0.host` encodes as `[2, <p0 sorted position>, 3]`.
+
+The client rebuilds the positional map from the slim keyframe at join/reconnect time using
+`buildPositionalMap`, then passes the schema to `GameStateParser.setSchema` or lets `set()` auto-initialize it.
+
+**Important invariant:** keys must never be deleted from the game state — only set to `null`. Deleting a
+key shifts all subsequent positional indices and breaks decoding.
 
 Deltas are sanitized on the same terms as keyframes: paths containing a `privateData` segment are
 dropped, and `privateData` is stripped out of whole-object update values. A client never sees private
@@ -218,8 +247,11 @@ Sent before the server closes a connection it still owns (for example, a kick).
 
 The reference client (`client/services/message-handler.ts`) routes by shape, in this order:
 
-1. `authenticated === true` → auth payload
-2. `op === "update"` → delta
-3. `op === "inquiryResponse"` → game list
-4. has both `code` and `id` → keyframe
-5. any other `op` → dispatched by that name (this is how game-specific messages get through)
+1. `"sv" in msg` → slim keyframe wrapper
+2. `msg.o === 4` → layout frame
+3. `msg.o === 1, 2, or 3` → delta update
+4. `authenticated === true` → auth payload
+5. `op === "inquiryResponse"` → game list
+6. `"disconnected" in msg` → disconnect
+
+Note: `sv` is checked before `authenticated` — keyframe priority is by design.
