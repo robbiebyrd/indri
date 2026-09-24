@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	goaway "github.com/TwiN/go-away"
@@ -125,7 +126,15 @@ func (s *Store) markPlayerConnected(
 		return fmt.Errorf("no player %v found in game %v", slotId, id)
 	}
 
-	s.publish(id, events.OpUpdate, [][]interface{}{{playerKey + ".connected", connected}}, nil)
+	connectedKey := playerKey + ".connected"
+	if g, lerr := s.Get(id); lerr == nil {
+		gMap, _ := events.ToMap(g)
+		posMap := events.BuildPositionalMap(gMap)
+		s.publish(id, events.OpUpdate, [][]interface{}{{events.EncodePath(connectedKey, gMap, posMap), connected}}, nil)
+	} else {
+		log.Printf("could not load game %v for positional encoding: %v", id, lerr)
+		s.publish(id, events.OpUpdate, [][]interface{}{{connectedKey, connected}}, nil)
+	}
 
 	return nil
 }

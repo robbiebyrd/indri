@@ -61,6 +61,30 @@ func TestEncodePath_RoundTrip(t *testing.T) {
 	if len(path) != 2 {
 		t.Errorf("expected 2 segments, got %v", path)
 	}
+	// a is the only root key → index 0. b is the only child key → index 0.
+	if path[0] != 0 || path[1] != 0 {
+		t.Errorf("expected [0, 0], got %v", path)
+	}
+}
+
+func TestEncodePath_UnknownKeyFallback(t *testing.T) {
+	schema := map[string]interface{}{
+		"a": map[string]interface{}{},
+	}
+	posMap := events.BuildPositionalMap(schema)
+
+	// "a.unknown" — "unknown" is not in schema, so falls back to raw string.
+	path := events.EncodePath("a.unknown", schema, posMap)
+
+	if len(path) != 2 {
+		t.Errorf("expected 2 segments, got %d: %v", len(path), path)
+	}
+	if path[0] != 0 {
+		t.Errorf("expected segment 0 to be 0, got %v", path[0])
+	}
+	if path[1] != "unknown" {
+		t.Errorf("expected segment 1 to be 'unknown' (fallback), got %v", path[1])
+	}
 }
 
 func TestSanitizeDelta_PassesThroughEncodedPaths(t *testing.T) {

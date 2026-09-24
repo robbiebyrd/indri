@@ -231,7 +231,14 @@ func (s *Store) UpdateField(id string, key string, value interface{}) error {
 		return fmt.Errorf("error updating game field: game with id %v does not exists", id)
 	}
 
-	s.publish(id, events.OpUpdate, [][]interface{}{{key, value}}, nil)
+	if g, lerr := s.Get(id); lerr == nil {
+		gMap, _ := events.ToMap(g)
+		posMap := events.BuildPositionalMap(gMap)
+		s.publish(id, events.OpUpdate, [][]interface{}{{events.EncodePath(key, gMap, posMap), value}}, nil)
+	} else {
+		log.Printf("could not load game %v for positional encoding: %v", id, lerr)
+		s.publish(id, events.OpUpdate, [][]interface{}{{key, value}}, nil)
+	}
 
 	return nil
 }
@@ -241,6 +248,14 @@ func (s *Store) DeleteField(id string, key string) error {
 	filterDoc, err := s.getBsonDocForID(id)
 	if err != nil {
 		return err
+	}
+
+	// Load before the delete so the key exists in the schema for positional encoding.
+	var preDelMap map[string]interface{}
+	if preDel, lerr := s.Get(id); lerr == nil {
+		preDelMap, _ = events.ToMap(preDel)
+	} else {
+		log.Printf("could not pre-load game %v for positional encoding: %v", id, lerr)
 	}
 
 	result, err := s.collection.Collection().UpdateOne(
@@ -264,7 +279,12 @@ func (s *Store) DeleteField(id string, key string) error {
 		return fmt.Errorf("field %v does not exists", key)
 	}
 
-	s.publish(id, events.OpUpdate, nil, []interface{}{key})
+	if preDelMap != nil {
+		posMap := events.BuildPositionalMap(preDelMap)
+		s.publish(id, events.OpUpdate, nil, []interface{}{events.EncodePath(key, preDelMap, posMap)})
+	} else {
+		s.publish(id, events.OpUpdate, nil, []interface{}{key})
+	}
 
 	return nil
 }
@@ -326,6 +346,7 @@ func (s *Store) publishDiff(id string, before map[string]interface{}, after *mod
 	}
 
 	posMap := events.BuildPositionalMap(afterMap)
+	posMapBefore := events.BuildPositionalMap(before)
 	updatedMap, removedSlice := events.Diff(before, afterMap)
 
 	// Sanitize on string paths first, then encode to positional indices.
@@ -344,10 +365,12 @@ func (s *Store) publishDiff(id string, before map[string]interface{}, after *mod
 		key := pair[0].(string)
 		updated = append(updated, []interface{}{events.EncodePath(key, afterMap, posMap), pair[1]})
 	}
+	// Use the before-state schema for removed paths: deleted keys are absent from
+	// afterMap so posMap has no entry for them; posMapBefore does.
 	removed := make([]interface{}, 0, len(sanitizedRemoved))
 	for _, item := range sanitizedRemoved {
 		r := item.(string)
-		removed = append(removed, events.EncodePath(r, afterMap, posMap))
+		removed = append(removed, events.EncodePath(r, before, posMapBefore))
 	}
 
 	s.publish(id, events.OpUpdate, updated, removed)
