@@ -100,20 +100,29 @@ func SanitizeDelta(updated [][]interface{}, removed []interface{}) ([][]interfac
 			continue
 		}
 
-		path, ok := pair[0].(string)
-		if !ok || pathHasSegment(path, privateDataKey) || metadataKeys[path] {
-			continue
+		switch key := pair[0].(type) {
+		case string:
+			if pathHasSegment(key, privateDataKey) || metadataKeys[key] {
+				continue
+			}
+			cleanUpdated = append(cleanUpdated, []interface{}{key, stripKey(pair[1], privateDataKey)})
+		case []interface{}:
+			// Already-encoded path — pre-sanitized by the caller, pass through.
+			cleanUpdated = append(cleanUpdated, pair)
 		}
-
-		cleanUpdated = append(cleanUpdated, []interface{}{path, stripKey(pair[1], privateDataKey)})
 	}
 
 	var cleanRemoved []interface{}
 
 	for _, item := range removed {
-		path, ok := item.(string)
-		if ok && !pathHasSegment(path, privateDataKey) && !metadataKeys[path] {
-			cleanRemoved = append(cleanRemoved, path)
+		switch path := item.(type) {
+		case string:
+			if !pathHasSegment(path, privateDataKey) && !metadataKeys[path] {
+				cleanRemoved = append(cleanRemoved, path)
+			}
+		case []interface{}:
+			// Already-encoded path — pass through.
+			cleanRemoved = append(cleanRemoved, item)
 		}
 	}
 

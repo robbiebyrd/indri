@@ -325,16 +325,29 @@ func (s *Store) publishDiff(id string, before map[string]interface{}, after *mod
 		return
 	}
 
+	posMap := events.BuildPositionalMap(afterMap)
 	updatedMap, removedSlice := events.Diff(before, afterMap)
 
-	var updated [][]interface{}
+	// Sanitize on string paths first, then encode to positional indices.
+	rawUpdated := make([][]interface{}, 0, len(updatedMap))
 	for k, v := range updatedMap {
-		updated = append(updated, []interface{}{k, v})
+		rawUpdated = append(rawUpdated, []interface{}{k, v})
 	}
-
-	var removed []interface{}
+	rawRemoved := make([]interface{}, 0, len(removedSlice))
 	for _, r := range removedSlice {
-		removed = append(removed, r)
+		rawRemoved = append(rawRemoved, r)
+	}
+	sanitized, sanitizedRemoved := events.SanitizeDelta(rawUpdated, rawRemoved)
+
+	updated := make([][]interface{}, 0, len(sanitized))
+	for _, pair := range sanitized {
+		key := pair[0].(string)
+		updated = append(updated, []interface{}{events.EncodePath(key, afterMap, posMap), pair[1]})
+	}
+	removed := make([]interface{}, 0, len(sanitizedRemoved))
+	for _, item := range sanitizedRemoved {
+		r := item.(string)
+		removed = append(removed, events.EncodePath(r, afterMap, posMap))
 	}
 
 	s.publish(id, events.OpUpdate, updated, removed)
