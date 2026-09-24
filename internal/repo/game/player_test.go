@@ -22,7 +22,8 @@ func TestAddPlayer_SetsUserID(t *testing.T) {
 	}
 
 	userId := "user-uid-1"
-	if _, err := store.AssignSlot(g.ID.Hex(), "TeamA", userId, "Alice"); err != nil {
+	slotId, err := store.AssignSlot(g.ID.Hex(), "TeamA", userId, "Alice")
+	if err != nil {
 		t.Fatalf("AssignSlot: %v", err)
 	}
 
@@ -31,9 +32,9 @@ func TestAddPlayer_SetsUserID(t *testing.T) {
 		t.Fatalf("reloading game: %v", err)
 	}
 
-	p, ok := final.Players[userId]
+	p, ok := final.Players[slotId]
 	if !ok {
-		t.Fatalf("player %q not found in game", userId)
+		t.Fatalf("slot %q not found in game", slotId)
 	}
 	if p.UserID != userId {
 		t.Fatalf("expected UserID=%q, got %q", userId, p.UserID)
