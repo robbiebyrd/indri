@@ -17,8 +17,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
+	"github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
 // ── fakeConn ─────────────────────────────────────────────────────────────────
@@ -455,38 +457,24 @@ func TestApplyLayoutOp_SetScript_Widget(t *testing.T) {
 // ── Handler auth: no sessionId ────────────────────────────────────────────────
 
 // TestHandle_NoSessionId_RejectsWithError verifies that a connection with no
-// "sessionId" key is rejected before any database call is made. This is the
-// only auth case fully testable without MongoDB: GetKeyAsString reads from the
-// Conn directly, so a fakeConn is sufficient.
+// "sessionId" key is rejected before any database call is made.
+// GetKeyAsString reads from the Conn directly, so a fakeConn is sufficient —
+// no MongoDB required.
 func TestHandle_NoSessionId_RejectsWithError(t *testing.T) {
 	conn := newFakeConn() // no "sessionId" key set
-
-	// We test the underlying auth check by replicating it.
-	//
-	// The connection.Service.GetKeyAsString path:
-	// cs.GetKeyAsString("sessionId") reads from conn.Get("sessionId").
-	// With a fakeConn that has no key, it returns an error.
-	//
-	// We can't call h.Handle directly here without a full injector. Verify the
-	// fakeConn correctly produces the error condition that the handler relies on.
-	_, exists := conn.Get("sessionId")
-	if exists {
-		t.Fatal("fakeConn should have no sessionId key")
+	h := New(&injector.Injector{
+		ClientsInjector: &injector.ClientsInjector{Transport: ws.New()},
+	})
+	msg := map[string]interface{}{
+		"code":     "GAME01",
+		"op":       "addWidget",
+		"sceneId":  "s1",
+		"widgetId": "w1",
+		"widget":   map[string]interface{}{},
 	}
-
-	// The error propagation path: RequireGameCode checks decodedMsg["code"],
-	// then GetKeyAsString("sessionId") fails. Simulate:
-	msg := map[string]interface{}{"code": "GAME01"}
-	gameCode, _ := msg["code"].(string)
-	if gameCode == "" {
-		t.Fatal("expected code to be parseable")
-	}
-
-	// sessionId lookup fails on fakeConn with no key set — this is what the
-	// handler depends on to reject unauthenticated callers.
-	_, sessionExists := conn.Get("sessionId")
-	if sessionExists {
-		t.Error("handler must not proceed past sessionId check for unauthenticated connections")
+	err := h.Handle(conn, msg)
+	if err == nil {
+		t.Fatal("expected error for connection with no sessionId key, got nil")
 	}
 }
 
