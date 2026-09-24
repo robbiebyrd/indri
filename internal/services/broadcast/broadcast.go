@@ -2,7 +2,6 @@ package broadcast
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"slices"
@@ -12,7 +11,6 @@ import (
 	sessionRepo "github.com/robbiebyrd/indri/internal/repo/session"
 	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
 	"github.com/robbiebyrd/indri/internal/transport"
-	ws "github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
 type Service struct {
@@ -72,15 +70,6 @@ func (bs *Service) BroadcastToPlayers(gameId *string, data interface{}, playerId
 	return bs.sendToPlayers(*gameId, playerIds, data)
 }
 
-func (bs *Service) BroadcastToAll(data interface{}) error {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-
-	return bs.sendToAll(jsonData)
-}
-
 func (bs *Service) sendToGame(gameId string, payload interface{}) error {
 	log.Printf("Broadcasting to game %v\n", gameId)
 
@@ -109,12 +98,6 @@ func (bs *Service) sendToTeam(gameId, teamId string, payload interface{}) error 
 	}
 
 	return bs.broadcastToSessions(ids, payload)
-}
-
-func (bs *Service) sendToAll(jsonData []byte) error {
-	log.Printf("Broadcasting to all\n")
-
-	return bs.t.Broadcast(jsonData)
 }
 
 func (bs *Service) sendToPlayer(gameId, playerId string, payload interface{}) error {
@@ -166,7 +149,7 @@ func (bs *Service) broadcastToSessions(sessionIds []string, payload interface{})
 		if !ok || !slices.Contains(sessionIds, id) {
 			continue
 		}
-		if err := ws.WriteEncoded(c, payload); err != nil {
+		if err := transport.WriteEncoded(c, payload); err != nil {
 			log.Printf("broadcast write error to session %s: %v", id, err)
 		}
 	}

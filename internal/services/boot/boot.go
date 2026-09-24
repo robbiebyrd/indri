@@ -3,7 +3,6 @@ package boot
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/robbiebyrd/indri/internal/handlers/luahandler"
@@ -39,7 +38,7 @@ func Boot(ctx context.Context, scriptFilePath *string) (*injector.Injector, erro
 
 	script := repos.ScriptRepo.Get()
 	if err := validateScript(script); err != nil {
-		log.Fatalf("invalid script: %v", err)
+		return nil, fmt.Errorf("invalid script: %w", err)
 	}
 	layoutHash, layoutData := injector.ComputeLayoutHash(script)
 
@@ -60,6 +59,9 @@ func Boot(ctx context.Context, scriptFilePath *string) (*injector.Injector, erro
 }
 
 func validateScript(script *models.Script) error {
+	if script.Config.MaxTeams <= 0 {
+		return fmt.Errorf("config.maxTeams must be > 0, got %d", script.Config.MaxTeams)
+	}
 	if script.Config.MaxTeams != len(script.Teams) {
 		return fmt.Errorf(
 			"config.maxTeams (%d) does not match number of declared teams (%d)",

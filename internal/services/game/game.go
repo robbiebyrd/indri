@@ -16,7 +16,6 @@ import (
 	scriptRepo "github.com/robbiebyrd/indri/internal/repo/script"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/transport"
-	ws "github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
 type Service struct {
@@ -215,14 +214,14 @@ func (gs *Service) slimKeyframe(g *models.Game) (events.KeyframeWrapper, error) 
 // WriteKeyframe sends a LayoutFrame followed by a slim keyframe to a single connection.
 func (gs *Service) WriteKeyframe(conn transport.Conn, g *models.Game, layoutHash string, layoutData map[string]interface{}) error {
 	layoutFrame := events.LayoutFrame{O: events.OpLayout, V: layoutHash, Data: layoutData}
-	if err := ws.WriteEncoded(conn, layoutFrame); err != nil {
+	if err := transport.WriteEncoded(conn, layoutFrame); err != nil {
 		return err
 	}
 	wrapper, err := gs.slimKeyframe(g)
 	if err != nil {
 		return err
 	}
-	return ws.WriteEncoded(conn, wrapper)
+	return transport.WriteEncoded(conn, wrapper)
 }
 
 // WriteSlimKeyframe sends a slim keyframe without a layout frame — used for refresh.
@@ -231,7 +230,7 @@ func (gs *Service) WriteSlimKeyframe(conn transport.Conn, g *models.Game) error 
 	if err != nil {
 		return err
 	}
-	return ws.WriteEncoded(conn, wrapper)
+	return transport.WriteEncoded(conn, wrapper)
 }
 
 func (gs *Service) DisconnectPlayer(id string, slotId string) error {
