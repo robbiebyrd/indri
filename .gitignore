@@ -62,3 +62,4 @@ client/.expo-*-check
 
 # Git worktrees
 .worktrees/
+.remember
