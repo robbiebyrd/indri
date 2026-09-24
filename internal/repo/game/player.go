@@ -65,6 +65,7 @@ func (s *Store) AddPlayer(id string, userId string, displayName string) error {
 		}
 
 		g.Players[userId] = models.Player{
+			UserID:    userId,
 			Name:      goaway.Censor(displayName),
 			Host:      !gameHasHost(g),
 			Connected: false,

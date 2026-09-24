@@ -1,6 +1,7 @@
 package models
 
 type Player struct {
+	UserID      string                  `bson:"userId"      json:"userId"`
 	Name        string                  `bson:"name"        json:"name"`
 	Score       int                     `bson:"score"       json:"score"`
 	Connected   bool                    `bson:"connected"   json:"connected"`
