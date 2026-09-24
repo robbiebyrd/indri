@@ -74,17 +74,6 @@ func TestDiff_RemovedKey(t *testing.T) {
 	}
 }
 
-func TestDiff_ArrayReplacedWhole(t *testing.T) {
-	before := map[string]interface{}{"board": []interface{}{"X", ""}}
-	after := map[string]interface{}{"board": []interface{}{"X", "O"}}
-
-	updated, _ := events.Diff(before, after)
-
-	if !reflect.DeepEqual(updated["board"], []interface{}{"X", "O"}) {
-		t.Errorf("expected whole board replaced, got %v", updated)
-	}
-}
-
 func TestDiff_NoChange(t *testing.T) {
 	m := map[string]interface{}{"a": 1, "b": map[string]interface{}{"c": 2}}
 
@@ -189,5 +178,82 @@ func TestSanitizeDelta_MalformedPairsDropped(t *testing.T) {
 	}
 	if gotUpdated[1][0] != "another.valid" {
 		t.Errorf("second valid pair wrong: %v", gotUpdated[1])
+	}
+}
+
+func TestDiff_ArrayIndexed_ScalarChange(t *testing.T) {
+	before := map[string]interface{}{"board": []interface{}{"X", "", ""}}
+	after := map[string]interface{}{"board": []interface{}{"X", "O", ""}}
+
+	updated, removed := events.Diff(before, after)
+
+	if _, ok := updated["board"]; ok {
+		t.Error("whole board must not be replaced")
+	}
+	if updated["board.1"] != "O" {
+		t.Errorf("expected board.1=O, got %v", updated)
+	}
+	if len(removed) != 0 {
+		t.Errorf("unexpected removals: %v", removed)
+	}
+}
+
+func TestDiff_ArrayIndexed_2D(t *testing.T) {
+	before := map[string]interface{}{
+		"board": []interface{}{
+			[]interface{}{"", "", ""},
+			[]interface{}{"", "", ""},
+		},
+	}
+	after := map[string]interface{}{
+		"board": []interface{}{
+			[]interface{}{"", "", ""},
+			[]interface{}{"", "X", ""},
+		},
+	}
+
+	updated, _ := events.Diff(before, after)
+
+	if updated["board.1.1"] != "X" {
+		t.Errorf("expected board.1.1=X, got %v", updated)
+	}
+	if _, ok := updated["board"]; ok {
+		t.Error("whole board must not be in updated")
+	}
+}
+
+func TestDiff_ArrayIndexed_ElementAdded(t *testing.T) {
+	before := map[string]interface{}{"ids": []interface{}{"p0"}}
+	after := map[string]interface{}{"ids": []interface{}{"p0", "p1"}}
+
+	updated, removed := events.Diff(before, after)
+
+	if updated["ids.1"] != "p1" {
+		t.Errorf("expected ids.1=p1, got %v", updated)
+	}
+	if len(removed) != 0 {
+		t.Errorf("unexpected removals: %v", removed)
+	}
+}
+
+func TestDiff_ArrayIndexed_ElementRemoved(t *testing.T) {
+	before := map[string]interface{}{"ids": []interface{}{"p0", "p1"}}
+	after := map[string]interface{}{"ids": []interface{}{"p0"}}
+
+	_, removed := events.Diff(before, after)
+
+	if len(removed) != 1 || removed[0] != "ids.1" {
+		t.Errorf("expected [ids.1] removed, got %v", removed)
+	}
+}
+
+func TestDiff_ArrayIndexed_NoChange(t *testing.T) {
+	before := map[string]interface{}{"board": []interface{}{"X", ""}}
+	after := map[string]interface{}{"board": []interface{}{"X", ""}}
+
+	updated, removed := events.Diff(before, after)
+
+	if len(updated) != 0 || len(removed) != 0 {
+		t.Errorf("expected no delta, got updated=%v removed=%v", updated, removed)
 	}
 }

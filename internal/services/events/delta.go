@@ -3,12 +3,14 @@ package events
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 )
 
 // Diff computes the dotted-path change between two documents (previously
-// supplied by MongoDB's updateDescription). Nested objects are walked so paths
-// look like "players.<id>.host"; arrays and scalars are treated as whole
-// values. before/after are the JSON representations of the document.
+// supplied by MongoDB's updateDescription). Nested objects and arrays are
+// walked recursively so paths look like "players.<id>.host" or "board.1.1";
+// scalars are compared whole. before/after are the JSON representations of
+// the document.
 func Diff(before, after map[string]interface{}) (updated map[string]interface{}, removed []string) {
 	updated = make(map[string]interface{})
 	diffInto("", before, after, updated, &removed)
@@ -28,10 +30,14 @@ func diffInto(prefix string, before, after map[string]interface{}, updated map[s
 
 		beforeMap, beforeIsMap := beforeVal.(map[string]interface{})
 		afterMap, afterIsMap := afterVal.(map[string]interface{})
+		beforeSlice, beforeIsSlice := beforeVal.([]interface{})
+		afterSlice, afterIsSlice := afterVal.([]interface{})
 
 		switch {
 		case beforeIsMap && afterIsMap:
 			diffInto(path, beforeMap, afterMap, updated, removed)
+		case beforeIsSlice && afterIsSlice:
+			diffSlice(path, beforeSlice, afterSlice, updated, removed)
 		case !reflect.DeepEqual(beforeVal, afterVal):
 			updated[path] = afterVal
 		}
@@ -41,6 +47,37 @@ func diffInto(prefix string, before, after map[string]interface{}, updated map[s
 		if _, ok := before[key]; !ok {
 			updated[joinPath(prefix, key)] = afterVal
 		}
+	}
+}
+
+func diffSlice(prefix string, before, after []interface{}, updated map[string]interface{}, removed *[]string) {
+	minLen := len(before)
+	if len(after) < minLen {
+		minLen = len(after)
+	}
+
+	for i := 0; i < minLen; i++ {
+		path := joinPath(prefix, strconv.Itoa(i))
+		bMap, bIsMap := before[i].(map[string]interface{})
+		aMap, aIsMap := after[i].(map[string]interface{})
+		bSlice, bIsSlice := before[i].([]interface{})
+		aSlice, aIsSlice := after[i].([]interface{})
+
+		switch {
+		case bIsMap && aIsMap:
+			diffInto(path, bMap, aMap, updated, removed)
+		case bIsSlice && aIsSlice:
+			diffSlice(path, bSlice, aSlice, updated, removed)
+		case !reflect.DeepEqual(before[i], after[i]):
+			updated[path] = after[i]
+		}
+	}
+
+	for i := minLen; i < len(before); i++ {
+		*removed = append(*removed, joinPath(prefix, strconv.Itoa(i)))
+	}
+	for i := minLen; i < len(after); i++ {
+		updated[joinPath(prefix, strconv.Itoa(i))] = after[i]
 	}
 }
 
