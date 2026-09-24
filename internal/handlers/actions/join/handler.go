@@ -65,13 +65,12 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	gameJSONBytes, err := h.i.GameService.GetJSONBytes(g.ID.Hex())
+	fresh, err := h.i.GameService.Get(g.ID.Hex())
 	if err != nil {
 		return err
 	}
 
-	err = cs.Write(*gameJSONBytes)
-	if err != nil {
+	if err = h.i.GameService.WriteKeyframe(s, fresh, h.i.LayoutHash, h.i.LayoutData); err != nil {
 		return err
 	}
 

@@ -4,11 +4,13 @@
 package ws
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/olahol/melody"
+	msgpack "github.com/vmihailenco/msgpack/v5"
 
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	"github.com/robbiebyrd/indri/internal/transport"
@@ -57,7 +59,12 @@ func New() *Transport {
 
 func (t *Transport) Handle(h transport.Handlers) {
 	if h.Connect != nil {
-		t.m.HandleConnect(func(s *melody.Session) { h.Connect(conn{s}) })
+		t.m.HandleConnect(func(s *melody.Session) {
+			if s.Request != nil && s.Request.URL.Query().Get("debug") == "1" {
+				s.Set("debug", true)
+			}
+			h.Connect(conn{s})
+		})
 	}
 
 	if h.Disconnect != nil {
@@ -111,6 +118,24 @@ func (t *Transport) Close() error {
 
 func (t *Transport) IsClosed() bool {
 	return t.m.IsClosed()
+}
+
+// WriteEncoded writes payload as MessagePack by default, or JSON when the
+// connection has the "debug" key set to true (set via ?debug=1 at upgrade).
+func WriteEncoded(c transport.Conn, payload interface{}) error {
+	debug, _ := c.Get("debug")
+	if debug == true {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		return c.Write(data)
+	}
+	data, err := msgpack.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return c.Write(data)
 }
 
 // originChecker guards the upgrade against Cross-Site WebSocket Hijacking:

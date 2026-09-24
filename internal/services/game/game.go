@@ -1,6 +1,8 @@
 package game
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,9 @@ import (
 	"github.com/robbiebyrd/indri/internal/models"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	scriptRepo "github.com/robbiebyrd/indri/internal/repo/script"
+	"github.com/robbiebyrd/indri/internal/services/events"
+	"github.com/robbiebyrd/indri/internal/transport"
+	ws "github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
 type Service struct {
@@ -185,6 +190,48 @@ func (gs *Service) Sanitize(game *models.Game) *models.Game {
 	}
 
 	return game
+}
+
+// slimKeyframe returns a sanitized, layout-stripped copy of the game wrapped with a schema-version hash.
+func (gs *Service) slimKeyframe(g *models.Game) (events.KeyframeWrapper, error) {
+	raw, err := json.Marshal(g)
+	if err != nil {
+		return events.KeyframeWrapper{}, err
+	}
+	var clone models.Game
+	if err := json.Unmarshal(raw, &clone); err != nil {
+		return events.KeyframeWrapper{}, err
+	}
+	slim := gs.Sanitize(&clone)
+	if slim.PublicData != nil {
+		delete(slim.PublicData, "layout")
+	}
+	svRaw, _ := json.Marshal(slim)
+	svHash := sha256.Sum256(svRaw)
+	sv := hex.EncodeToString(svHash[:8])
+	return events.KeyframeWrapper{SV: sv, Game: slim}, nil
+}
+
+// WriteKeyframe sends a LayoutFrame followed by a slim keyframe to a single connection.
+func (gs *Service) WriteKeyframe(conn transport.Conn, g *models.Game, layoutHash string, layoutData map[string]interface{}) error {
+	layoutFrame := events.LayoutFrame{O: events.OpLayout, V: layoutHash, Data: layoutData}
+	if err := ws.WriteEncoded(conn, layoutFrame); err != nil {
+		return err
+	}
+	wrapper, err := gs.slimKeyframe(g)
+	if err != nil {
+		return err
+	}
+	return ws.WriteEncoded(conn, wrapper)
+}
+
+// WriteSlimKeyframe sends a slim keyframe without a layout frame — used for refresh.
+func (gs *Service) WriteSlimKeyframe(conn transport.Conn, g *models.Game) error {
+	wrapper, err := gs.slimKeyframe(g)
+	if err != nil {
+		return err
+	}
+	return ws.WriteEncoded(conn, wrapper)
 }
 
 func (gs *Service) DisconnectPlayer(id string, slotId string) error {

@@ -77,13 +77,7 @@ func (h *Handler) Handle(
 			return err
 		}
 
-		jsonGameBytes, err := json.Marshal(h.i.GameService.Sanitize(g))
-		if err != nil {
-			return err
-		}
-
-		err = ss.Write(jsonGameBytes)
-		if err != nil {
+		if err = h.i.GameService.WriteKeyframe(s, g, h.i.LayoutHash, h.i.LayoutData); err != nil {
 			return err
 		}
 	}

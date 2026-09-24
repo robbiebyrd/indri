@@ -35,12 +35,17 @@ func Boot(ctx context.Context, scriptFilePath *string) (*injector.Injector, erro
 		return nil, fmt.Errorf("initializing services: %w", err)
 	}
 
+	script := repos.ScriptRepo.Get()
+	layoutHash, layoutData := injector.ComputeLayoutHash(script)
+
 	i := &injector.Injector{
 		ReposInjector:    repos,
 		ClientsInjector:  clients,
 		ServicesInjector: services,
 		GlobalContext:    ctx,
-		Script:           repos.ScriptRepo.Get(),
+		Script:           script,
+		LayoutHash:       layoutHash,
+		LayoutData:       layoutData,
 	}
 
 	registerHandlers(i)
