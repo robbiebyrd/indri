@@ -32,13 +32,13 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	targetUserId, ok := decodedMsg["userId"].(string)
-	if !ok || targetUserId == "" {
-		return fmt.Errorf("userId to kick must be provided")
+	targetSlotId, ok := decodedMsg["slotId"].(string)
+	if !ok || targetSlotId == "" {
+		return fmt.Errorf("slotId to kick must be provided")
 	}
 
 	// Authorize the CALLER from their own connection, never from the
-	// client-supplied target userId.
+	// client-supplied target slotId.
 	callerSessionId, err := cs.GetKeyAsString("sessionId")
 	if err != nil {
 		return fmt.Errorf("must be logged in to kick a player: %w", err)
@@ -49,8 +49,8 @@ func (h *Handler) Handle(
 		return fmt.Errorf("could not resolve calling session: %w", err)
 	}
 
-	if callerSession.UserID == nil {
-		return fmt.Errorf("calling session has no user id")
+	if callerSession.SlotID == nil || *callerSession.SlotID == "" {
+		return fmt.Errorf("calling session has no slot id")
 	}
 
 	g, err := h.i.GameService.GetByCode(*gameCode)
@@ -61,27 +61,33 @@ func (h *Handler) Handle(
 	gameId := g.ID.Hex()
 
 	if callerSession.GameID == nil || *callerSession.GameID != gameId {
-		return fmt.Errorf("caller %v is not in game %v", *callerSession.UserID, *gameCode)
+		return fmt.Errorf("caller is not in game %v", *gameCode)
 	}
 
-	if !g.Players[*callerSession.UserID].Host {
-		return fmt.Errorf("caller %v is not the host of game %v", *callerSession.UserID, *gameCode)
+	callerSlot := *callerSession.SlotID
+	if !g.Players[callerSlot].Host {
+		return fmt.Errorf("caller %v is not the host of game %v", callerSlot, *gameCode)
 	}
 
-	// Resolve the target and remove them from the game.
-	targetSession, err := h.i.SessionService.GetByUserID(targetUserId)
+	// Resolve the target slot and find their session.
+	targetPlayer, ok := g.Players[targetSlotId]
+	if !ok || targetPlayer.UserID == "" {
+		return fmt.Errorf("slot %v is empty or not found in game %v", targetSlotId, *gameCode)
+	}
+
+	targetSession, err := h.i.SessionService.GetByUserID(targetPlayer.UserID)
 	if err != nil {
 		return err
 	}
 
 	if targetSession.GameID == nil || *targetSession.GameID != gameId {
-		return fmt.Errorf("target %v is not in game %v", targetUserId, *gameCode)
+		return fmt.Errorf("target %v is not in game %v", targetSlotId, *gameCode)
 	}
 
 	targetSessionId := targetSession.ID.Hex()
 
-	if err = h.i.GameService.RemovePlayer(gameId, targetUserId); err != nil {
-		log.Printf("could not remove player %v from game %v: %v\n", targetUserId, gameId, err)
+	if err = h.i.GameRepo.RemovePlayer(gameId, targetSlotId); err != nil {
+		log.Printf("could not remove player %v from game %v: %v\n", targetSlotId, gameId, err)
 	}
 
 	// Force-disconnect the target if they are currently connected. A target

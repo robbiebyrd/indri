@@ -49,16 +49,20 @@ func newTestStore(t *testing.T) *Store {
 func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
 	store := newTestStore(t)
 
-	code := fmt.Sprintf("test-%d", time.Now().UnixNano())
+	const players = 25
 
-	g, err := store.New(code, &models.Script{}, false)
+	code := fmt.Sprintf("test-%d", time.Now().UnixNano())
+	script := &models.Script{
+		Config: models.Config{MaxPlayersPerTeam: players},
+		Teams:  map[string]models.Team{"Main": {Name: "Main"}},
+	}
+
+	g, err := store.New(code, script, false)
 	if err != nil {
 		t.Fatalf("creating game: %v", err)
 	}
 
 	gameId := g.ID.Hex()
-
-	const players = 25
 
 	var wg sync.WaitGroup
 
@@ -71,7 +75,7 @@ func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
 			defer wg.Done()
 
 			userId := fmt.Sprintf("user-%d", n)
-			if err := store.AddPlayer(gameId, userId, userId); err != nil {
+			if _, err := store.AssignSlot(gameId, "Main", userId, userId); err != nil {
 				errs <- err
 			}
 		}(i)
@@ -81,7 +85,7 @@ func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
 	close(errs)
 
 	for err := range errs {
-		t.Errorf("concurrent AddPlayer failed: %v", err)
+		t.Errorf("concurrent AssignSlot failed: %v", err)
 	}
 
 	final, err := store.Get(gameId)
@@ -89,8 +93,14 @@ func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
 		t.Fatalf("reloading game: %v", err)
 	}
 
-	if len(final.Players) != players {
-		t.Fatalf("expected %d players after concurrent adds, got %d (lost updates)", players, len(final.Players))
+	assigned := 0
+	for _, p := range final.Players {
+		if p.UserID != "" {
+			assigned++
+		}
+	}
+	if assigned != players {
+		t.Fatalf("expected %d assigned players after concurrent assigns, got %d (lost updates)", players, assigned)
 	}
 
 	hosts := 0

@@ -12,14 +12,18 @@ func TestAddPlayer_SetsUserID(t *testing.T) {
 	store := newTestStore(t)
 
 	code := fmt.Sprintf("userid-test-%d", time.Now().UnixNano())
-	g, err := store.New(code, &models.Script{}, false)
+	script := &models.Script{
+		Config: models.Config{MaxPlayersPerTeam: 2},
+		Teams:  map[string]models.Team{"TeamA": {Name: "TeamA"}},
+	}
+	g, err := store.New(code, script, false)
 	if err != nil {
 		t.Fatalf("creating game: %v", err)
 	}
 
 	userId := "user-uid-1"
-	if err := store.AddPlayer(g.ID.Hex(), userId, "Alice"); err != nil {
-		t.Fatalf("AddPlayer: %v", err)
+	if _, err := store.AssignSlot(g.ID.Hex(), "TeamA", userId, "Alice"); err != nil {
+		t.Fatalf("AssignSlot: %v", err)
 	}
 
 	final, err := store.Get(g.ID.Hex())

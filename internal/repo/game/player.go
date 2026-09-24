@@ -2,7 +2,6 @@ package game
 
 import (
 	"fmt"
-	"slices"
 	"time"
 
 	goaway "github.com/TwiN/go-away"
@@ -13,78 +12,53 @@ import (
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
 )
 
-// HasPlayer determines if a given userId is in a game.
-func (s *Store) HasPlayer(id string, userId string) bool {
-	g, err := s.Get(id)
-	if err != nil {
-		return false
-	}
+// AssignSlot claims the first empty slot in the given team for userId.
+// It looks only at slots pre-declared in g.Teams[teamId].PlayerIDs so a
+// player joining team A never lands in team B's slot.
+func (s *Store) AssignSlot(id string, teamId string, userId string, displayName string) (string, error) {
+	var assignedSlot string
 
-	for uId := range g.Players {
-		if uId == userId {
-			return true
+	err := s.Mutate(id, func(g *models.Game) error {
+		team, ok := g.Teams[teamId]
+		if !ok {
+			return fmt.Errorf("team %v not found in game %v", teamId, id)
 		}
-	}
-
-	return false
-}
-
-// PlayerOnATeam determines if a given userId is in a game.
-func (s *Store) PlayerOnATeam(id string, userId string) bool {
-	if hasPlayer := s.HasPlayer(id, userId); !hasPlayer {
-		return false
-	}
-
-	g, err := s.Get(id)
-	if err != nil {
-		return false
-	}
-
-	for _, team := range g.Teams {
-		if slices.Contains(team.PlayerIDs, userId) {
-			return true
+		for _, slotID := range team.PlayerIDs {
+			player := g.Players[slotID]
+			if player.UserID == "" {
+				player.UserID = userId
+				player.Name = goaway.Censor(displayName)
+				player.Connected = true
+				player.Host = !gameHasHost(g)
+				g.Players[slotID] = player
+				assignedSlot = slotID
+				return nil
+			}
 		}
-	}
-
-	return false
-}
-
-// AddPlayer adds a player to the game.
-func (s *Store) AddPlayer(id string, userId string, displayName string) error {
-	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
-		return err
-	}
-
-	return s.Mutate(id, func(g *models.Game) error {
-		if _, ok := g.Players[userId]; ok {
-			return fmt.Errorf("player with id %v already exists in game %v", userId, id)
-		}
-
-		if g.Players == nil {
-			g.Players = map[string]models.Player{}
-		}
-
-		g.Players[userId] = models.Player{
-			UserID:    userId,
-			Name:      goaway.Censor(displayName),
-			Host:      !gameHasHost(g),
-			Connected: false,
-		}
-
-		return nil
+		return fmt.Errorf("no available player slots in team %v of game %v", teamId, id)
 	})
+
+	return assignedSlot, err
 }
 
-// RemovePlayer removes a player from a game and any team it was on, atomically.
-func (s *Store) RemovePlayer(id string, userId string) error {
-	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
+// RemovePlayer clears the player's slot without removing the key, preserving
+// the pre-declared schema. The slot is available for reassignment after this.
+func (s *Store) RemovePlayer(id string, slotId string) error {
+	if err := sessionUtils.ValidateGameAndUser(id, slotId); err != nil {
 		return err
 	}
 
 	return s.Mutate(id, func(g *models.Game) error {
-		removePlayerFromTeams(g, userId)
-		delete(g.Players, userId)
-
+		slot, ok := g.Players[slotId]
+		if !ok {
+			return fmt.Errorf("slot %v not found in game %v", slotId, id)
+		}
+		slot.UserID = ""
+		slot.Name = ""
+		slot.Connected = false
+		slot.Host = false
+		slot.Controller = false
+		g.Players[slotId] = slot
 		return nil
 	})
 }
@@ -100,41 +74,14 @@ func gameHasHost(g *models.Game) bool {
 	return false
 }
 
-// removePlayerFromTeams removes userId from every team it belongs to on the
-// in-memory game, returning whether any team changed.
-func removePlayerFromTeams(g *models.Game, userId string) bool {
-	removed := false
-
-	for tId, team := range g.Teams {
-		newIDs := make([]string, 0, len(team.PlayerIDs))
-		teamChanged := false
-
-		for _, pId := range team.PlayerIDs {
-			if pId == userId {
-				teamChanged = true
-				removed = true
-			} else {
-				newIDs = append(newIDs, pId)
-			}
-		}
-
-		if teamChanged {
-			team.PlayerIDs = newIDs
-			g.Teams[tId] = team
-		}
-	}
-
-	return removed
+// ConnectPlayer marks the player's slot as connected.
+func (s *Store) ConnectPlayer(id string, slotId string) error {
+	return s.markPlayerConnected(id, slotId, true)
 }
 
-// ConnectPlayer marks the player as offline.
-func (s *Store) ConnectPlayer(id string, userId string) error {
-	return s.markPlayerConnected(id, userId, true)
-}
-
-// DisconnectPlayer marks the player as offline.
-func (s *Store) DisconnectPlayer(id string, userId string) error {
-	return s.markPlayerConnected(id, userId, false)
+// DisconnectPlayer marks the player's slot as disconnected.
+func (s *Store) DisconnectPlayer(id string, slotId string) error {
+	return s.markPlayerConnected(id, slotId, false)
 }
 
 // markPlayerConnected sets the player's connected status atomically, only if
@@ -142,10 +89,10 @@ func (s *Store) DisconnectPlayer(id string, userId string) error {
 // player document. The version bump keeps it coherent with Mutate's CAS.
 func (s *Store) markPlayerConnected(
 	id string,
-	userId string,
+	slotId string,
 	connected bool,
 ) error {
-	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
+	if err := sessionUtils.ValidateGameAndUser(id, slotId); err != nil {
 		return err
 	}
 
@@ -154,7 +101,7 @@ func (s *Store) markPlayerConnected(
 		return err
 	}
 
-	playerKey := "players." + userId
+	playerKey := "players." + slotId
 
 	result, err := s.collection.Collection().UpdateOne(
 		*s.ctx,
@@ -175,7 +122,7 @@ func (s *Store) markPlayerConnected(
 	}
 
 	if result.MatchedCount == 0 {
-		return fmt.Errorf("no player %v found in game %v", userId, id)
+		return fmt.Errorf("no player %v found in game %v", slotId, id)
 	}
 
 	s.publish(id, events.OpUpdate, [][]interface{}{{playerKey + ".connected", connected}}, nil)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/chenmingyong0423/go-mongox/v2"
@@ -57,6 +59,39 @@ func NewStore(ctx context.Context, client *mongodb.Client, locks lock.Manager, p
 	}, nil
 }
 
+// preDeclareSlots creates the fixed player-slot map from the script config.
+// Teams are sorted alphanumerically; team i gets slots [i*max … (i+1)*max-1].
+// Returns the players map and a copy of the teams map with PlayerIDs pre-populated.
+func preDeclareSlots(script *models.Script) (map[string]models.Player, map[string]models.Team) {
+	players := make(map[string]models.Player)
+	teams := make(map[string]models.Team, len(script.Teams))
+
+	for k, v := range script.Teams {
+		teams[k] = v
+	}
+
+	sortedNames := make([]string, 0, len(script.Teams))
+	for name := range script.Teams {
+		sortedNames = append(sortedNames, name)
+	}
+	sort.Strings(sortedNames)
+
+	idx := 0
+	for _, name := range sortedNames {
+		team := teams[name]
+		team.PlayerIDs = make([]string, 0, script.Config.MaxPlayersPerTeam)
+		for j := 0; j < script.Config.MaxPlayersPerTeam; j++ {
+			slotID := "p" + strconv.Itoa(idx)
+			players[slotID] = models.Player{}
+			team.PlayerIDs = append(team.PlayerIDs, slotID)
+			idx++
+		}
+		teams[name] = team
+	}
+
+	return players, teams
+}
+
 // New creates a new game, given an ID.
 func (s *Store) New(code string, script *models.Script, privateGame bool) (*models.Game, error) {
 	gameDataModel := models.CreateGame{
@@ -67,10 +102,12 @@ func (s *Store) New(code string, script *models.Script, privateGame bool) (*mode
 	}
 
 	if script != nil {
-		gameDataModel.Teams = &script.Teams
+		slots, teamsWithSlots := preDeclareSlots(script)
+		gameDataModel.Teams = &teamsWithSlots
 		gameDataModel.Stage = &script.Stage
 		gameDataModel.PublicData = script.PublicData
 		gameDataModel.PrivateData = script.PrivateData
+		gameDataModel.Players = &slots
 	}
 
 	doc, err := repoUtils.CreateBSONDoc(gameDataModel)
