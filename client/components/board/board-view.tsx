@@ -62,9 +62,10 @@ function installWidgetGlobal(session: LuaSession): void {
 interface Props {
     game: Game
     onSend?: (msg: object) => void
+    editMode?: boolean
 }
 
-export function BoardView({game, onSend}: Props) {
+export function BoardView({game, onSend, editMode = false}: Props) {
     const rawLayout = game.data?.layout
     const {layout, issues} = parseLayout(rawLayout)
 
@@ -124,6 +125,7 @@ export function BoardView({game, onSend}: Props) {
                         grid={layout.grid}
                         overrides={overrides}
                         onWidgetPress={handleWidgetPress}
+                        editMode={editMode}
                     />
                 </StyledBox>
             )}
