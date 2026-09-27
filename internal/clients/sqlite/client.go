@@ -20,9 +20,10 @@ CREATE TABLE IF NOT EXISTS games (
 );
 
 CREATE TABLE IF NOT EXISTS users (
-    id    TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    data  TEXT NOT NULL
+    id       TEXT PRIMARY KEY,
+    email    TEXT UNIQUE NOT NULL,
+    password TEXT,
+    data     TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

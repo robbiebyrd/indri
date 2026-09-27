@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	sqliteClient "github.com/robbiebyrd/indri/internal/clients/sqlite"
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	scriptRepo "github.com/robbiebyrd/indri/internal/repo/script"
@@ -50,6 +51,36 @@ func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath stri
 			return nil, err
 		}
 		sr, err = sessionRepo.NewMemoryStore(ctx)
+		if err != nil {
+			return nil, err
+		}
+	case "sqlite":
+		sqliteDB, err := sqliteClient.Open(env.SQLitePath)
+		if err != nil {
+			return nil, fmt.Errorf("open sqlite %q: %w", env.SQLitePath, err)
+		}
+		gr, err = gameRepo.NewSQLiteStore(ctx, sqliteDB, clients.LockManager, clients.Publisher)
+		if err != nil {
+			return nil, err
+		}
+		ur, err = userRepo.NewSQLiteStore(ctx, sqliteDB)
+		if err != nil {
+			return nil, err
+		}
+		sr, err = sessionRepo.NewSQLiteStore(ctx, sqliteDB)
+		if err != nil {
+			return nil, err
+		}
+	case "postgres":
+		gr, err = gameRepo.NewPostgresStore(ctx, env.PostgresURI, clients.LockManager, clients.Publisher)
+		if err != nil {
+			return nil, err
+		}
+		ur, err = userRepo.NewPostgresStore(ctx, env.PostgresURI)
+		if err != nil {
+			return nil, err
+		}
+		sr, err = sessionRepo.NewPostgresStore(ctx, env.PostgresURI)
 		if err != nil {
 			return nil, err
 		}

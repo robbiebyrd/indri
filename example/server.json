@@ -4,6 +4,7 @@
   "allowedOrigins": "",
   "lockBackend": "inprocess",
   "dbBackend": "mongodb",
+  "sqlitePath": "./indri.db",
   "postgresUri": "",
   "mongoUri": "mongodb+srv://test:test@localhost/",
   "mongoDatabase": "indri",
