@@ -42,6 +42,13 @@ func Open(dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("sqlite open %q: %w", dsn, err)
 	}
 
+	// Pin the pool to a single connection. SQLite is single-writer regardless,
+	// a ":memory:" DSN gives each new connection its own empty database (there
+	// is nothing to share without a shared-cache DSN), and pragmas such as
+	// foreign_keys are per-connection — so more than one pooled connection
+	// would see an unmigrated schema and/or a different pragma state.
+	db.SetMaxOpenConns(1)
+
 	// WAL gives concurrent readers without blocking writers.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		db.Close()
