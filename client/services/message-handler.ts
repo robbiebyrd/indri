@@ -98,15 +98,18 @@ export class MessageHandler {
 
         for (const parser of this.parsers.filter(p => p.action === action)) {
             if (parser) {
-                const data = (parser.dataKey && parsed && parsed[parser.dataKey]) ? parsed[parser.dataKey] : parsed
+                // A present key is used even when null (the server sends
+                // "games": null for an empty list); only an absent one falls
+                // back to the whole message.
+                const data = (parser.dataKey && parsed && parser.dataKey in parsed) ? parsed[parser.dataKey] : parsed
                 parser.parser(data)
             }
         }
     }
 
-    updateAvailableGames(games: any[]) {
+    updateAvailableGames(games: any[] | null) {
         this.setGameList({
-            payload: games as GameInfo[],
+            payload: (games ?? []) as GameInfo[],
             type: "setAvailableGames"
         } as GameListDispatchMessage)
     }
