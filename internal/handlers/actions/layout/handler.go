@@ -5,7 +5,6 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
 	"github.com/robbiebyrd/indri/internal/transport"
 	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
@@ -23,40 +22,16 @@ func New(i *injector.Injector) *Handler {
 // named game; auth is always resolved from the caller's own connection key, never
 // from a client-supplied userId.
 func (h *Handler) Handle(s transport.Conn, decodedMsg map[string]interface{}) error {
-	cs := connection.NewService(s, h.i.Transport)
-
 	gameCode, err := handlerUtils.RequireGameCode(decodedMsg)
 	if err != nil {
 		return err
 	}
 
-	// Authorize the CALLER from their own connection, never from any userId the
-	// client may have included in the message payload.
-	callerSessionId, err := cs.GetKeyAsString("sessionId")
-	if err != nil {
-		return fmt.Errorf("must be logged in to edit a layout: %w", err)
-	}
-
-	callerSession, err := h.i.SessionService.Get(*callerSessionId)
-	if err != nil {
-		return fmt.Errorf("could not resolve calling session: %w", err)
-	}
-	if callerSession.UserID == nil {
-		return fmt.Errorf("calling session has no user id")
-	}
-
-	g, err := h.i.GameService.GetByCode(*gameCode)
+	g, _, err := handlerUtils.RequireHost(h.i, s, *gameCode)
 	if err != nil {
 		return err
 	}
 	gameId := g.ID
-
-	if callerSession.GameID == nil || *callerSession.GameID != gameId {
-		return fmt.Errorf("caller %v is not in game %v", *callerSession.UserID, *gameCode)
-	}
-	if !g.Players[*callerSession.UserID].Host {
-		return fmt.Errorf("caller %v is not the host of game %v", *callerSession.UserID, *gameCode)
-	}
 
 	op, err := DecodeOp(decodedMsg)
 	if err != nil {

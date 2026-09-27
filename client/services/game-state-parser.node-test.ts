@@ -80,3 +80,27 @@ test("debug mode numeric-dotted path applies correctly", () => {
     p.update({o: 1, t: new Date(2000), u: [["0.1.1", "O"]], r: []})
     assert.equal(p.current().board[1][1], "O", "debug dotted-numeric path applied")
 })
+
+test("the schema is a snapshot: keys added to the keyframe object later don't shift positions", () => {
+    // MessageHandler merges the layout into the keyframe object after setting
+    // the schema; the server's positions never include it.
+    const keyframe: any = { data: { board: ["", ""], turn: "X" } }
+    const p = new GameStateParser<any>()
+    p.setSchema(keyframe)
+    keyframe.data.layout = { grid: { cols: 3, rows: 3 } }
+    p.set(keyframe, new Date(1000))
+
+    // data is root key 0; under it, board is 0 and turn is 1 on the server.
+    p.update({o: 1, t: new Date(2000), u: [[[0, 1], "O"]], r: []})
+    assert.equal(p.current().data.turn, "O", "delta for turn applied to turn")
+    assert.deepEqual(p.current().data.layout, { grid: { cols: 3, rows: 3 } }, "layout untouched")
+})
+
+test("removing an array's trailing indices shrinks it without leaving holes", () => {
+    const p = new GameStateParser<any>()
+    p.set({ list: ["a", "b", "c"] }, new Date(1000))
+
+    // The server sends one removal per dropped index, in ascending order.
+    p.update(delta(2000, undefined, ["list.1", "list.2"]))
+    assert.deepEqual(p.current().list, ["a"], "array shrank to its remaining items")
+})

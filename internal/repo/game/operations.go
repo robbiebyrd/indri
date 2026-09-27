@@ -3,6 +3,7 @@ package game
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -13,6 +14,7 @@ import (
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/events"
+	"github.com/robbiebyrd/indri/internal/services/mutation"
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
 )
 
@@ -118,9 +120,11 @@ func preDeclareSlots(script *models.Script) (map[string]models.Player, map[strin
 	return players, teams
 }
 
-// assignSlot claims the first empty slot in the given team for userId.
-// It looks only at slots pre-declared in g.Teams[teamId].PlayerIDs so a
-// player joining team A never lands in team B's slot.
+// assignSlot seats userId in teamId and returns their slot. A user holds at
+// most one slot per game: joining their own team again keeps (and reconnects)
+// their slot, and joining another team moves them, host flag included, to its
+// first empty slot. Only slots pre-declared in g.Teams[teamId].PlayerIDs are
+// considered, so a player joining team A never lands in team B's slot.
 func assignSlot(m mutator, id string, teamId string, userId string, displayName string) (string, error) {
 	var assignedSlot string
 
@@ -129,27 +133,47 @@ func assignSlot(m mutator, id string, teamId string, userId string, displayName 
 		if !ok {
 			return fmt.Errorf("team %v not found in game %v", teamId, id)
 		}
+
+		held := slotHeldBy(g, userId)
+		if held != "" && slices.Contains(team.PlayerIDs, held) {
+			player := g.Players[held]
+			player.Connected = true
+			g.Players[held] = player
+			assignedSlot = held
+			return nil
+		}
+
 		for _, slotID := range team.PlayerIDs {
 			player := g.Players[slotID]
-			if player.UserID == "" {
-				player.UserID = userId
-				player.Name = goaway.Censor(displayName)
-				player.Connected = true
-				player.Host = !gameHasHost(g)
-				g.Players[slotID] = player
-				assignedSlot = slotID
-				return nil
+			if player.UserID != "" {
+				continue
 			}
+
+			host := !gameHasHost(g)
+			if held != "" {
+				host = g.Players[held].Host
+				clearSlot(g, held)
+			}
+
+			player.UserID = userId
+			player.Name = goaway.Censor(displayName)
+			player.Connected = true
+			player.Host = host
+			g.Players[slotID] = player
+			assignedSlot = slotID
+			return nil
 		}
+
 		return fmt.Errorf("no available player slots in team %v of game %v", teamId, id)
 	})
 
 	return assignedSlot, err
 }
 
-// removePlayer clears the player's slot without removing the key, preserving
-// the pre-declared schema. The slot is available for reassignment after this.
-func removePlayer(m mutator, id string, slotId string) error {
+// removePlayer empties userId's slot without removing the key, preserving the
+// pre-declared schema; the slot is then free for reassignment. It fails if
+// userId no longer holds the slot.
+func removePlayer(m mutator, id string, slotId string, userId string) error {
 	if err := sessionUtils.ValidateGameAndUser(id, slotId); err != nil {
 		return err
 	}
@@ -159,19 +183,18 @@ func removePlayer(m mutator, id string, slotId string) error {
 		if !ok {
 			return fmt.Errorf("slot %v not found in game %v", slotId, id)
 		}
-		slot.UserID = ""
-		slot.Name = ""
-		slot.Connected = false
-		slot.Host = false
-		slot.Controller = false
-		g.Players[slotId] = slot
+		if slot.UserID != userId {
+			return fmt.Errorf("slot %v of game %v is not held by %v", slotId, id, userId)
+		}
+		clearSlot(g, slotId)
 		return nil
 	})
 }
 
-// setConnected sets a slot's connected status, failing rather than creating
-// the slot if it doesn't exist.
-func setConnected(m mutator, id string, slotId string, connected bool) error {
+// setConnected sets whether userId, in slotId, is connected. It fails rather
+// than creating a missing slot, and does nothing if userId no longer holds the
+// slot: a stale connection must not change its new holder.
+func setConnected(m mutator, id string, slotId string, userId string, connected bool) error {
 	if err := sessionUtils.ValidateGameAndUser(id, slotId); err != nil {
 		return err
 	}
@@ -181,10 +204,40 @@ func setConnected(m mutator, id string, slotId string, connected bool) error {
 		if !ok {
 			return fmt.Errorf("no player %v found in game %v", slotId, id)
 		}
+		if slot.UserID != userId {
+			return mutation.ErrAbort
+		}
 		slot.Connected = connected
 		g.Players[slotId] = slot
 		return nil
 	})
+}
+
+// slotHeldBy returns the slot userId holds in g, or "" if none. Empty slots
+// have no user, so an empty userId holds nothing.
+func slotHeldBy(g *models.Game, userId string) string {
+	if userId == "" {
+		return ""
+	}
+
+	for slotID, p := range g.Players {
+		if p.UserID == userId {
+			return slotID
+		}
+	}
+
+	return ""
+}
+
+// clearSlot empties a slot of its player, keeping the slot and its data.
+func clearSlot(g *models.Game, slotId string) {
+	slot := g.Players[slotId]
+	slot.UserID = ""
+	slot.Name = ""
+	slot.Connected = false
+	slot.Host = false
+	slot.Controller = false
+	g.Players[slotId] = slot
 }
 
 // update copies the set fields of upd onto the game. Private is always copied.

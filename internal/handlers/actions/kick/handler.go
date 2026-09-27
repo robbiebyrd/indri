@@ -8,7 +8,6 @@ import (
 
 	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
-	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
 type Handler struct {
@@ -24,8 +23,6 @@ func (h *Handler) Handle(
 	s transport.Conn,
 	decodedMsg map[string]interface{},
 ) error {
-	cs := connection.NewService(s, h.i.Transport)
-
 	gameCode, err := handlerUtils.RequireGameCode(decodedMsg)
 	if err != nil {
 		return err
@@ -38,35 +35,12 @@ func (h *Handler) Handle(
 
 	// Authorize the CALLER from their own connection, never from the
 	// client-supplied target slotId.
-	callerSessionId, err := cs.GetKeyAsString("sessionId")
-	if err != nil {
-		return fmt.Errorf("must be logged in to kick a player: %w", err)
-	}
-
-	callerSession, err := h.i.SessionService.Get(*callerSessionId)
-	if err != nil {
-		return fmt.Errorf("could not resolve calling session: %w", err)
-	}
-
-	if callerSession.SlotID == nil || *callerSession.SlotID == "" {
-		return fmt.Errorf("calling session has no slot id")
-	}
-
-	g, err := h.i.GameService.GetByCode(*gameCode)
+	g, _, err := handlerUtils.RequireHost(h.i, s, *gameCode)
 	if err != nil {
 		return err
 	}
 
 	gameId := g.ID
-
-	if callerSession.GameID == nil || *callerSession.GameID != gameId {
-		return fmt.Errorf("caller is not in game %v", *gameCode)
-	}
-
-	callerSlot := *callerSession.SlotID
-	if !g.Players[callerSlot].Host {
-		return fmt.Errorf("caller %v is not the host of game %v", callerSlot, *gameCode)
-	}
 
 	// Resolve the target slot and find their session.
 	targetPlayer, ok := g.Players[targetSlotId]
@@ -85,7 +59,7 @@ func (h *Handler) Handle(
 
 	targetSessionId := targetSession.ID
 
-	if err = h.i.GameRepo.RemovePlayer(gameId, targetSlotId); err != nil {
+	if err = h.i.GameRepo.RemovePlayer(gameId, targetSlotId, targetPlayer.UserID); err != nil {
 		log.Printf("could not remove player %v from game %v: %v\n", targetSlotId, gameId, err)
 	}
 

@@ -80,7 +80,7 @@ func TestStore_RemovePlayerEmptiesTheSlotButKeepsIt(t *testing.T) {
 		g := twoSlotGame(t, store)
 		slot, _ := store.AssignSlot(g.ID, "red", "u1", "Alice")
 
-		if err := store.RemovePlayer(g.ID, slot); err != nil {
+		if err := store.RemovePlayer(g.ID, slot, "u1"); err != nil {
 			t.Fatalf("RemovePlayer: %v", err)
 		}
 
@@ -99,21 +99,21 @@ func TestStore_ConnectAndDisconnectPlayer(t *testing.T) {
 		g := twoSlotGame(t, store)
 		slot, _ := store.AssignSlot(g.ID, "red", "u1", "Alice")
 
-		if err := store.DisconnectPlayer(g.ID, slot); err != nil {
+		if err := store.DisconnectPlayer(g.ID, slot, "u1"); err != nil {
 			t.Fatalf("DisconnectPlayer: %v", err)
 		}
 		if player(t, store, g.ID, slot).Connected {
 			t.Fatal("still connected")
 		}
 
-		if err := store.ConnectPlayer(g.ID, slot); err != nil {
+		if err := store.ConnectPlayer(g.ID, slot, "u1"); err != nil {
 			t.Fatalf("ConnectPlayer: %v", err)
 		}
 		if !player(t, store, g.ID, slot).Connected {
 			t.Fatal("not connected")
 		}
 
-		if err := store.ConnectPlayer(g.ID, "p99"); err == nil {
+		if err := store.ConnectPlayer(g.ID, "p99", "u1"); err == nil {
 			t.Fatal("connecting a slot that doesn't exist succeeded")
 		}
 	})

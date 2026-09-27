@@ -1,16 +1,10 @@
 package layout
 
 // handler_test.go exercises applyLayoutOp (the pure mutation function) and the
-// handler's auth guard via a fake transport.Conn. The handler-level auth tests
-// that require a real session or game (session-in-different-game, non-host,
-// userId spoof) cannot be fully exercised here because SessionService and
-// GameService are concrete structs backed by MongoDB; they would require an
-// integration test with a live database.
-//
-// What we can test without MongoDB:
+// handler's early auth failure (missing "sessionId" connection key):
 //   - applyLayoutOp: every op, the ErrAbort case for removeWidget, and the
 //     guarantee that only PublicData["layout"] changes.
-//   - Handler.Handle early auth failure: missing "sessionId" connection key.
+// Host authorization against real in-memory stores is in handler_auth_test.go.
 
 import (
 	"encoding/json"

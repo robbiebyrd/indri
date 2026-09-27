@@ -90,7 +90,7 @@ func TestSlotOperations(t *testing.T) {
 		t.Fatal("assigning into an unknown team succeeded")
 	}
 
-	if err := store.DisconnectPlayer(g.ID, slot); err != nil {
+	if err := store.DisconnectPlayer(g.ID, slot, "u1"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = store.Get(g.ID)
@@ -98,7 +98,7 @@ func TestSlotOperations(t *testing.T) {
 		t.Fatal("still connected after DisconnectPlayer")
 	}
 
-	if err := store.RemovePlayer(g.ID, slot); err != nil {
+	if err := store.RemovePlayer(g.ID, slot, "u1"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = store.Get(g.ID)
@@ -106,7 +106,7 @@ func TestSlotOperations(t *testing.T) {
 		t.Fatalf("after RemovePlayer slot = %+v (present=%v), want an empty slot kept in place", pl, ok)
 	}
 
-	if err := store.ConnectPlayer(g.ID, "p99"); err == nil {
+	if err := store.ConnectPlayer(g.ID, "p99", "u1"); err == nil {
 		t.Fatal("connecting a nonexistent slot succeeded")
 	}
 }

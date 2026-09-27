@@ -185,13 +185,13 @@ func TestMarkPlayerConnected_EmitsPositionalPath(t *testing.T) {
 	}
 
 	// AssignSlot already connects the player; disconnect so connecting is a change.
-	if err := store.DisconnectPlayer(g.ID, slotId); err != nil {
+	if err := store.DisconnectPlayer(g.ID, slotId, "user-connect-1"); err != nil {
 		t.Fatalf("DisconnectPlayer: %v", err)
 	}
 
 	pub.reset()
 
-	if err := store.ConnectPlayer(g.ID, slotId); err != nil {
+	if err := store.ConnectPlayer(g.ID, slotId, "user-connect-1"); err != nil {
 		t.Fatalf("ConnectPlayer: %v", err)
 	}
 
