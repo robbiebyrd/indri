@@ -1,5 +1,7 @@
-import {Button, StyleSheet, View} from 'react-native'
+import {Button, Platform, StyleSheet, View} from 'react-native'
 import {useEffect, useRef, useState} from "react"
+import {fetch as expoFetch} from "expo/fetch"
+import {createTransportClient} from "@indri/protocol-client"
 import {MessageHandler} from "@/services/message-handler";
 import Login from "@/components/auth/login";
 import {useGameState} from "@/providers/game-state/use-game-state";
@@ -19,13 +21,13 @@ export default function Index() {
     const {dispatch: gameListDispatch} = useGameList()
 
 
-    // Create the socket once (lazy ref, not useMemo — opening a socket is a
-    // side effect) and close it on unmount to avoid leaking connections.
+    // Create the connection once (lazy ref, not useMemo — opening a connection
+    // is a side effect) and close it on unmount to avoid leaking connections.
     const wsRef = useRef<MessageHandler | undefined>(undefined)
     if (!wsRef.current) {
-        // An empty URL is not a harmless default: WebSocket("") resolves
-        // against the page origin, so the app silently dials Metro on :8081
-        // and looks like a broken server rather than missing config.
+        // An empty URL is not a harmless default: it resolves against the page
+        // origin, so the app silently dials Metro on :8081 and looks like a
+        // broken server rather than missing config.
         const apiUrl = process.env.EXPO_PUBLIC_API_URL
         if (!apiUrl) {
             console.error(
@@ -33,7 +35,13 @@ export default function Index() {
                 "and restart Metro — EXPO_PUBLIC_* values are inlined at build time.",
             )
         }
-        wsRef.current = new MessageHandler(apiUrl ?? "", userDispatch, gameDispatch, gameListDispatch)
+        const transport = createTransportClient(process.env.EXPO_PUBLIC_TRANSPORT || "ws", {
+            url: apiUrl ?? "",
+            // React Native's global fetch buffers whole responses; SSE needs a
+            // streaming body, which expo/fetch provides.
+            fetch: Platform.OS === "web" ? undefined : expoFetch,
+        })
+        wsRef.current = new MessageHandler(transport, userDispatch, gameDispatch, gameListDispatch)
     }
     const ws: MessageHandler = wsRef.current!
 

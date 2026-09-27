@@ -7,6 +7,7 @@ import {GameListDispatchMessage} from "@/providers/game-list/game-list-actions";
 import {GameInfo} from "@/providers/game-list/game-list-context";
 import {parseJsonSafely} from "@/services/json";
 import {JsonObject} from "type-fest";
+import type {Payload, TransportClient} from "@indri/protocol-client";
 
 type actionHandler = {
     name: string
@@ -16,7 +17,7 @@ type actionHandler = {
 }
 
 export class MessageHandler {
-    private ws?: WebSocket = undefined
+    private readonly transport: TransportClient
     private stateList: GameStateParser<Game> = new GameStateParser<Game>()
     private readonly setGameState: Dispatch<GameDispatchMessage>
     private readonly setPlayerState: Dispatch<UserDispatchMessage>
@@ -24,7 +25,7 @@ export class MessageHandler {
     private parsers: actionHandler[]
 
     constructor(
-        url: string,
+        transport: TransportClient,
         setPlayerState: Dispatch<UserDispatchMessage>,
         setGameState: Dispatch<GameDispatchMessage>,
         setGameList: Dispatch<GameListDispatchMessage>,
@@ -59,26 +60,35 @@ export class MessageHandler {
             ...parsers
         ]
 
-        this.ws = new WebSocket(url)
+        this.transport = transport
 
-        this.ws.onmessage = (e: MessageEvent) => {
-            this.routeIncomingMessage(e)
-        }
+        this.transport.onMessage((data) => {
+            this.routeIncomingMessage({data})
+        })
 
         //TODO: Handle errors appropriately.
-        this.ws.onerror = (e: Event) => {
+        this.transport.onError((e) => {
             console.log(e)
-        }
+        })
 
         //TODO: Handle reconnects
-        this.ws.onclose = (e: CloseEvent) => {
-            console.log(e.code, e.reason)
-        }
+        this.transport.onClose((reason) => {
+            console.log(reason)
+        })
+
+        this.transport.connect().catch((e) => {
+            console.error("could not connect to the server", e)
+        })
 
         return this
     }
 
-    routeIncomingMessage(message: MessageEvent) {
+    routeIncomingMessage(message: {data: Payload}) {
+        if (typeof message.data !== "string") {
+            console.warn("ignoring a binary message: this client only decodes JSON")
+            return
+        }
+
         const parsed = parseJsonSafely<JsonObject>(message.data)
 
         const action = this.messageType(parsed)
@@ -101,24 +111,15 @@ export class MessageHandler {
         } as GameListDispatchMessage)
     }
 
+    // A close from our side never fires onClose, so a teardown can't trigger
+    // close handling (e.g. future reconnect) during unmount.
     close() {
-        if (this.ws) {
-            // Drop handlers before closing so a teardown doesn't fire onclose
-            // logic (e.g. future reconnect) during unmount.
-            this.ws.onmessage = null
-            this.ws.onerror = null
-            this.ws.onclose = null
-            this.ws.close()
-            this.ws = undefined
-        }
+        this.transport.close()
     }
 
+    // Dropped, with a warning, while the connection isn't open.
     send(message: object) {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            console.warn("dropping message sent before the socket was open")
-            return
-        }
-        this.ws.send(JSON.stringify(message))
+        this.transport.send(JSON.stringify(message))
     }
 
     update(parsedMessage?: any) {
