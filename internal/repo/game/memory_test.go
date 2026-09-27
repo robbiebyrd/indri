@@ -3,6 +3,7 @@ package game
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/robbiebyrd/indri/internal/models"
@@ -186,5 +187,68 @@ func TestMemoryStore_Mutate_UnknownID(t *testing.T) {
 	err := store.Mutate("no-such-id", func(g *models.Game) error { return nil })
 	if !errors.Is(err, repoErrors.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// TestMemoryStore_ConcurrentSceneWritesAndReadsDoNotRace runs Mutates that
+// write a scene's data alongside readers that walk the whole game. Run under
+// -race: a copy that shares nested maps with stored state races here.
+func TestMemoryStore_ConcurrentSceneWritesAndReadsDoNotRace(t *testing.T) {
+	store := newMemoryFixture(t)
+	g, err := store.New("RACE", sceneScript(), false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	const n = 50
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if err := store.Mutate(g.ID, func(g *models.Game) error {
+				(*g.Stage.Scenes["s1"].PublicData)["n"] = i
+				return nil
+			}); err != nil {
+				t.Errorf("Mutate: %v", err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			got, err := store.Get(g.ID)
+			if err != nil {
+				t.Errorf("Get: %v", err)
+				return
+			}
+			if _, err := events.ToMap(got); err != nil {
+				t.Errorf("ToMap: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// TestCopyGame_CopiesNonJSONContainers covers data values a Go caller stored
+// directly (not decoded from JSON): they must not be shared with the copy.
+func TestCopyGame_CopiesNonJSONContainers(t *testing.T) {
+	g := &models.Game{PublicData: map[string]interface{}{
+		"tags":   []string{"a"},
+		"counts": map[string]int{"x": 1},
+		"list":   []interface{}{nil, map[string]interface{}{"k": "v"}},
+	}}
+
+	c := copyGame(g)
+	c.PublicData["tags"].([]string)[0] = "changed"
+	c.PublicData["counts"].(map[string]int)["x"] = 2
+	c.PublicData["list"].([]interface{})[1].(map[string]interface{})["k"] = "changed"
+
+	if got := g.PublicData["tags"].([]string)[0]; got != "a" {
+		t.Errorf("tags[0] = %q, want a", got)
+	}
+	if got := g.PublicData["counts"].(map[string]int)["x"]; got != 1 {
+		t.Errorf("counts.x = %d, want 1", got)
+	}
+	if got := g.PublicData["list"].([]interface{})[1].(map[string]interface{})["k"]; got != "v" {
+		t.Errorf("list[1].k = %v, want v", got)
 	}
 }
