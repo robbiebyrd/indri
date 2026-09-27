@@ -115,6 +115,22 @@ the login screen while its old slot shows as disconnected.
     against pre-disconnect state could be wrong after resume, and the keyframe re-syncs the player
     anyway.
 
+### Slow clients: close instead of dropping (review finding #7)
+
+Today a connection whose outbound buffer is full drops the frame and stays open. That happens in
+`QueuedConn.enqueue` (`ErrBufferFull`) for sse, graphqlws and webrtc, and in melody's
+`ErrMessageBufferFull` for ws. Positional deltas can't be resent, so that client drifts out of sync for
+good.
+
+With resume in place, the fix is to close the connection on a full buffer. The client then reconnects,
+resumes, and gets a fresh keyframe.
+- **Where:** `QueuedConn` closes itself on `ErrBufferFull`, and the ws transport's `HandleError` closes
+  the melody session on `ErrMessageBufferFull`.
+- **Test:** a conformance-suite case that fills one connection's buffer and expects `Disconnect`.
+
+This is deliberately scheduled with resume: without resume, closing would send the player back to the
+login screen.
+
 ### Docs
 
 - `docs/PROTOCOL.md`: document resume, `session_invalid`, the `replaced` reason, idle expiry, and that
