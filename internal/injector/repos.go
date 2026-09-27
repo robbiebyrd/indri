@@ -71,6 +71,19 @@ func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath stri
 		if err != nil {
 			return nil, err
 		}
+	case "postgres":
+		gr, err = gameRepo.NewPostgresStore(ctx, env.PostgresURI, clients.LockManager, clients.Publisher)
+		if err != nil {
+			return nil, err
+		}
+		ur, err = userRepo.NewPostgresStore(ctx, env.PostgresURI)
+		if err != nil {
+			return nil, err
+		}
+		sr, err = sessionRepo.NewPostgresStore(ctx, env.PostgresURI)
+		if err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("unknown database backend %q", env.DBBackend)
 	}
