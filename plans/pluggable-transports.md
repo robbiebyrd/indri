@@ -135,3 +135,10 @@ Findings worth keeping:
   - Two-player games over ws, sse, and graphqlws on MongoDB and on memory, where the state rebuilt from
     deltas equals a fresh keyframe.
   - A full game in the browser over WebRTC.
+- **DB-backends catch-up.**
+  - PostgresStore is ported onto the shared layer and runs in the contract suite; its team operations
+    are dropped along with `Storer`'s.
+  - `Update` and the host operations now also live once in `operations.go`. This fixed
+    `MongoStore.Update`, which wrote without a version bump, lock, or delta.
+  - The concurrent lost-update test is in the contract suite and passes on memory, SQLite, MongoDB, and
+    Postgres.
