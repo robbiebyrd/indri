@@ -55,8 +55,8 @@ Three-stage construction, each stage depending only on the previous one.
 
 | File | Builds |
 |---|---|
-| `clients.go` | Mongo client, client transport (built from `INDRI_TRANSPORTS` by `transport.go`), lock manager, change-event publisher. Cached process-globally; all four are injectable for tests. |
-| `repos.go` | `game`, `user`, `session` Mongo stores (each creates its indexes in `NewStore`) plus the script store. |
+| `clients.go` | Mongo client (`mongodb` backend only), client transport (built from `INDRI_TRANSPORTS` by `transport.go`), lock manager, change-event publisher. Cached process-globally; all four are injectable for tests. |
+| `repos.go` | `game`, `user`, `session` stores for the backend chosen by `INDRI_DB_BACKEND` (see [Database backends](#database-backends)) plus the script store. |
 | `services.go` | game, broadcast, auth, user, session services. |
 
 `injector.Injector` embeds all three structs plus `GlobalContext` and the parsed `Script`, and is the
@@ -134,7 +134,7 @@ pass `transporttest.Run` — the conformance suite every transport runs — and 
 
 ### `internal/repo`
 
-Mongo stores plus `env` (envconfig-backed, `INDRI_` prefix, cached singleton) and `script`
+Game, user and session stores (one implementation per [database backend](#database-backends)) plus `env` (envconfig-backed, `INDRI_` prefix, cached singleton) and `script`
 (reads and unmarshals the JSON script file once at boot).
 
 `repo/game` is split by concern: `game.go` (CRUD, `Mutate`, `saveWithVersion`), `player.go`, `team.go`,
@@ -165,9 +165,30 @@ identically; a store supplies only load, a version-fenced save, and queries.
 `InProcess` locks and the in-process event bus are correct for a single instance only. Multi-instance
 deployments must set `INDRI_LOCK_BACKEND=redis`, which switches both to Redis.
 
+## Database backends
+
+`INDRI_DB_BACKEND` picks the implementation behind the `game`, `user` and `session` `Storer`
+interfaces; `injector/repos.go` switches on it.
+
+| Value | Files | Notes |
+|---|---|---|
+| `mongodb` (default) | `repo/*/mongo*.go` | Client opened in `clients.go` from `INDRI_MONGO_*`. |
+| `memory` | `repo/*/memory*.go` | In-process maps; lost on restart and not shared between instances. |
+| `sqlite` | `repo/*/sqlite*.go` | One `*sql.DB` from `internal/clients/sqlite` (`INDRI_SQLITE_PATH`), pinned to a single connection; `Open` creates the schema. |
+| `postgres` | `repo/*/postgres*.go` | One `*sql.DB` from `internal/clients/postgres` (`INDRI_POSTGRES_URI`), capped at 25 connections; each store runs its own `CREATE TABLE IF NOT EXISTS` DDL. |
+
+The SQL backends store each record as a JSON blob (JSONB on Postgres) beside the columns needed for
+lookups and uniqueness: game `code`/`version`/`private`, user `email`/`password`, session
+`token`/`user_id`. Game writes go through the same `mutation.Run` lock and version fence as Mongo, with
+the expected version in the `UPDATE ... WHERE`. The shared pool is `ReposInjector.SQLDB`, closed by
+`closeResources` on shutdown.
+
+Sessions expire `sessionMaxAge` (7 days) after creation on `mongodb` (TTL index) and `postgres`
+(reads ignore older rows; `New` purges them). `memory` and `sqlite` do not expire sessions.
+
 ## Data model
 
-Collections: `game`, `user`, `session`.
+Collections (tables `games`, `users`, `sessions` on the SQL backends): `game`, `user`, `session`.
 
 ```
 Game
@@ -256,6 +277,8 @@ platform including web). The edit-mode toggle lives in `client/app/board/index.t
 |---|---|---|
 | `INDRI_LISTEN_ADDRESS` / `INDRI_LISTEN_PORT` | `localhost` / `5002` | |
 | `INDRI_ALLOWED_ORIGINS` | `""` | Comma-separated. Empty rejects all cross-origin browsers. |
+| `INDRI_DB_BACKEND` | `mongodb` | `mongodb`, `memory`, `sqlite` or `postgres`. |
+| `INDRI_SQLITE_PATH` / `INDRI_POSTGRES_URI` | `./indri.db` / `""` | Used by the `sqlite` / `postgres` backends. Pass the Postgres URI by env var, not the `-postgres-uri` flag, since flags are visible in `ps`. |
 | `INDRI_MONGO_URI` / `INDRI_MONGO_DATABASE` | `localhost` / `indri` | A replica set is not required. |
 | `INDRI_LOCK_BACKEND` | `inprocess` | Multi-instance switch: `redis` moves both the lock manager and the event bus to Redis. |
 | `INDRI_REDIS_*` | localhost:6379 | Only used in `redis` mode. |
@@ -265,4 +288,6 @@ platform including web). The edit-mode toggle lives in `client/app/board/index.t
 
 `go test -race ./...` in CI. Tests that need MongoDB (`internal/repo/game/game_concurrency_test.go`)
 call `t.Skipf` when no database is reachable, so CI stays green without one. Point them elsewhere with
-`INDRI_TEST_MONGO_URI`; they use the `indri_test` database.
+`INDRI_TEST_MONGO_URI`; they use the `indri_test` database. The Postgres store tests skip unless
+`INDRI_TEST_POSTGRES_URI` is set (CI runs a `postgres:15-alpine` service for them); they `TRUNCATE`
+their tables in whatever database it points at.

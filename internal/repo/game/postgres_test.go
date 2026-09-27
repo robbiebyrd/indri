@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	postgresClient "github.com/robbiebyrd/indri/internal/clients/postgres"
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	"github.com/robbiebyrd/indri/internal/services/events"
@@ -21,21 +22,29 @@ func postgresURI(t *testing.T) string {
 	return uri
 }
 
+// newPostgresFixture TRUNCATEs the games table of whatever database
+// INDRI_TEST_POSTGRES_URI points at, both before the test (so rows left by a
+// crashed run can't break it) and after it. Never point it at real data.
 func newPostgresFixture(t *testing.T) *PostgresStore {
 	t.Helper()
+	db, err := postgresClient.Open(context.Background(), postgresURI(t))
+	if err != nil {
+		t.Fatalf("postgres Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
 	store, err := NewPostgresStore(
 		context.Background(),
-		postgresURI(t),
+		db,
 		lock.NewInProcess(),
 		events.NewInProcess(),
 	)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = store.db.Exec("TRUNCATE TABLE games")
-		_ = store.db.Close()
-	})
+	if _, err := db.Exec("TRUNCATE TABLE games"); err != nil {
+		t.Fatalf("truncating games: %v", err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("TRUNCATE TABLE games") })
 	return store
 }
 

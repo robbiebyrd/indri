@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	postgresClient "github.com/robbiebyrd/indri/internal/clients/postgres"
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 )
@@ -19,16 +20,24 @@ func postgresUserURI(t *testing.T) string {
 	return uri
 }
 
+// newPostgresUserFixture TRUNCATEs the users table of whatever database
+// INDRI_TEST_POSTGRES_URI points at, both before the test (so rows left by a
+// crashed run can't break it) and after it. Never point it at real data.
 func newPostgresUserFixture(t *testing.T) *PostgresStore {
 	t.Helper()
-	store, err := NewPostgresStore(context.Background(), postgresUserURI(t))
+	db, err := postgresClient.Open(context.Background(), postgresUserURI(t))
+	if err != nil {
+		t.Fatalf("postgres Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := NewPostgresStore(context.Background(), db)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = store.db.Exec("TRUNCATE TABLE users")
-		_ = store.db.Close()
-	})
+	if _, err := db.Exec("TRUNCATE TABLE users"); err != nil {
+		t.Fatalf("truncating users: %v", err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("TRUNCATE TABLE users") })
 	return store
 }
 

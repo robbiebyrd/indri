@@ -3,6 +3,7 @@ package injector
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 
@@ -29,6 +30,9 @@ type ReposInjector struct {
 	UserRepo    userRepo.Storer
 	SessionRepo sessionRepo.Storer
 	ScriptRepo  *scriptRepo.Store
+	// SQLDB is the database/sql pool shared by the sqlite and postgres
+	// stores, closed on shutdown; nil for the mongodb and memory backends.
+	SQLDB *sql.DB
 }
 
 type ClientsInjector struct {

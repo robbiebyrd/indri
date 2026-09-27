@@ -2,9 +2,11 @@ package injector
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
+	postgresClient "github.com/robbiebyrd/indri/internal/clients/postgres"
 	sqliteClient "github.com/robbiebyrd/indri/internal/clients/sqlite"
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
@@ -21,10 +23,11 @@ func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath stri
 	env := envVars.GetEnv()
 
 	var (
-		gr  gameRepo.Storer
-		ur  userRepo.Storer
-		sr  sessionRepo.Storer
-		err error
+		gr    gameRepo.Storer
+		ur    userRepo.Storer
+		sr    sessionRepo.Storer
+		sqlDB *sql.DB
+		err   error
 	)
 
 	switch env.DBBackend {
@@ -55,32 +58,37 @@ func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath stri
 			return nil, err
 		}
 	case "sqlite":
-		sqliteDB, err := sqliteClient.Open(env.SQLitePath)
+		sqlDB, err = sqliteClient.Open(env.SQLitePath)
 		if err != nil {
 			return nil, fmt.Errorf("open sqlite %q: %w", env.SQLitePath, err)
 		}
-		gr, err = gameRepo.NewSQLiteStore(ctx, sqliteDB, clients.LockManager, clients.Publisher)
+		gr, err = gameRepo.NewSQLiteStore(ctx, sqlDB, clients.LockManager, clients.Publisher)
 		if err != nil {
 			return nil, err
 		}
-		ur, err = userRepo.NewSQLiteStore(ctx, sqliteDB)
+		ur, err = userRepo.NewSQLiteStore(ctx, sqlDB)
 		if err != nil {
 			return nil, err
 		}
-		sr, err = sessionRepo.NewSQLiteStore(ctx, sqliteDB)
+		sr, err = sessionRepo.NewSQLiteStore(ctx, sqlDB)
 		if err != nil {
 			return nil, err
 		}
 	case "postgres":
-		gr, err = gameRepo.NewPostgresStore(ctx, env.PostgresURI, clients.LockManager, clients.Publisher)
+		// The URI carries a password, so it is deliberately left out of the error.
+		sqlDB, err = postgresClient.Open(ctx, env.PostgresURI)
+		if err != nil {
+			return nil, fmt.Errorf("open postgres: %w", err)
+		}
+		gr, err = gameRepo.NewPostgresStore(ctx, sqlDB, clients.LockManager, clients.Publisher)
 		if err != nil {
 			return nil, err
 		}
-		ur, err = userRepo.NewPostgresStore(ctx, env.PostgresURI)
+		ur, err = userRepo.NewPostgresStore(ctx, sqlDB)
 		if err != nil {
 			return nil, err
 		}
-		sr, err = sessionRepo.NewPostgresStore(ctx, env.PostgresURI)
+		sr, err = sessionRepo.NewPostgresStore(ctx, sqlDB)
 		if err != nil {
 			return nil, err
 		}
@@ -99,5 +107,6 @@ func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath stri
 		UserRepo:    ur,
 		SessionRepo: sr,
 		ScriptRepo:  scr,
+		SQLDB:       sqlDB,
 	}, nil
 }

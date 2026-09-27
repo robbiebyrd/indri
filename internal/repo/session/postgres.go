@@ -9,28 +9,33 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // registers "pgx" driver for database/sql
-
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	"github.com/robbiebyrd/indri/internal/repo/ids"
 )
 
+// created_at backs the sessionMaxAge cap (the Mongo store's TTL index). The
+// ALTER adds it to a sessions table created before the column existed.
 const sessionSchemaSQL = `
 CREATE TABLE IF NOT EXISTS sessions (
-    id      TEXT PRIMARY KEY,
-    token   TEXT UNIQUE,
-    user_id TEXT UNIQUE,
-    data    JSONB NOT NULL
+    id         TEXT PRIMARY KEY,
+    token      TEXT UNIQUE,
+    user_id    TEXT UNIQUE,
+    data       JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_token   ON sessions (token);
-CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+CREATE INDEX IF NOT EXISTS idx_sessions_token      ON sessions (token);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id    ON sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions (created_at);
 `
 
 // PostgresStore is a PostgreSQL-backed session.Storer. Each session is stored
 // as a JSONB blob alongside indexed scalar columns for efficient lookups.
 // token is kept in its own column because models.Session.Token is tagged
 // json:"-" and would otherwise be lost on every read/write round-trip.
+// Sessions older than sessionMaxAge are treated as absent by every read and
+// purged on New, mirroring the Mongo store's TTL index.
 type PostgresStore struct {
 	ctx context.Context
 	db  *sql.DB
@@ -38,20 +43,11 @@ type PostgresStore struct {
 
 var _ Storer = (*PostgresStore)(nil)
 
-func NewPostgresStore(ctx context.Context, uri string) (*PostgresStore, error) {
-	if uri == "" {
-		return nil, errors.New("postgres URI is required")
-	}
-	db, err := sql.Open("pgx", uri)
-	if err != nil {
-		return nil, fmt.Errorf("opening postgres connection: %w", err)
-	}
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("pinging postgres: %w", err)
+func NewPostgresStore(ctx context.Context, db *sql.DB) (*PostgresStore, error) {
+	if db == nil {
+		return nil, errors.New("db is required")
 	}
 	if _, err := db.ExecContext(ctx, sessionSchemaSQL); err != nil {
-		_ = db.Close()
 		return nil, fmt.Errorf("running session schema DDL: %w", err)
 	}
 	return &PostgresStore{ctx: ctx, db: db}, nil
@@ -67,12 +63,25 @@ func isPgDuplicateKey(err error) bool {
 		strings.Contains(err.Error(), "duplicate key value violates unique constraint")
 }
 
+// sessionCutoff is the creation time at or before which a session has expired.
+func sessionCutoff() time.Time {
+	return time.Now().Add(-sessionMaxAge)
+}
+
 // New enforces one-session-per-userId: a second call for the same UserID
 // returns the existing session, matching MemoryStore/MongoStore behaviour.
 // ptrOrNil is defined in memory.go (same package).
 func (s *PostgresStore) New(c models.CreateSession) (*models.Session, error) {
 	if c.UserID == "" {
 		return nil, errors.New("session must have a user ID")
+	}
+
+	// Purge expired sessions first so an expired row can neither be returned
+	// below nor block this user's new session via the UNIQUE(user_id) index.
+	if _, err := s.db.ExecContext(s.ctx,
+		`DELETE FROM sessions WHERE created_at <= $1`, sessionCutoff(),
+	); err != nil {
+		return nil, fmt.Errorf("purging expired sessions: %w", err)
 	}
 
 	// Return existing session for this user if one exists.
@@ -101,8 +110,8 @@ func (s *PostgresStore) New(c models.CreateSession) (*models.Session, error) {
 	// doesn't collide across sessions without one, mirroring MemoryStore
 	// (which never indexes an empty token in byToken).
 	_, err = s.db.ExecContext(s.ctx,
-		`INSERT INTO sessions (id, token, user_id, data) VALUES ($1, $2, $3, $4)`,
-		sess.ID, ptrOrNil(c.Token), c.UserID, data,
+		`INSERT INTO sessions (id, token, user_id, data, created_at) VALUES ($1, $2, $3, $4, $5)`,
+		sess.ID, ptrOrNil(c.Token), c.UserID, data, sess.CreatedAt,
 	)
 	if err != nil {
 		if isPgDuplicateKey(err) {
@@ -121,7 +130,7 @@ func (s *PostgresStore) Get(id string) (*models.Session, error) {
 		token sql.NullString
 	)
 	err := s.db.QueryRowContext(s.ctx,
-		`SELECT data, token FROM sessions WHERE id = $1`, id,
+		`SELECT data, token FROM sessions WHERE id = $1 AND created_at > $2`, id, sessionCutoff(),
 	).Scan(&data, &token)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
@@ -149,7 +158,7 @@ func (s *PostgresStore) GetByToken(token string) (*models.Session, error) {
 		tokenCol sql.NullString
 	)
 	err := s.db.QueryRowContext(s.ctx,
-		`SELECT data, token FROM sessions WHERE token = $1`, token,
+		`SELECT data, token FROM sessions WHERE token = $1 AND created_at > $2`, token, sessionCutoff(),
 	).Scan(&data, &tokenCol)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("token: %w", repoErrors.ErrNotFound)
@@ -170,7 +179,7 @@ func (s *PostgresStore) GetByToken(token string) (*models.Session, error) {
 func (s *PostgresStore) Exists(id string) (bool, error) {
 	var exists bool
 	err := s.db.QueryRowContext(s.ctx,
-		`SELECT EXISTS(SELECT 1 FROM sessions WHERE id = $1)`, id,
+		`SELECT EXISTS(SELECT 1 FROM sessions WHERE id = $1 AND created_at > $2)`, id, sessionCutoff(),
 	).Scan(&exists)
 	if err != nil {
 		return false, err
@@ -189,7 +198,7 @@ func (s *PostgresStore) Find(key string, value string) ([]*models.Session, error
 		return s.findInGo(key, value)
 	}
 	rows, err := s.db.QueryContext(s.ctx,
-		fmt.Sprintf(`SELECT data, token FROM sessions WHERE %s = $1`, col), value,
+		fmt.Sprintf(`SELECT data, token FROM sessions WHERE %s = $1 AND created_at > $2`, col), value, sessionCutoff(),
 	)
 	if err != nil {
 		return nil, err
@@ -199,7 +208,9 @@ func (s *PostgresStore) Find(key string, value string) ([]*models.Session, error
 }
 
 func (s *PostgresStore) findInGo(key, value string) ([]*models.Session, error) {
-	rows, err := s.db.QueryContext(s.ctx, `SELECT data, token FROM sessions`)
+	rows, err := s.db.QueryContext(s.ctx,
+		`SELECT data, token FROM sessions WHERE created_at > $1`, sessionCutoff(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -255,11 +266,22 @@ func (s *PostgresStore) Update(id string, u *models.UpdateSession) error {
 	if sess.UserID != nil {
 		userID = *sess.UserID
 	}
-	_, err = s.db.ExecContext(s.ctx,
+	res, err := s.db.ExecContext(s.ctx,
 		`UPDATE sessions SET user_id = $2, data = $3 WHERE id = $1`,
 		sess.ID, userID, data,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("updating session %q: %w", id, err)
+	}
+	// The session can be deleted between the Get above and this UPDATE.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("updating session %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
+	}
+	return nil
 }
 
 func (s *PostgresStore) Delete(id string) error {
