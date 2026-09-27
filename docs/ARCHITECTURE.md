@@ -34,7 +34,7 @@ internal/repo/*                          MongoDB stores
         │                   ▼
         │       internal/services/boot/monitor.go    Subscribe, fan out per game
         │                   ▼
-        └────── internal/services/broadcast/         Transport.BroadcastFilter → clients
+        └────── internal/services/broadcast/         BroadcastLocal → this instance's clients
 ```
 
 Note the delta path is driven by the **application**, not by MongoDB. Because the server is the sole
@@ -63,8 +63,14 @@ Three-stage construction, each stage depending only on the previous one.
 single value threaded into every handler.
 
 `INDRI_LOCK_BACKEND` is really a multi-instance switch. Set to `redis`, `GetClients` opens one Redis
-connection and shares it between `lock.Redis` and `events.Redis`; otherwise both the lock manager and
-the event bus are in-process.
+connection and shares it between `lock.Redis`, the change bus (`events.NewRedis`, `indri:changes`), and
+the delivery relay (`events.NewRedisDeliveries`, `indri:deliveries`); otherwise locks and changes are
+in-process and there is no relay.
+
+Sends to other players (`BroadcastService.Broadcast`, `CloseSessions`) resolve their sessions on the
+sending instance, then publish an `events.Delivery` on the relay; every instance's
+`BroadcastService.RelayDeliveries` (run by `boot.Serve`) applies it to the connections it holds. Change
+events already reach every instance, so the monitor delivers them with `BroadcastLocal` instead.
 
 ### `internal/entrypoints`
 
@@ -163,7 +169,8 @@ operations over `Mutate` (`repo/game/operations.go`), so every store changes and
 identically; a store supplies only load, a version-fenced save, and queries.
 
 `InProcess` locks and the in-process event bus are correct for a single instance only. Multi-instance
-deployments must set `INDRI_LOCK_BACKEND=redis`, which switches both to Redis.
+deployments must set `INDRI_LOCK_BACKEND=redis`, which switches both to Redis and enables the delivery
+relay.
 
 ## Database backends
 

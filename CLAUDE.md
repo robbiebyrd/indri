@@ -66,8 +66,9 @@ tag. Settings resolve JSON config < env vars < flags. Add a setting's flag there
 1. **clients** (`clients.go`) — MongoDB (only for the `mongodb` backend), the client transport (built
    from `INDRI_TRANSPORTS` by `transport.go`), the lock manager, and the change-event publisher. Clients are process-global singletons; `GetClients` returns a cached `*ClientsInjector` on
    every call after the first, and accepts overrides for tests. `INDRI_LOCK_BACKEND=redis` is the
-   *multi-instance switch*: it flips **both** the lock manager and the event bus to Redis, sharing one
-   connection. Otherwise both are in-process.
+   *multi-instance switch*: it moves the lock manager, the change-event bus, and the delivery relay
+   (`Deliveries`) to Redis, sharing one connection. Otherwise locks and changes are in-process and there
+   is no relay.
 2. **repos** (`repos.go`) — game/user/session stores for `INDRI_DB_BACKEND` (`mongodb` default, `memory`,
    `sqlite`, `postgres`; see "Database backends" in `docs/ARCHITECTURE.md`) plus the script store (loaded
    from the JSON file). The SQL backends share one `*sql.DB` (`ReposInjector.SQLDB`), closed on shutdown.
@@ -134,8 +135,11 @@ Store.Mutate commit ──► changePublisher.diff (repo/game/changes.go) ──
                                                                           ▼
                                          boot.monitorGameChanges (Subscribe)
                                                                           ▼
-                                         BroadcastService.Broadcast(gameID, …)
+                                         BroadcastService.BroadcastLocal(gameID, …)
 ```
+
+Every instance receives every change event, so the monitor writes only to its own connections
+(`BroadcastLocal`); relaying it again would deliver each delta once per instance.
 
 **Shape changes re-keyframe.** A write that adds or removes an object key in the client view shifts
 positions the client's schema can't know, so instead of a delta `changePublisher` publishes an
@@ -156,10 +160,17 @@ publishing for free as long as it is built on `Mutate`:
 - Publish failures are logged, never returned — the write already committed, so a fan-out hiccup must
   not fail the mutation.
 
-`BroadcastService` offers game, team, player, and global fan-out. Because `sessionId` is the only
-per-connection key the app sets, every targeted send resolves its recipients through the session store
-first and then filters connections on that one key (`broadcastToSessions`). Do not invent new
-connection keys to filter on — nothing sets them.
+`BroadcastService` offers game, team, and player fan-out, plus `CloseSessions` (kick). Because
+`sessionId` is the only per-connection key the app sets, every targeted send resolves its recipients
+through the session store first, then filters connections on that one key. Do not invent new connection
+keys to filter on — nothing sets them.
+
+**Sends reach every instance.** A player's connection can be on any instance, so `BroadcastService`
+resolves the sessions once and hands an `events.Delivery` to every instance. With one instance it writes
+directly; in multi-instance mode it publishes on the Redis relay (`indri:deliveries`) and each instance's
+`RelayDeliveries` loop applies it to the connections it holds. Never reach another player through
+`Transport.Conns()` — that only sees this instance. Only a reply on the caller's *own* connection may be
+written directly.
 
 ### Concurrency model
 

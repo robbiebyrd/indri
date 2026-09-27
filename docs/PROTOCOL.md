@@ -96,11 +96,17 @@ channel hasn't opened within 15s of the answer is dropped.
 
 ### Load balancers
 
-`ws` and `graphqlws` keep each client on one socket. `sse` splits a client across a stream and
-separate POSTs, and `webrtc` needs ICE traffic to reach the instance that answered the offer, so
-behind a load balancer with several instances **both need sticky sessions by client IP** (there are
-no cookies to pin on). An SSE send that lands on the wrong instance gets `404`, and the client
-reconnects.
+Messages for other players reach them on whichever instance they are connected to (with
+`INDRI_LOCK_BACKEND=redis`), so players in one game need not share an instance.
+
+- `ws` and `graphqlws` keep each client on one socket and need no affinity.
+- `sse` splits a client across a stream and separate POSTs, so behind several instances it needs
+  **sticky sessions by client IP** (there are no cookies to pin on). An SSE send that lands on the wrong
+  instance gets `404`, and the client treats the connection as ended (automatic reconnect is not built
+  yet; see `plans/session-resume.md`).
+- `webrtc` needs no stickiness: the offer may reach any instance, and the answer carries that
+  instance's own ICE candidates. Each instance must be reachable at the UDP address it advertises (its
+  own `INDRI_WEBRTC_NAT_1TO1_IPS` and port range) — a load balancer in front of the UDP ports breaks it.
 
 ---
 
@@ -219,11 +225,12 @@ Removes the caller from their game and from any team, atomically.
 ### `kick`
 
 ```json
-{ "action": "kick", "code": "my-room", "userId": "<target user id>" }
+{ "action": "kick", "code": "my-room", "slotId": "<target's slot, e.g. p1>" }
 ```
 
 Host-only. The caller is authorized from their own connection's session — never from the payload. The
-target is removed from the game and force-disconnected if currently connected.
+target is removed from the game and, if connected (to any instance), sent `{"disconnected": true}` and
+disconnected.
 
 ### `logout`
 

@@ -1,6 +1,8 @@
 # Multi-instance routing and sticky sessions
 
-Status: **proposal — options for Boss to choose from.** Nothing here is built.
+Status: **Part 1 is built** (branch `wip/multi-instance-routing`): sends and kicks reach every instance,
+and the doc errors below are fixed. Part 2 (SSE affinity) is a choice for Boss; the recommendation
+below stands.
 
 ## Where we are (line refs are for `wip/transports-compact-delta`)
 

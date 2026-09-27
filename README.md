@@ -24,7 +24,8 @@ everyone in that game. A client holds the last full snapshot (a *keyframe*) and 
 Because the server is the sole writer it computes deltas itself rather than tailing a database change
 feed — so MongoDB needs no replica set, and the same mechanism would work over any store. On a single
 instance the bus is an in-memory channel; set `INDRI_LOCK_BACKEND=redis` and it becomes Redis Pub/Sub,
-so deltas reach players connected to other instances.
+so deltas — and every other message to a player, such as a kick — reach players connected to other
+instances.
 
 Everything a specific game needs to define is:
 

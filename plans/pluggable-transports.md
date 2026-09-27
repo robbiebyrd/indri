@@ -35,8 +35,8 @@ docs that still described the pre-refactor melody-everywhere layout.
   - queued writes flushed on a server-side close.
 
   `transporttest` is the conformance suite every transport, `ws` included, must pass.
-- **Multi-instance:** SSE and WebRTC need IP-hash sticky sessions behind a load balancer. Relaying
-  over Redis was judged over-engineering. An SSE send to the wrong instance gets `404` and reconnects.
+- **Multi-instance:** SSE needs IP-hash sticky sessions behind a load balancer; WebRTC needs each
+  instance reachable at its advertised UDP address instead. See `plans/multi-instance-routing.md`.
 - **No client auto-reconnect** until the session-resume handshake exists. Without it, a reconnect
   lands on the login scene while the old player is marked disconnected.
 
