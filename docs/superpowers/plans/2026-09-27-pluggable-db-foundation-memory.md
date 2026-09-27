@@ -48,7 +48,17 @@
 | `internal/services/user/user.go` | Modify | `*userRepo.Store` → `userRepo.Storer` |
 | `internal/services/session/session.go` | Modify | `*sessionRepo.Store` → `sessionRepo.Storer` |
 | `internal/services/authentication/authentication.go` | Modify | Both user + session |
-| `internal/services/broadcast/broadcast.go` | Modify | Both user + session |
+| `internal/services/broadcast/broadcast.go` | Modify | Both user + session; strip `.ID.Hex()` |
+| `internal/services/session/session.go` | Modify | Strip `.ID.Hex()` at line 79 |
+| `internal/services/authentication/authentication.go` | Modify | Strip `storedUser.ID.Hex()` at line 60 |
+| `internal/services/stage/stage.go` | Modify | Strip 5× `g.ID.Hex()` and 1× `bson.ObjectIDFromHex` |
+| `internal/handlers/actions/kick/handler.go` | Modify | Strip `g.ID.Hex()`, `targetSession.ID.Hex()` |
+| `internal/handlers/actions/join/handler.go` | Modify | Strip 3× `.ID.Hex()` |
+| `internal/handlers/actions/create/handler.go` | Modify | Strip 3× `.ID.Hex()` |
+| `internal/handlers/actions/leave/handler.go` | Modify | Strip `g.ID.Hex()` |
+| `internal/handlers/actions/login/handler.go` | Modify | Strip `session.ID.Hex()` |
+| `internal/handlers/actions/reconnect/handler.go` | Modify | Strip `session.ID.Hex()` |
+| `internal/handlers/actions/register/handler.go` | Modify | Strip `createdUser.ID.Hex()` |
 | `internal/injector/injector.go` | Modify | `ReposInjector` fields → interfaces |
 | `internal/injector/clients.go` | Modify | Guard MongoDB client on `env.DBBackend == "mongodb"` |
 | `internal/injector/repos.go` | Modify | Switch on `env.DBBackend` |
@@ -446,9 +456,17 @@ Update `internal/repo/session/interface.go`:
 var _ Storer = (*MongoStore)(nil)
 ```
 
-- [ ] **Step 3.9 — MongoDB test files: no code change**
+- [ ] **Step 3.9 — Fix `.Hex()` calls in renamed test files**
 
-`mongo_concurrency_test.go` and `mongo_test.go` already skip when MongoDB is unreachable. Verify by grepping for `t.Skip`; if a test lacks a skip, add:
+The two renamed test files still call `.Hex()` on IDs, which no longer compile now that `.ID` is `string`.
+
+- `internal/repo/game/mongo_concurrency_test.go:59` — `gameId := g.ID.Hex()` → `gameId := g.ID`
+- `internal/repo/session/mongo_test.go:63` — `store.Delete(created.ID.Hex())` → `store.Delete(created.ID)`
+- `internal/repo/session/mongo_test.go:72` — same substitution
+
+Also update the references to `*Store` types in these test files to `*MongoStore` (any `newTestStore` return type, local variable declarations, etc.).
+
+Both files already skip when MongoDB is unreachable; if any test in either file lacks a skip guard, add:
 ```go
 if os.Getenv("INDRI_MONGO_URI") == "" && os.Getenv("INDRI_TEST_MONGO_URI") == "" {
     t.Skip("no MongoDB URI set; skipping integration test")
@@ -573,15 +591,41 @@ sr sessionRepo.Storer
 func NewService(ctx context.Context, t transport.Transport, userRepo userRepo.Storer, sessionRepo sessionRepo.Storer) (*Service, error) { ... }
 ```
 
-- [ ] **Step 4.8 — Build**
+- [ ] **Step 4.8 — Strip `.ID.Hex()` and `bson.ObjectIDFromHex` from every remaining consumer**
+
+Task 2's model change broke every callsite that treated `.ID` as `bson.ObjectID`. Task 3 covered the repo layer; Task 4 must cover the rest before the build turns green.
+
+**In `internal/services/`:**
+- `services/stage/stage.go:65,102,126,238,257` — replace `g.ID.Hex()` with `g.ID`.
+- `services/stage/stage.go:121` — remove the `objectId, err := bson.ObjectIDFromHex(id)` block entirely; pass `id` directly to `UpdateField("stage.scriptId", id)`. Delete the now-unused `bson` import.
+- `services/session/session.go:79` — `s.ID.Hex()` → `s.ID`.
+- `services/authentication/authentication.go:60` — `storedUser.ID.Hex()` → `storedUser.ID`.
+- `services/broadcast/broadcast.go:121,192,204` — `session.ID.Hex()` → `session.ID`.
+
+**In `internal/handlers/actions/`:**
+- `join/handler.go:62,67,78` — `g.ID.Hex()` → `g.ID`.
+- `create/handler.go:64,69,80` — same.
+- `leave/handler.go:45` — same.
+- `kick/handler.go:61,81` — `g.ID.Hex()` and `targetSession.ID.Hex()` → drop the `.Hex()` call.
+- `login/handler.go:57` — `session.ID.Hex()` → `session.ID`.
+- `reconnect/handler.go:51` — same.
+- `register/handler.go:50` — `createdUser.ID.Hex()` → `createdUser.ID`.
+
+Verify none remain:
+```bash
+grep -rn "\.ID\.Hex()\|bson\.ObjectIDFromHex" internal/services/ internal/handlers/ example/
+```
+Expected: no output.
+
+- [ ] **Step 4.9 — Build**
 
 ```bash
 go build ./...
 ```
 
-Expected: PASS. If any callsite outside `internal/services/` still uses `*Store` (e.g., a test helper), fix it.
+Expected: PASS.
 
-- [ ] **Step 4.9 — Full test suite**
+- [ ] **Step 4.10 — Full test suite**
 
 ```bash
 go test ./...
@@ -589,14 +633,13 @@ go test ./...
 
 Expected: PASS. MongoDB integration tests skip because no URI is set.
 
-- [ ] **Step 4.10 — Commit Tasks 2, 3, and 4 as one atomic refactor**
+- [ ] **Step 4.11 — Commit Tasks 2, 3, and 4 as one atomic refactor**
 
 ```bash
 git status
 git add internal/models/game.go internal/models/user.go internal/models/session.go \
         internal/repo/game/ internal/repo/user/ internal/repo/session/ \
-        internal/services/game/ internal/services/stage/ internal/services/user/ \
-        internal/services/session/ internal/services/authentication/ internal/services/broadcast/ \
+        internal/services/ internal/handlers/actions/ \
         internal/injector/
 git commit -m "$(cat <<'EOF'
 refactor(repo): rename Store to MongoStore, use string IDs and Storer interfaces
@@ -604,6 +647,8 @@ refactor(repo): rename Store to MongoStore, use string IDs and Storer interfaces
 Replaces bson.ObjectID with string UUIDs on Game, User, and Session
 models. Each MongoDB store now generates its own UUID in New() and
 inserts a fully populated struct rather than a CreateXxx projection.
+Handlers and services that formerly called .Hex() now use the string
+IDs directly.
 
 Services and the ReposInjector now hold Storer interfaces so alternate
 backends can slot in without touching consumer code.
@@ -1015,6 +1060,14 @@ func copyGame(g *models.Game) *models.Game {
 			if v.PrivateData != nil {
 				t.PrivateData = deepCopyMap(v.PrivateData)
 			}
+			if v.PlayerData != nil {
+				t.PlayerData = make(map[string]map[string]interface{}, len(v.PlayerData))
+				for pid, pdata := range v.PlayerData {
+					if pdata != nil {
+						t.PlayerData[pid] = deepCopyMap(pdata)
+					}
+				}
+			}
 			out.Teams[k] = t
 		}
 	}
@@ -1172,6 +1225,8 @@ git commit -m "feat(game/memory): add MemoryStore with read operations"
 ## Task 8: `game.MemoryStore` — write path (Update, UpdateField, DeleteField, Mutate)
 
 The write path publishes deltas via the injected `events.Publisher` using the same shape as MongoStore. `Mutate` uses `mutation.Run`; its `load` signature is `func() (*T, int64, error)` and its `save` signature is `func(*T, int64) (bool, error)` returning `(committed, err)` — a `false` committed value tells `mutation.Run` to retry.
+
+**Concurrency note.** The `save` callback runs the publish while holding `s.mu.Lock()`. The in-process publisher is a non-blocking channel send, so this is fine in practice. If a future backend wires up a blocking publisher, `save` would need to snapshot inputs, unlock, then publish; that trade-off is deferred to the SQLite/Postgres plans.
 
 `UpdateField` and `DeleteField` operate on the dotted-path JSON view of the game (`data.foo`, `players.<userId>.host`, ...). We use `events.ToMap` to render the game as JSON, mutate the map in place, then decode back into the struct via `json.Marshal`/`json.Unmarshal`.
 
