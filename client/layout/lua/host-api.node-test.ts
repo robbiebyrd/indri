@@ -164,3 +164,21 @@ test("state() returns a deep-frozen snapshot", () => {
     try { (snap as {x: number}).x = 99 } catch (_) { /* strict mode may throw */ }
     assert.equal((session.currentGame as {x: number}).x, 1, "currentGame must be unaffected by mutation attempt")
 })
+
+// ---------------------------------------------------------------------------
+// JSON null is Lua nil: fengari-interop would otherwise hand scripts a truthy
+// js.null object, so `if x == nil` checks (e.g. "no winner yet") misfire.
+// ---------------------------------------------------------------------------
+test("null values in state read as nil in Lua", () => {
+    const session = new LuaSession()
+    session.installHostApi(() => {})
+    session.onKeyframe({scene: {winningTeam: null, board: [null, "X"]}}, "s")
+
+    const r = session.runScript(
+        "local s = indri.state().scene; return tostring(s.winningTeam == nil) .. ',' .. tostring(s.board[0] == nil) .. ',' .. s.board[1]",
+        "=nulls",
+    )
+
+    assert.ok(r.ok, `chunk failed: ${r.ok ? "" : r.error}`)
+    assert.equal(r.ok ? r.value : null, "true,true,X")
+})

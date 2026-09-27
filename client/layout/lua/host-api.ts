@@ -137,8 +137,10 @@ export class LuaSession implements HostApi {
     state(): Readonly<unknown> {
         return deepFreeze(
             // Return a plain JSON clone so mutations to the frozen object cannot
-            // reach currentGame through shared references.
-            JSON.parse(JSON.stringify(this.currentGame ?? null)) as unknown,
+            // reach currentGame through shared references. JSON null becomes
+            // undefined, which Lua sees as nil; fengari-interop would pass
+            // null as a truthy js.null object.
+            JSON.parse(JSON.stringify(this.currentGame ?? null), (_k, v) => v === null ? undefined : v) as unknown,
         )
     }
 
