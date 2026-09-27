@@ -40,6 +40,19 @@ func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath stri
 		if err != nil {
 			return nil, err
 		}
+	case "memory":
+		gr, err = gameRepo.NewMemoryStore(ctx, clients.LockManager, clients.Publisher)
+		if err != nil {
+			return nil, err
+		}
+		ur, err = userRepo.NewMemoryStore(ctx)
+		if err != nil {
+			return nil, err
+		}
+		sr, err = sessionRepo.NewMemoryStore(ctx)
+		if err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("unknown database backend %q", env.DBBackend)
 	}
