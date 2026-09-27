@@ -13,6 +13,7 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
+	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
 )
 
@@ -161,7 +162,7 @@ func (s *MongoStore) Update(sessionId string, session *models.UpdateSession) err
 	}
 
 	if result.MatchedCount == 0 {
-		return fmt.Errorf("session with id %v does not exists", sessionId)
+		return fmt.Errorf("id %q: %w", sessionId, repoErrors.ErrNotFound)
 	}
 
 	return nil

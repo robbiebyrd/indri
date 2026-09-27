@@ -121,6 +121,18 @@ func (s *MemoryStore) Update(id string, u *models.UpdateSession) error {
 	if !ok {
 		return fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
 	}
+	// byUserID is the one-session-per-user index, so it follows a change
+	// of user; like the other stores' unique index, it refuses a user who
+	// already has a session.
+	if u.UserID != "" && (sess.UserID == nil || *sess.UserID != u.UserID) {
+		if other, taken := s.byUserID[u.UserID]; taken && other != id {
+			return fmt.Errorf("user %q already has a session: %w", u.UserID, repoErrors.ErrDuplicate)
+		}
+		if sess.UserID != nil {
+			delete(s.byUserID, *sess.UserID)
+		}
+		s.byUserID[u.UserID] = id
+	}
 	applyUpdate(sess, u)
 	return nil
 }

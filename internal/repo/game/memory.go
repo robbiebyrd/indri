@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -48,9 +49,13 @@ func NewMemoryStore(ctx context.Context, locks lock.Manager, publisher events.Pu
 	}, nil
 }
 
-// copyGame returns a defensive deep copy. Maps at each level are re-created
-// so callers cannot mutate stored state via the returned pointer. Leaf
-// scalars are shared.
+// copyGame returns a deep copy sharing nothing mutable with g: every map,
+// slice and pointer-to-map reachable from the game is re-created. The store
+// hands copies to callers and to Mutate's apply, and keeps a copy of what it
+// saves, so no one can edit stored state outside the lock, and a failed or
+// aborted apply leaves it untouched. It copies field by field rather than
+// through JSON because a JSON round trip would drop the json:"-" fields and
+// turn empty-but-non-nil maps (omitempty) into nil ones that callers write to.
 func copyGame(g *models.Game) *models.Game {
 	if g == nil {
 		return nil
@@ -60,43 +65,88 @@ func copyGame(g *models.Game) *models.Game {
 		out.Teams = make(map[string]models.Team, len(g.Teams))
 		for k, v := range g.Teams {
 			t := v
-			// PlayerIDs is a slice: re-slice to unshare backing storage.
-			if v.PlayerIDs != nil {
-				t.PlayerIDs = append([]string(nil), v.PlayerIDs...)
-			}
-			if v.PublicData != nil {
-				t.PublicData = deepCopyMap(v.PublicData)
-			}
-			if v.PrivateData != nil {
-				t.PrivateData = deepCopyMap(v.PrivateData)
-			}
-			if v.PlayerData != nil {
-				t.PlayerData = make(map[string]map[string]interface{}, len(v.PlayerData))
-				for pid, pdata := range v.PlayerData {
-					if pdata != nil {
-						t.PlayerData[pid] = deepCopyMap(pdata)
-					}
-				}
-			}
+			t.PlayerIDs = copyStrings(v.PlayerIDs)
+			t.PublicData = copyData(v.PublicData)
+			t.PrivateData = copyData(v.PrivateData)
+			t.PlayerData = copyPlayerData(v.PlayerData)
 			out.Teams[k] = t
 		}
 	}
 	if g.Players != nil {
 		out.Players = make(map[string]models.Player, len(g.Players))
 		for k, v := range g.Players {
-			out.Players[k] = v // Player has pointer-to-map fields; share by design
+			p := v
+			p.PublicData = copyDataPtr(v.PublicData)
+			p.PrivateData = copyDataPtr(v.PrivateData)
+			out.Players[k] = p
 		}
 	}
-	if g.PublicData != nil {
-		out.PublicData = deepCopyMap(g.PublicData)
-	}
-	if g.PrivateData != nil {
-		out.PrivateData = deepCopyMap(g.PrivateData)
-	}
-	if g.PlayerData != nil {
-		out.PlayerData = deepCopyMap(g.PlayerData)
-	}
+	out.Stage = copyStage(g.Stage)
+	out.PublicData = copyData(g.PublicData)
+	out.PrivateData = copyData(g.PrivateData)
+	out.PlayerData = copyData(g.PlayerData)
 	return &out
+}
+
+func copyStage(st models.Stage) models.Stage {
+	out := st
+	out.SceneOrder = copyStrings(st.SceneOrder)
+	if st.Scenes != nil {
+		out.Scenes = make(map[string]models.Scene, len(st.Scenes))
+		for k, v := range st.Scenes {
+			out.Scenes[k] = models.Scene{
+				PublicData:  copyDataPtr(v.PublicData),
+				PrivateData: copyDataPtr(v.PrivateData),
+				PlayerData:  copyPlayerDataPtr(v.PlayerData),
+			}
+		}
+	}
+	out.PublicData = copyData(st.PublicData)
+	out.PrivateData = copyData(st.PrivateData)
+	out.PlayerData = copyPlayerData(st.PlayerData)
+	return out
+}
+
+func copyStrings(src []string) []string {
+	if src == nil {
+		return nil
+	}
+	return append([]string{}, src...)
+}
+
+// copyData deep-copies a data map, keeping nil as nil.
+func copyData(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	return deepCopyMap(src)
+}
+
+func copyDataPtr(src *map[string]interface{}) *map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	m := copyData(*src)
+	return &m
+}
+
+func copyPlayerData(src map[string]map[string]interface{}) map[string]map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]map[string]interface{}, len(src))
+	for k, v := range src {
+		dst[k] = copyData(v)
+	}
+	return dst
+}
+
+func copyPlayerDataPtr(src *map[string]map[string]interface{}) *map[string]map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	m := copyPlayerData(*src)
+	return &m
 }
 
 func deepCopyMap(src map[string]interface{}) map[string]interface{} {
@@ -107,6 +157,9 @@ func deepCopyMap(src map[string]interface{}) map[string]interface{} {
 	return dst
 }
 
+// deepCopyValue copies the containers a data value can hold. JSON-decoded
+// values (maps and []interface{}) take the fast path; any other map or slice
+// a Go caller stored is copied by reflection so it is not shared either.
 func deepCopyValue(v interface{}) interface{} {
 	switch t := v.(type) {
 	case map[string]interface{}:
@@ -117,9 +170,41 @@ func deepCopyValue(v interface{}) interface{} {
 			out[i] = deepCopyValue(item)
 		}
 		return out
+	}
+
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Map:
+		if rv.IsNil() {
+			return v
+		}
+		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
+		iter := rv.MapRange()
+		for iter.Next() {
+			out.SetMapIndex(iter.Key(), copiedElem(iter.Value(), rv.Type().Elem()))
+		}
+		return out.Interface()
+	case reflect.Slice:
+		if rv.IsNil() {
+			return v
+		}
+		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			out.Index(i).Set(copiedElem(rv.Index(i), rv.Type().Elem()))
+		}
+		return out.Interface()
 	default:
 		return v
 	}
+}
+
+// copiedElem deep-copies one map or slice element, keeping its static type.
+func copiedElem(v reflect.Value, elemType reflect.Type) reflect.Value {
+	c := deepCopyValue(v.Interface())
+	if c == nil {
+		return reflect.Zero(elemType)
+	}
+	return reflect.ValueOf(c)
 }
 
 func (s *MemoryStore) New(code string, script *models.Script, privateGame bool) (*models.Game, error) {
@@ -169,10 +254,11 @@ func (s *MemoryStore) GetIDHex(code string) (*string, error) {
 	return &g.ID, nil
 }
 
-func (s *MemoryStore) Exists(id string) (bool, error) {
+// Exists reports whether a game with the given code exists.
+func (s *MemoryStore) Exists(code string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	_, ok := s.games[id]
+	_, ok := s.codes[code]
 	return ok, nil
 }
 
@@ -288,21 +374,35 @@ func (s *MemoryStore) Mutate(id string, apply func(g *models.Game) error) error 
 		},
 		apply,
 		func(g *models.Game, expectedVersion int64) (bool, error) {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			cur, ok := s.games[id]
-			if !ok {
-				return false, fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
+			committed, err := s.commit(id, g, expectedVersion)
+			if committed {
+				// Published after the store lock is released: a subscriber
+				// may read the game back (a keyframe), and Publish may block.
+				// The mutation lock is still held, so events for one game
+				// still go out in commit order.
+				s.changes.diff(id, before, g)
 			}
-			if cur.Version != expectedVersion {
-				// Version drift — return false so mutation.Run reloads and retries.
-				return false, nil
-			}
-			g.Version = expectedVersion + 1
-			g.UpdatedAt = time.Now()
-			s.games[id] = g
-			s.changes.diff(id, before, g)
-			return true, nil
+			return committed, err
 		},
 	)
+}
+
+// commit saves g if the stored version is still expectedVersion, reporting
+// whether it did. It stores a copy: apply may have kept references into g, or
+// put caller-owned maps in it.
+func (s *MemoryStore) commit(id string, g *models.Game, expectedVersion int64) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.games[id]
+	if !ok {
+		return false, fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
+	}
+	if cur.Version != expectedVersion {
+		// Version drift — return false so mutation.Run reloads and retries.
+		return false, nil
+	}
+	g.Version = expectedVersion + 1
+	g.UpdatedAt = time.Now()
+	s.games[id] = copyGame(g)
+	return true, nil
 }

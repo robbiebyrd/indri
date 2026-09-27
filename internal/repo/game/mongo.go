@@ -101,9 +101,9 @@ func (s *MongoStore) GetIDHex(gameCode string) (*string, error) {
 	return &g.ID, nil
 }
 
-// Exists checks to see if a game with the given ID already exists.
-func (s *MongoStore) Exists(id string) (bool, error) {
-	count, err := s.collection.Finder().Filter(query.Eq("code", id)).Count(*s.ctx)
+// Exists reports whether a game with the given code exists.
+func (s *MongoStore) Exists(code string) (bool, error) {
+	count, err := s.collection.Finder().Filter(query.Eq("code", code)).Count(*s.ctx)
 	if err != nil {
 		return false, err
 	}

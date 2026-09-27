@@ -193,12 +193,26 @@ func (s *SQLiteStore) Update(id string, u *models.UpdateSession) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(s.ctx,
-		`UPDATE sessions SET data = ? WHERE id = ?`,
-		blob, id,
+	// user_id backs the one-session-per-user lookup in New, so it moves
+	// with the session. Empty is stored as NULL, as in New.
+	userID := sql.NullString{}
+	if sess.UserID != nil {
+		userID = sql.NullString{String: *sess.UserID, Valid: true}
+	}
+	res, err := s.db.ExecContext(s.ctx,
+		`UPDATE sessions SET user_id = ?, data = ? WHERE id = ?`,
+		userID, blob, id,
 	)
 	if err != nil {
 		return fmt.Errorf("update session: %w", err)
+	}
+	// The session can be deleted between the Get above and this UPDATE.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update session: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
 	}
 	return nil
 }

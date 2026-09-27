@@ -168,10 +168,11 @@ func (s *PostgresStore) GetIDHex(gameCode string) (*string, error) {
 	return &g.ID, nil
 }
 
-func (s *PostgresStore) Exists(id string) (bool, error) {
+// Exists reports whether a game with the given code exists.
+func (s *PostgresStore) Exists(code string) (bool, error) {
 	var exists bool
 	err := s.db.QueryRowContext(s.ctx,
-		`SELECT EXISTS(SELECT 1 FROM games WHERE id = $1)`, id,
+		`SELECT EXISTS(SELECT 1 FROM games WHERE code = $1)`, code,
 	).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("checking game existence: %w", err)

@@ -103,13 +103,13 @@ func TestPostgresStore_FindByCode(t *testing.T) {
 func TestPostgresStore_Exists(t *testing.T) {
 	store := newPostgresFixture(t)
 	created, _ := store.New("ABCD", makeScript(), false)
-	exists, _ := store.Exists(created.ID)
+	exists, _ := store.Exists(created.Code)
 	if !exists {
-		t.Errorf("expected exists=true for created id")
+		t.Errorf("expected exists=true for created code")
 	}
 	exists, _ = store.Exists("nope")
 	if exists {
-		t.Errorf("expected exists=false for unknown id")
+		t.Errorf("expected exists=false for unknown code")
 	}
 }
 

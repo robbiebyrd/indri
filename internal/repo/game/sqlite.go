@@ -26,8 +26,7 @@ type SQLiteStore struct {
 	changes changePublisher
 }
 
-// TODO(sqlite): reinstate after all Storer methods land in Task 6.
-// var _ Storer = (*SQLiteStore)(nil)
+var _ Storer = (*SQLiteStore)(nil)
 
 // NewSQLiteStore creates a SQLiteStore using an already-open *sql.DB. The caller
 // is responsible for opening the DB via sqlite.Open, which runs the DDL.
@@ -150,10 +149,11 @@ func (s *SQLiteStore) GetIDHex(gameCode string) (*string, error) {
 	return &g.ID, nil
 }
 
-func (s *SQLiteStore) Exists(id string) (bool, error) {
+// Exists reports whether a game with the given code exists.
+func (s *SQLiteStore) Exists(code string) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(s.ctx,
-		`SELECT COUNT(*) FROM games WHERE id = ?`, id,
+		`SELECT COUNT(*) FROM games WHERE code = ?`, code,
 	).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("exists game: %w", err)
