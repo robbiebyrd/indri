@@ -74,7 +74,7 @@ func (h *Handler) Handle(
 			return err
 		}
 
-		if err = h.i.GameService.WriteKeyframe(s, g, h.i.LayoutHash, h.i.LayoutData); err != nil {
+		if err = h.i.GameService.WriteKeyframe(s, g); err != nil {
 			return err
 		}
 	}

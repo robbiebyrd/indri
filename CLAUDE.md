@@ -113,8 +113,8 @@ own with `router.RegisterHandler(name, action, handler)` **after** `boot.Boot` a
 Two different shapes reach the client:
 
 - **Keyframe** — the game's *client view* (`events.ClientView`: private data removed at every depth,
-  `data.layout` removed because it is sent once in a layout frame) with a schema version `sv` (the layout
-  hash). Written to the requesting connection on join/create/refresh/reconnect, and broadcast to a whole
+  `data.layout` removed because it travels in its own layout frame) with `sv`, the version of the game's
+  layout. Written to the requesting connection on join/create/refresh/reconnect, and broadcast to a whole
   game when a write changes its shape (below).
 - **Delta** — an `events.ChangeEvent` (`{o, t, u, r}`) broadcast to every session in the affected game.
   Paths are **positional**: each object key is replaced by its index among its sorted siblings in the
@@ -269,6 +269,9 @@ is never wired up — an unregistered action is silently unreachable, so the tes
 
 `game.PublicData["layout"]` (JSON path `data.layout`) is the canonical location for all layout data.
 It is written exclusively through the `layout` WebSocket action (`internal/handlers/actions/layout/`).
+Each game has its own layout, seeded from the script. Because it is excluded from keyframes and deltas,
+the shared change publisher reports a write that edits it as an `OpLayout` event, and the broadcaster
+sends that game's clients the new layout frame (`GameService.LayoutFrame`).
 
 **`privateData` is a reserved key at any depth inside the layout document.** The server's
 `ValidateLayout` rejects it unconditionally, and the TypeScript `parseLayout` function does the same.

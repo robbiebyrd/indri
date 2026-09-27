@@ -40,7 +40,6 @@ func Boot(ctx context.Context, scriptFilePath *string) (*injector.Injector, erro
 	if err := validateScript(script); err != nil {
 		return nil, fmt.Errorf("invalid script: %w", err)
 	}
-	layoutHash, layoutData := injector.ComputeLayoutHash(script)
 
 	i := &injector.Injector{
 		ReposInjector:    repos,
@@ -48,8 +47,6 @@ func Boot(ctx context.Context, scriptFilePath *string) (*injector.Injector, erro
 		ServicesInjector: services,
 		GlobalContext:    ctx,
 		Script:           script,
-		LayoutHash:       layoutHash,
-		LayoutData:       layoutData,
 	}
 
 	registerHandlers(i)

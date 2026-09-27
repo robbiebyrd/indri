@@ -104,3 +104,25 @@ test("removing an array's trailing indices shrinks it without leaving holes", ()
     p.update(delta(2000, undefined, ["list.1", "list.2"]))
     assert.deepEqual(p.current().list, ["a"], "array shrank to its remaining items")
 })
+
+test("the layout is laid over data.layout without joining the positional schema", () => {
+    const p = new GameStateParser<any>()
+    p.setLayout({ grid: { cols: 3 } })
+    p.set({ data: { board: ["", ""], turn: "X" } }, new Date(1000))
+
+    // data is root key 0; turn is 1 under it, as on the server (no layout).
+    p.update({o: 1, t: new Date(2000), u: [[[0, 1], "O"]], r: []})
+    assert.equal(p.current().data.turn, "O", "delta decoded without the layout")
+    assert.deepEqual(p.current().data.layout, { grid: { cols: 3 } }, "layout overlaid")
+})
+
+test("a new layout mid-game replaces the old one and keeps the game's state", () => {
+    const p = new GameStateParser<any>()
+    p.setLayout({ grid: { cols: 3 } })
+    p.set({ data: { turn: "X" } }, new Date(1000))
+    p.update(delta(2000, [["data.turn", "O"]]))
+
+    p.setLayout({ grid: { cols: 4 } })
+    assert.deepEqual(p.current().data.layout, { grid: { cols: 4 } }, "new layout shown")
+    assert.equal(p.current().data.turn, "O", "deltas since the keyframe kept")
+})

@@ -47,7 +47,7 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	if err = h.i.GameService.WriteSlimKeyframe(s, g, h.i.LayoutHash); err != nil {
+	if err = h.i.GameService.WriteSlimKeyframe(s, g); err != nil {
 		_ = cs.WriteError(models.ErrServerError)
 		return err
 	}

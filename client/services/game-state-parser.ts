@@ -20,11 +20,20 @@ export class GameStateParser<T> {
     private baseState?: T = undefined
     private currentState?: T = undefined
     private schema?: Record<string, unknown> = undefined
+    private layout?: unknown = undefined
 
     // The schema is copied: positions must stay those of the server's keyframe
     // even if the caller later adds keys (such as the layout) to that object.
     setSchema(schema: Record<string, unknown>): void {
         this.schema = deepClone(schema)
+    }
+
+    // The game's layout is sent separately from keyframes and deltas, so it is
+    // kept apart and laid over data.layout each time the state is rebuilt: it
+    // never enters the positional schema, and a new one keeps the game's state.
+    setLayout(layout: unknown): void {
+        this.layout = deepClone(layout)
+        this.reapply()
     }
 
     set(data: T, timestamp: Date): void {
@@ -95,6 +104,12 @@ export class GameStateParser<T> {
                     state = this.updateJSONKeyByDotPath(state, this.toDotPath(rawPath), value)
                 }
             }
+        }
+
+        if (this.layout !== undefined && typeof state === "object" && state !== null) {
+            const game = state as Record<string, any>
+            if (typeof game.data !== "object" || game.data === null) game.data = {}
+            game.data.layout = deepClone(this.layout)
         }
 
         this.currentState = state

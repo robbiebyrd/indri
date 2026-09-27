@@ -20,7 +20,7 @@ type actionHandler = {
 export class MessageHandler {
     private readonly transport: TransportClient
     private stateList: GameStateParser<Game> = new GameStateParser<Game>()
-    private cachedLayout?: { v: string; data: Record<string, unknown> }
+    private layoutVersion?: string
     private readonly setGameState: Dispatch<GameDispatchMessage>
     private readonly setPlayerState: Dispatch<UserDispatchMessage>
     private readonly setGameList: Dispatch<GameListDispatchMessage>
@@ -172,26 +172,19 @@ export class MessageHandler {
         } as UserDispatchMessage)
     }
 
+    // A layout arrives before a connection's first keyframe and again whenever
+    // the host edits it; either way it replaces the one on screen.
     handleLayout(msg: any) {
-        if (typeof msg?.v !== "string" || !msg.data) return
-        if (!this.cachedLayout || this.cachedLayout.v !== msg.v) {
-            this.cachedLayout = { v: msg.v, data: msg.data }
-        }
+        if (typeof msg?.v !== "string" || !msg.data || msg.v === this.layoutVersion) return
+        this.layoutVersion = msg.v
+        this.stateList.setLayout(msg.data)
+        this.updateGameState()
     }
 
     keyframe(wrapperData: any) {
         const g = wrapperData.game as Game
-        // setSchema MUST run before the layout merge: the server strips layout from
-        // the keyframe before encoding, so the positional map must be built from the
-        // same layout-free object. Moving setSchema after the merge would add layout
-        // keys to the positional indices and break all subsequent path decoding.
+        // The keyframe carries no layout; the parser lays the current one over it.
         this.stateList.setSchema(g as Record<string, unknown>)
-
-        // Merge layout back into game.data for rendering.
-        if (this.cachedLayout) {
-            if (!g.data) g.data = {}
-            g.data.layout = this.cachedLayout.data as any
-        }
         this.stateList.set(g as JsonObject, new Date(g.updatedAt ?? new Date().toISOString()))
         this.updateGameState()
     }

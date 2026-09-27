@@ -36,6 +36,12 @@ func (p changePublisher) diff(id string, beforeDoc map[string]interface{}, after
 		return
 	}
 
+	// The layout isn't in the client view; an edit to it is sent as a layout
+	// frame instead, alongside whatever else this write changed.
+	if !reflect.DeepEqual(events.Layout(beforeDoc), events.Layout(afterDoc)) {
+		p.publish(events.ChangeEvent{ID: id, OperationType: events.OpLayout, Timestamp: time.Now()})
+	}
+
 	before, afterMap := events.ClientView(beforeDoc), events.ClientView(afterDoc)
 	beforePos, afterPos := events.BuildPositionalMap(before), events.BuildPositionalMap(afterMap)
 

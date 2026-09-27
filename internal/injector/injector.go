@@ -2,10 +2,7 @@ package injector
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
-	"encoding/json"
 
 	mongodbClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -58,19 +55,5 @@ type Injector struct {
 	*ClientsInjector
 	*ServicesInjector
 	Script        *models.Script
-	LayoutHash    string
-	LayoutData    map[string]interface{}
 	GlobalContext context.Context
-}
-
-// ComputeLayoutHash extracts the layout data from the script's public data,
-// computes a short stable hash, and returns both. Called once at boot time.
-func ComputeLayoutHash(script *models.Script) (string, map[string]interface{}) {
-	if script == nil || script.PublicData == nil {
-		return "", nil
-	}
-	layout, _ := script.PublicData["layout"].(map[string]interface{})
-	raw, _ := json.Marshal(layout)
-	hash := sha256.Sum256(raw)
-	return hex.EncodeToString(hash[:8]), layout
 }

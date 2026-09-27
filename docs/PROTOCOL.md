@@ -334,16 +334,18 @@ must set `binaryType = "arraybuffer"`.
 
 ### Layout frame
 
-Sent once per new schema version, immediately before the keyframe, on `create`, `join`, and `reconnect`.
-Not sent on `refresh`.
+Carries the game's layout (its `data.layout`, seeded from the script and changed by the `layout`
+action). Sent immediately before the keyframe on `create`, `join`, and `reconnect` (not on `refresh`),
+and broadcast to the whole game whenever a write edits the layout.
 
 ```json
-{ "o": 4, "v": "<8-char hex hash>", "data": { "layout": { … } } }
+{ "o": 4, "v": "<16-char hex version>", "data": { "grid": { … }, "scenes": { … } } }
 ```
 
 - `o: 4` is the layout opcode.
-- `v` is the layout schema version hash, stable across game instances using the same config.
-- `data` contains the layout object from the script config.
+- `v` is the layout's version: a hash of its content, so it changes exactly when the layout does.
+- `data` is the layout object itself. A client shows the newest layout it has received; a layout frame
+  never changes game state, and deltas still decode against the keyframe.
 
 ### Slim keyframe wrapper
 
@@ -353,10 +355,10 @@ Follows the layout frame. `PrivateData` and the `layout` key are stripped from `
 { "sv": "<same hash as v in layout frame>", "game": { … } }
 ```
 
-- `sv` is the schema version (matches `v` from the preceding layout frame). Presence of `sv` identifies
-  this message as a keyframe.
-- `game` is a sanitized `models.Game`. The client must build its positional map from `game` before
-  merging the cached layout back for rendering.
+- `sv` is the version of the game's layout when the keyframe was built (the `v` of its layout frame).
+  Presence of `sv` identifies this message as a keyframe.
+- `game` is a sanitized `models.Game` without `data.layout`. The client builds its positional map from
+  `game` as sent, and shows the layout from the layout frame alongside it.
 
 ### Keyframes mid-game
 

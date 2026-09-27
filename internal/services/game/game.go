@@ -190,44 +190,68 @@ func (gs *Service) Sanitize(game *models.Game) *models.Game {
 }
 
 // slimKeyframe returns the client view of the game (private data and the
-// layout removed). Its schema version is the layout hash, which stays the same
-// for the life of the game.
-func (gs *Service) slimKeyframe(g *models.Game, layoutHash string) (events.KeyframeWrapper, error) {
+// layout removed). Its schema version is the game's layout version, which
+// changes only when the layout is edited.
+func (gs *Service) slimKeyframe(g *models.Game) (events.KeyframeWrapper, error) {
 	doc, err := events.ToMap(g)
 	if err != nil {
 		return events.KeyframeWrapper{}, err
 	}
 
-	return events.KeyframeWrapper{SV: layoutHash, Game: events.ClientView(doc)}, nil
+	return events.KeyframeWrapper{SV: events.LayoutVersion(events.Layout(doc)), Game: events.ClientView(doc)}, nil
+}
+
+// layoutFrame is the game's own layout (data.layout: seeded from the script
+// when the game was created, changed by layout edits) as a layout frame.
+func layoutFrame(g *models.Game) (events.LayoutFrame, error) {
+	doc, err := events.ToMap(g)
+	if err != nil {
+		return events.LayoutFrame{}, err
+	}
+
+	return events.NewLayoutFrame(events.Layout(doc)), nil
 }
 
 // Keyframe loads the game and returns its current keyframe, for broadcasting
 // after a write that changed the game's shape.
-func (gs *Service) Keyframe(id string, layoutHash string) (events.KeyframeWrapper, error) {
+func (gs *Service) Keyframe(id string) (events.KeyframeWrapper, error) {
 	g, err := gs.Get(id)
 	if err != nil {
 		return events.KeyframeWrapper{}, err
 	}
 
-	return gs.slimKeyframe(g, layoutHash)
+	return gs.slimKeyframe(g)
 }
 
-// WriteKeyframe sends a LayoutFrame followed by a slim keyframe to a single connection.
-func (gs *Service) WriteKeyframe(conn transport.Conn, g *models.Game, layoutHash string, layoutData map[string]interface{}) error {
-	layoutFrame := events.LayoutFrame{O: events.OpLayout, V: layoutHash, Data: layoutData}
-	if err := transport.WriteEncoded(conn, layoutFrame); err != nil {
-		return err
+// LayoutFrame loads the game and returns its current layout frame, for
+// broadcasting after a write that edited the layout.
+func (gs *Service) LayoutFrame(id string) (events.LayoutFrame, error) {
+	g, err := gs.Get(id)
+	if err != nil {
+		return events.LayoutFrame{}, err
 	}
-	wrapper, err := gs.slimKeyframe(g, layoutHash)
+
+	return layoutFrame(g)
+}
+
+// WriteKeyframe sends the game's layout frame followed by a slim keyframe to a
+// single connection.
+func (gs *Service) WriteKeyframe(conn transport.Conn, g *models.Game) error {
+	frame, err := layoutFrame(g)
 	if err != nil {
 		return err
 	}
-	return transport.WriteEncoded(conn, wrapper)
+
+	if err := transport.WriteEncoded(conn, frame); err != nil {
+		return err
+	}
+
+	return gs.WriteSlimKeyframe(conn, g)
 }
 
 // WriteSlimKeyframe sends a slim keyframe without a layout frame — used for refresh.
-func (gs *Service) WriteSlimKeyframe(conn transport.Conn, g *models.Game, layoutHash string) error {
-	wrapper, err := gs.slimKeyframe(g, layoutHash)
+func (gs *Service) WriteSlimKeyframe(conn transport.Conn, g *models.Game) error {
+	wrapper, err := gs.slimKeyframe(g)
 	if err != nil {
 		return err
 	}

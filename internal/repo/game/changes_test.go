@@ -156,6 +156,29 @@ func TestChangePublisher_ShapeChangeRequestsAKeyframe(t *testing.T) {
 	}
 }
 
+// The layout isn't part of the client view, so editing it publishes a layout
+// event (the broadcaster sends the new layout) alongside any ordinary delta.
+func TestChangePublisher_LayoutChangePublishesALayoutEvent(t *testing.T) {
+	pub := &recordingPublisher{}
+	cp := changePublisher{ctx: context.Background(), publisher: pub}
+
+	before := &models.Game{Code: "G1", PublicData: map[string]interface{}{"layout": map[string]interface{}{"grid": 3.0}, "n": 1.0}}
+	after := &models.Game{Code: "G1", PublicData: map[string]interface{}{"layout": map[string]interface{}{"grid": 4.0}, "n": 2.0}}
+
+	cp.diff("g1", snapshot(t, before), after)
+
+	ops := map[events.OpCode]int{}
+	for _, ev := range pub.events {
+		ops[ev.OperationType]++
+		if ev.OperationType == events.OpLayout && (ev.ID != "g1" || ev.HasChanges()) {
+			t.Fatalf("layout event = %+v, want a bare layout event for g1", ev)
+		}
+	}
+	if ops[events.OpLayout] != 1 || ops[events.OpUpdate] != 1 || len(pub.events) != 2 {
+		t.Fatalf("published %+v, want one layout event and one delta", pub.events)
+	}
+}
+
 // Private data never reaches clients, so changing only it publishes nothing,
 // even when it adds keys.
 func TestChangePublisher_PrivateOnlyChangePublishesNothing(t *testing.T) {

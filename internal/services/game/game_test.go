@@ -2,9 +2,11 @@ package game
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/transport"
 )
 
@@ -27,33 +29,49 @@ func keyframeOf(t *testing.T, frame []byte) map[string]any {
 	return m
 }
 
-// The schema version is the layout hash: stable across keyframes of the same
-// game, so it identifies the schema rather than the game's current state.
-func TestKeyframes_SchemaVersionIsTheLayoutHash(t *testing.T) {
+// Each game carries its own layout: the layout frame sends the game's layout,
+// and the keyframe's schema version is that layout's version, so it changes
+// when the layout is edited and not otherwise.
+func TestKeyframes_SendTheGamesOwnLayout(t *testing.T) {
 	gs := &Service{}
+	layout := map[string]interface{}{"grid": 3.0}
 	g := &models.Game{
 		ID: "g1", Code: "C1",
-		PublicData:  map[string]interface{}{"layout": map[string]interface{}{"grid": 3}, "score": 1.0},
+		PublicData:  map[string]interface{}{"layout": layout, "score": 1.0},
 		PrivateData: map[string]interface{}{"secret": "x"},
 	}
 
 	c := &debugConn{}
-	if err := gs.WriteKeyframe(c, g, "layout-v1", map[string]interface{}{"grid": 3}); err != nil {
+	if err := gs.WriteKeyframe(c, g); err != nil {
 		t.Fatal(err)
 	}
 
 	g.PublicData["score"] = 2.0
-	if err := gs.WriteSlimKeyframe(c, g, "layout-v1"); err != nil {
+	if err := gs.WriteSlimKeyframe(c, g); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(c.frames) != 3 {
-		t.Fatalf("frames = %d, want layout + 2 keyframes", len(c.frames))
+	g.PublicData["layout"] = map[string]interface{}{"grid": 4.0}
+	if err := gs.WriteSlimKeyframe(c, g); err != nil {
+		t.Fatal(err)
 	}
 
-	first, second := keyframeOf(t, c.frames[1]), keyframeOf(t, c.frames[2])
-	if first["sv"] != "layout-v1" || second["sv"] != "layout-v1" {
-		t.Fatalf("sv = %v then %v, want the layout hash both times", first["sv"], second["sv"])
+	if len(c.frames) != 4 {
+		t.Fatalf("frames = %d, want layout + 3 keyframes", len(c.frames))
+	}
+
+	frame := keyframeOf(t, c.frames[0])
+	version := events.LayoutVersion(layout)
+	if frame["v"] != version || !reflect.DeepEqual(frame["data"], map[string]any{"grid": 3.0}) {
+		t.Fatalf("layout frame = %v, want the game's layout at version %s", frame, version)
+	}
+
+	first, second, edited := keyframeOf(t, c.frames[1]), keyframeOf(t, c.frames[2]), keyframeOf(t, c.frames[3])
+	if first["sv"] != version || second["sv"] != version {
+		t.Fatalf("sv = %v then %v, want the layout version %s both times", first["sv"], second["sv"], version)
+	}
+	if edited["sv"] == version {
+		t.Fatal("editing the layout didn't change the keyframe's schema version")
 	}
 
 	game := first["game"].(map[string]any)
