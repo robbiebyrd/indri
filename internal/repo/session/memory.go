@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
-	"github.com/robbiebyrd/indri/internal/repo/ids"
 )
 
 type MemoryStore struct {
@@ -39,13 +37,6 @@ func copySession(s *models.Session) *models.Session {
 	return &out
 }
 
-func ptrOrNil(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 // New enforces "one session per userId" like MongoStore does: a second call
 // for the same UserID returns the existing session.
 func (s *MemoryStore) New(c models.CreateSession) (*models.Session, error) {
@@ -58,15 +49,7 @@ func (s *MemoryStore) New(c models.CreateSession) (*models.Session, error) {
 	if existingID, ok := s.byUserID[c.UserID]; ok {
 		return copySession(s.byID[existingID]), nil
 	}
-	sess := &models.Session{
-		ID:        ids.New(),
-		Token:     c.Token,
-		UserID:    ptrOrNil(c.UserID),
-		GameID:    ptrOrNil(c.GameID),
-		TeamID:    ptrOrNil(c.TeamID),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
+	sess := newSession(c)
 	s.byID[sess.ID] = sess
 	if sess.Token != "" {
 		s.byToken[sess.Token] = sess.ID
@@ -138,16 +121,7 @@ func (s *MemoryStore) Update(id string, u *models.UpdateSession) error {
 	if !ok {
 		return fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
 	}
-	if u.GameID != "" {
-		sess.GameID = ptrOrNil(u.GameID)
-	}
-	if u.UserID != "" {
-		sess.UserID = ptrOrNil(u.UserID)
-	}
-	if u.TeamID != "" {
-		sess.TeamID = ptrOrNil(u.TeamID)
-	}
-	sess.UpdatedAt = time.Now()
+	applyUpdate(sess, u)
 	return nil
 }
 

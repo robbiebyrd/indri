@@ -13,7 +13,6 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/repo/ids"
 	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
 )
 
@@ -137,18 +136,25 @@ func (s *MongoStore) Exists(id string) (bool, error) {
 }
 
 // Update saves session data to the repository.
+// Update sets the session's non-empty fields, as every store does; an empty
+// field is left as it is rather than cleared.
 func (s *MongoStore) Update(sessionId string, session *models.UpdateSession) error {
-	session.UpdatedAt = time.Now()
-
-	doc, err := repoUtils.CreateBSONDoc(session)
-	if err != nil {
-		return err
+	set := bson.D{{Key: "updatedAt", Value: time.Now()}}
+	for _, field := range []bson.E{
+		{Key: "gameId", Value: session.GameID},
+		{Key: "userId", Value: session.UserID},
+		{Key: "teamId", Value: session.TeamID},
+		{Key: "slotId", Value: session.SlotID},
+	} {
+		if field.Value != "" {
+			set = append(set, field)
+		}
 	}
 
 	result, err := s.collection.Collection().UpdateOne(
 		*s.ctx,
 		bson.D{{Key: "_id", Value: sessionId}},
-		bson.D{{Key: "$set", Value: doc}},
+		bson.D{{Key: "$set", Value: set}},
 	)
 	if err != nil {
 		return err
@@ -162,22 +168,9 @@ func (s *MongoStore) Update(sessionId string, session *models.UpdateSession) err
 }
 
 func (s *MongoStore) createNewSession(session models.CreateSession) (*models.Session, error) {
-	now := time.Now()
-	newSession := &models.Session{
-		ID:        ids.New(),
-		Token:     session.Token,
-		UserID:    &session.UserID,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	if session.GameID != "" {
-		newSession.GameID = &session.GameID
-	}
-	if session.TeamID != "" {
-		newSession.TeamID = &session.TeamID
-	}
+	created := newSession(session)
 
-	doc, err := repoUtils.CreateBSONDoc(newSession)
+	doc, err := repoUtils.CreateBSONDoc(created)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +186,7 @@ func (s *MongoStore) createNewSession(session models.CreateSession) (*models.Ses
 		return nil, err
 	}
 
-	return s.Get(newSession.ID)
+	return s.Get(created.ID)
 }
 
 func (s *MongoStore) isSessionInGameAndTeam(gameId, teamId, sessionGameId, sessionTeamId string) bool {

@@ -6,11 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
-	"github.com/robbiebyrd/indri/internal/repo/ids"
 )
 
 // SQLiteStore is a SQLite-backed session.Storer. Each row holds the full JSON
@@ -80,15 +78,7 @@ func (s *SQLiteStore) New(c models.CreateSession) (*models.Session, error) {
 		return nil, fmt.Errorf("check existing session: %w", err)
 	}
 
-	sess := &models.Session{
-		ID:        ids.New(),
-		Token:     c.Token,
-		GameID:    ptrOrNil(c.GameID),
-		UserID:    ptrOrNil(c.UserID),
-		TeamID:    ptrOrNil(c.TeamID),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
+	sess := newSession(c)
 
 	blob, err := marshalSession(sess)
 	if err != nil {
@@ -197,16 +187,7 @@ func (s *SQLiteStore) Update(id string, u *models.UpdateSession) error {
 	if err != nil {
 		return err
 	}
-	if u.GameID != "" {
-		sess.GameID = ptrOrNil(u.GameID)
-	}
-	if u.UserID != "" {
-		sess.UserID = ptrOrNil(u.UserID)
-	}
-	if u.TeamID != "" {
-		sess.TeamID = ptrOrNil(u.TeamID)
-	}
-	sess.UpdatedAt = time.Now()
+	applyUpdate(sess, u)
 
 	blob, err := marshalSession(sess)
 	if err != nil {

@@ -11,7 +11,6 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
-	"github.com/robbiebyrd/indri/internal/repo/ids"
 )
 
 // created_at backs the sessionMaxAge cap (the Mongo store's TTL index). The
@@ -93,15 +92,7 @@ func (s *PostgresStore) New(c models.CreateSession) (*models.Session, error) {
 		return nil, err
 	}
 
-	sess := &models.Session{
-		ID:        ids.New(),
-		Token:     c.Token,
-		UserID:    ptrOrNil(c.UserID),
-		GameID:    ptrOrNil(c.GameID),
-		TeamID:    ptrOrNil(c.TeamID),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
+	sess := newSession(c)
 	data, err := json.Marshal(sess)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling session: %w", err)
@@ -247,16 +238,7 @@ func (s *PostgresStore) Update(id string, u *models.UpdateSession) error {
 	if err != nil {
 		return err
 	}
-	if u.GameID != "" {
-		sess.GameID = ptrOrNil(u.GameID)
-	}
-	if u.UserID != "" {
-		sess.UserID = ptrOrNil(u.UserID)
-	}
-	if u.TeamID != "" {
-		sess.TeamID = ptrOrNil(u.TeamID)
-	}
-	sess.UpdatedAt = time.Now()
+	applyUpdate(sess, u)
 
 	data, err := json.Marshal(sess)
 	if err != nil {
