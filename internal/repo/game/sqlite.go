@@ -150,10 +150,11 @@ func (s *SQLiteStore) GetIDHex(gameCode string) (*string, error) {
 	return &g.ID, nil
 }
 
-func (s *SQLiteStore) Exists(id string) (bool, error) {
+// Exists reports whether a game with the given code exists.
+func (s *SQLiteStore) Exists(code string) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(s.ctx,
-		`SELECT COUNT(*) FROM games WHERE id = ?`, id,
+		`SELECT COUNT(*) FROM games WHERE code = ?`, code,
 	).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("exists game: %w", err)

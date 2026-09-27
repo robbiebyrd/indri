@@ -12,7 +12,7 @@ type Storer interface {
 	FindByCode(gameCode string) (*models.Game, error)
 	FindOpen(limit int) ([]*models.Game, error)
 	GetIDHex(gameCode string) (*string, error)
-	Exists(id string) (bool, error)
+	Exists(code string) (bool, error)
 	Update(id string, game *models.UpdateGame) error
 	UpdateField(id string, key string, value interface{}) error
 	DeleteField(id string, key string) error

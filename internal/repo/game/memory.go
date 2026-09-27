@@ -169,10 +169,11 @@ func (s *MemoryStore) GetIDHex(code string) (*string, error) {
 	return &g.ID, nil
 }
 
-func (s *MemoryStore) Exists(id string) (bool, error) {
+// Exists reports whether a game with the given code exists.
+func (s *MemoryStore) Exists(code string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	_, ok := s.games[id]
+	_, ok := s.codes[code]
 	return ok, nil
 }
 
