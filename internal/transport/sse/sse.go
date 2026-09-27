@@ -128,24 +128,9 @@ func (t *Transport) stream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-c.Done():
-			drain(c, emit)
+			c.Drain(func(f transport.Frame) bool { return emit(encode(f)) })
 			return
 		case <-r.Context().Done():
-			return
-		}
-	}
-}
-
-// drain flushes what was queued before a server-side Close, so a kick's
-// final message still arrives.
-func drain(c *transport.QueuedConn, emit func(string) bool) {
-	for {
-		select {
-		case f := <-c.Outbound():
-			if !emit(encode(f)) {
-				return
-			}
-		default:
 			return
 		}
 	}

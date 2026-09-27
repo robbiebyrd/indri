@@ -57,6 +57,34 @@ func TestQueuedConn_WritesQueueInOrderWithKind(t *testing.T) {
 	}
 }
 
+func TestQueuedConn_DrainFlushesQueuedFramesAndStopsOnFailure(t *testing.T) {
+	c := transport.NewQueuedConn(4, nil)
+	_ = c.Write([]byte("a"))
+	_ = c.Write([]byte("b"))
+	_ = c.Close()
+
+	var got []string
+	c.Drain(func(f transport.Frame) bool {
+		got = append(got, string(f.Data))
+		return true
+	})
+
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("drained %v, want [a b]", got)
+	}
+
+	c = transport.NewQueuedConn(4, nil)
+	_ = c.Write([]byte("a"))
+	_ = c.Write([]byte("b"))
+
+	calls := 0
+	c.Drain(func(transport.Frame) bool { calls++; return false })
+
+	if calls != 1 {
+		t.Fatalf("write called %d times after failing, want 1", calls)
+	}
+}
+
 func TestQueuedConn_FullBufferAndClosedReturnErrors(t *testing.T) {
 	c := transport.NewQueuedConn(1, nil)
 

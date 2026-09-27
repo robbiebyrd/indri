@@ -136,6 +136,22 @@ func (c *QueuedConn) Outbound() <-chan Frame { return c.out }
 // Done is closed when the conn closes.
 func (c *QueuedConn) Done() <-chan struct{} { return c.done }
 
+// Drain passes every frame still queued to write, stopping at the first
+// failed write. Writers call it after Done so that what was queued before a
+// server-side close (e.g. a kick's final message) still reaches the client.
+func (c *QueuedConn) Drain(write func(Frame) bool) {
+	for {
+		select {
+		case f := <-c.out:
+			if !write(f) {
+				return
+			}
+		default:
+			return
+		}
+	}
+}
+
 // Connected fires h.Connect once the client can receive.
 func (c *QueuedConn) Connected(h Handlers) {
 	c.lifecycleMu.Lock()

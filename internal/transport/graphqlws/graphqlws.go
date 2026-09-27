@@ -321,6 +321,7 @@ func (s *socket) writer() {
 	defer ping.Stop()
 
 	var (
+		conn *transport.QueuedConn
 		out  <-chan transport.Frame
 		done <-chan struct{}
 	)
@@ -331,8 +332,8 @@ func (s *socket) writer() {
 			if s.ws.WriteJSON(m) != nil {
 				return
 			}
-		case c := <-s.attach:
-			out, done = c.Outbound(), c.Done()
+		case conn = <-s.attach:
+			out, done = conn.Outbound(), conn.Done()
 		case f := <-out:
 			if !s.writeFrame(f) {
 				return
@@ -340,7 +341,13 @@ func (s *socket) writer() {
 		case <-done:
 			// A server-side close (kick, shutdown): flush what was queued,
 			// end the subscription, then close the socket.
-			if s.drain(out) {
+			flushed := true
+			conn.Drain(func(f transport.Frame) bool {
+				flushed = s.writeFrame(f)
+				return flushed
+			})
+
+			if flushed {
 				_ = s.ws.WriteJSON(message{ID: s.eventsID, Type: "complete"})
 			}
 
@@ -353,21 +360,6 @@ func (s *socket) writer() {
 			}
 		case <-s.stop:
 			return
-		}
-	}
-}
-
-// drain writes every frame still queued and reports whether the socket
-// accepted them all.
-func (s *socket) drain(out <-chan transport.Frame) bool {
-	for {
-		select {
-		case f := <-out:
-			if !s.writeFrame(f) {
-				return false
-			}
-		default:
-			return true
 		}
 	}
 }
