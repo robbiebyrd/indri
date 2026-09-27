@@ -9,9 +9,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.robbiebyrd.indri-client"
+      "bundleIdentifier": "com.robbiebyrd.indriclient"
     },
     "android": {
+      "package": "com.robbiebyrd.indriclient",
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
       },
