@@ -36,6 +36,10 @@ type Vars struct {
 	WebRTCNAT1To1IPs      string `default:""          envconfig:"WEBRTC_NAT_1TO1_IPS"   json:"webrtcNat1To1Ips"     flag:"webrtc-nat-1to1-ips"`
 	WebRTCUDPPortMin      int    `default:"0"         envconfig:"WEBRTC_UDP_PORT_MIN"   json:"webrtcUdpPortMin"     flag:"webrtc-udp-port-min"`
 	WebRTCUDPPortMax      int    `default:"0"         envconfig:"WEBRTC_UDP_PORT_MAX"   json:"webrtcUdpPortMax"     flag:"webrtc-udp-port-max"`
+	// Must stay under the HTTP server's 10s WriteTimeout: the offer response waits on gathering.
+	WebRTCGatherTimeoutSeconds int `default:"5"  envconfig:"WEBRTC_GATHER_TIMEOUT" json:"webrtcGatherTimeout" flag:"webrtc-gather-timeout"`
+	WebRTCOpenTimeoutSeconds   int `default:"15" envconfig:"WEBRTC_OPEN_TIMEOUT"   json:"webrtcOpenTimeout"   flag:"webrtc-open-timeout"`
+	GraphQLInitTimeoutSeconds  int `default:"10" envconfig:"GRAPHQL_INIT_TIMEOUT"  json:"graphqlInitTimeout"  flag:"graphql-init-timeout"`
 }
 
 var globalClient *Vars

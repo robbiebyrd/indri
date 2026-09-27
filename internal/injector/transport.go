@@ -15,18 +15,6 @@ import (
 	"github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
-const (
-	// webrtcGatherTimeout must stay under the HTTP server's 10s WriteTimeout
-	// (entrypoints/http.go), since the offer response waits on gathering.
-	webrtcGatherTimeout = 5 * time.Second
-	// webrtcOpenTimeout leaves headroom over observed setup times: ~2s on a
-	// host offering many interfaces.
-	webrtcOpenTimeout = 15 * time.Second
-	// graphqlInitTimeout is how long a graphqlws client has to send
-	// connection_init.
-	graphqlInitTimeout = 10 * time.Second
-)
-
 // newTransport builds the transports named in vars.Transports. A single
 // transport is returned as-is; several run concurrently behind a Composite.
 func newTransport(vars *envVars.Vars) (transport.Transport, error) {
@@ -76,13 +64,17 @@ func buildTransport(name string, vars *envVars.Vars) (transport.Transport, error
 			PingPeriod:     time.Duration(vars.WSPingPeriodSeconds) * time.Second,
 		}), nil
 	case "graphqlws":
+		if vars.GraphQLInitTimeoutSeconds <= 0 {
+			return nil, errors.New("INDRI_GRAPHQL_INIT_TIMEOUT must be positive")
+		}
+
 		return graphqlws.New(graphqlws.Config{
 			AllowedOrigins: vars.AllowedOrigins,
 			BufferSize:     vars.WSMessageBufferSize,
 			MaxMessageSize: int64(vars.WSMaxMessageSizeBytes),
 			PingPeriod:     time.Duration(vars.WSPingPeriodSeconds) * time.Second,
 			PongWait:       time.Duration(vars.WSPongTimeoutSeconds) * time.Second,
-			InitTimeout:    graphqlInitTimeout,
+			InitTimeout:    time.Duration(vars.GraphQLInitTimeoutSeconds) * time.Second,
 		}), nil
 	case "webrtc":
 		return buildWebRTC(vars)
@@ -94,6 +86,10 @@ func buildTransport(name string, vars *envVars.Vars) (transport.Transport, error
 func buildWebRTC(vars *envVars.Vars) (transport.Transport, error) {
 	if vars.WebRTCMaxPeers <= 0 {
 		return nil, errors.New("INDRI_WEBRTC_MAX_PEERS must be positive")
+	}
+
+	if vars.WebRTCGatherTimeoutSeconds <= 0 || vars.WebRTCOpenTimeoutSeconds <= 0 {
+		return nil, errors.New("INDRI_WEBRTC_GATHER_TIMEOUT and INDRI_WEBRTC_OPEN_TIMEOUT must be positive")
 	}
 
 	for _, p := range []int{vars.WebRTCUDPPortMin, vars.WebRTCUDPPortMax} {
@@ -110,8 +106,8 @@ func buildWebRTC(vars *envVars.Vars) (transport.Transport, error) {
 		NAT1To1IPs:     splitList(vars.WebRTCNAT1To1IPs),
 		UDPPortMin:     uint16(vars.WebRTCUDPPortMin),
 		UDPPortMax:     uint16(vars.WebRTCUDPPortMax),
-		GatherTimeout:  webrtcGatherTimeout,
-		OpenTimeout:    webrtcOpenTimeout,
+		GatherTimeout:  time.Duration(vars.WebRTCGatherTimeoutSeconds) * time.Second,
+		OpenTimeout:    time.Duration(vars.WebRTCOpenTimeoutSeconds) * time.Second,
 	})
 	if err != nil {
 		return nil, err

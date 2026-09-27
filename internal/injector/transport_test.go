@@ -11,12 +11,15 @@ import (
 
 func vars(transports string) *envVars.Vars {
 	return &envVars.Vars{
-		Transports:            transports,
-		WSMaxMessageSizeBytes: 32768,
-		WSMessageBufferSize:   1024,
-		WSPingPeriodSeconds:   54,
-		WSPongTimeoutSeconds:  60,
-		WebRTCMaxPeers:        4,
+		Transports:                 transports,
+		WSMaxMessageSizeBytes:      32768,
+		WSMessageBufferSize:        1024,
+		WSPingPeriodSeconds:        54,
+		WSPongTimeoutSeconds:       60,
+		WebRTCMaxPeers:             4,
+		WebRTCGatherTimeoutSeconds: 5,
+		WebRTCOpenTimeoutSeconds:   15,
+		GraphQLInitTimeoutSeconds:  10,
 	}
 }
 
@@ -104,6 +107,21 @@ func TestNewTransport_RejectsBadConfiguration(t *testing.T) {
 		"no peer cap": func() *envVars.Vars {
 			v := vars("webrtc")
 			v.WebRTCMaxPeers = 0
+			return v
+		}(),
+		"no gather timeout": func() *envVars.Vars {
+			v := vars("webrtc")
+			v.WebRTCGatherTimeoutSeconds = 0
+			return v
+		}(),
+		"no open timeout": func() *envVars.Vars {
+			v := vars("webrtc")
+			v.WebRTCOpenTimeoutSeconds = 0
+			return v
+		}(),
+		"no graphql init timeout": func() *envVars.Vars {
+			v := vars("graphqlws")
+			v.GraphQLInitTimeoutSeconds = 0
 			return v
 		}(),
 	}
