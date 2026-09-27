@@ -182,3 +182,19 @@ func TestSessionPostgresStore_New_AfterExpiry_CreatesFreshSession(t *testing.T) 
 		t.Errorf("GetByToken(old token): want ErrNotFound, got %v", err)
 	}
 }
+
+func TestSessionPostgresStore_Update_DeletedSession_ReturnsErrNotFound(t *testing.T) {
+	s := newPostgresSessionFixture(t)
+	sess, err := s.New(models.CreateSession{Token: "t-1", UserID: "u-1"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := s.Delete(sess.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	err = s.Update(sess.ID, &models.UpdateSession{GameID: "g-1"})
+	if !errors.Is(err, repoErrors.ErrNotFound) {
+		t.Errorf("Update: want ErrNotFound, got %v", err)
+	}
+}

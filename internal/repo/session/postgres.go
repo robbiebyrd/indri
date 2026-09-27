@@ -266,11 +266,22 @@ func (s *PostgresStore) Update(id string, u *models.UpdateSession) error {
 	if sess.UserID != nil {
 		userID = *sess.UserID
 	}
-	_, err = s.db.ExecContext(s.ctx,
+	res, err := s.db.ExecContext(s.ctx,
 		`UPDATE sessions SET user_id = $2, data = $3 WHERE id = $1`,
 		sess.ID, userID, data,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("updating session %q: %w", id, err)
+	}
+	// The session can be deleted between the Get above and this UPDATE.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("updating session %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
+	}
+	return nil
 }
 
 func (s *PostgresStore) Delete(id string) error {
