@@ -77,6 +77,7 @@ func registerSettingsFlags(fs *flag.FlagSet) {
 	fs.Int("redis-database", 0, "Redis database number.")
 	fs.String("lock-backend", "", "Lock backend: inprocess or redis.")
 	fs.String("db-backend", "", "Database backend (default mongodb).")
+	fs.String("postgres-uri", "", "PostgreSQL connection URI.")
 	fs.String("mongo-uri", "", "MongoDB URI.")
 	fs.String("mongo-database", "", "MongoDB database name.")
 	fs.String("mongo-auth-database", "", "MongoDB auth database.")
