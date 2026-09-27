@@ -3,7 +3,6 @@ package game
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/chenmingyong0423/go-mongox/v2"
@@ -29,7 +28,7 @@ type MongoStore struct {
 	collection *mongox.Collection[models.Game]
 	client     *mongodb.Client
 	locks      lock.Manager
-	publisher  events.Publisher
+	changes    changePublisher
 }
 
 // NewMongoStore creates a new repository for accessing game data. locks provides the
@@ -55,7 +54,7 @@ func NewMongoStore(ctx context.Context, client *mongodb.Client, locks lock.Manag
 		client:     client,
 		collection: gameColl,
 		locks:      locks,
-		publisher:  publisher,
+		changes:    changePublisher{ctx: ctx, publisher: publisher},
 	}, nil
 }
 
@@ -191,7 +190,7 @@ func (s *MongoStore) UpdateField(id string, key string, value interface{}) error
 		return fmt.Errorf("error updating game field: game with id %v does not exists", id)
 	}
 
-	s.publish(id, events.OpUpdate, map[string]interface{}{key: value}, nil)
+	s.changes.field(id, map[string]interface{}{key: value}, nil)
 
 	return nil
 }
@@ -224,7 +223,7 @@ func (s *MongoStore) DeleteField(id string, key string) error {
 		return fmt.Errorf("field %v does not exists", key)
 	}
 
-	s.publish(id, events.OpUpdate, nil, []string{key})
+	s.changes.field(id, nil, []string{key})
 
 	return nil
 }
@@ -264,58 +263,11 @@ func (s *MongoStore) Mutate(id string, apply func(g *models.Game) error) error {
 				return committed, err
 			}
 
-			s.publishDiff(id, before, g)
+			s.changes.diff(id, before, g)
 
 			return true, nil
 		},
 	)
-}
-
-// publishDiff computes the dotted-path delta between the pre-mutation snapshot
-// and the saved game and publishes it. Errors are logged, not surfaced: the
-// write already committed, so a fan-out hiccup must not fail the mutation.
-func (s *MongoStore) publishDiff(id string, before map[string]interface{}, after *models.Game) {
-	if s.publisher == nil {
-		return
-	}
-
-	afterMap, err := events.ToMap(after)
-	if err != nil {
-		log.Printf("could not snapshot game %v for change event: %v", id, err)
-		return
-	}
-
-	updated, removed := events.Diff(before, afterMap)
-
-	s.publish(id, events.OpUpdate, updated, removed)
-}
-
-// publish emits a change event for the game, if a publisher is configured.
-func (s *MongoStore) publish(id string, op events.OperationType, updated map[string]interface{}, removed []string) {
-	if s.publisher == nil {
-		return
-	}
-
-	// Strip private data so a broadcast delta never exposes more than a
-	// sanitized keyframe would.
-	updated, removed = events.SanitizeDelta(updated, removed)
-
-	event := events.ChangeEvent{
-		ID:            id,
-		OperationType: op,
-		Timestamp:     time.Now(),
-		Collection:    collectionName,
-		UpdatedFields: updated,
-		RemovedFields: removed,
-	}
-
-	if !event.HasChanges() {
-		return
-	}
-
-	if err := s.publisher.Publish(*s.ctx, event); err != nil {
-		log.Printf("could not publish change event for game %v: %v", id, err)
-	}
 }
 
 // saveWithVersion persists the whole game only if its stored version still

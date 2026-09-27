@@ -22,9 +22,9 @@ import (
 // publisher are used identically to MongoStore for cross-instance mutation
 // serialisation and change fan-out.
 type MemoryStore struct {
-	ctx       context.Context
-	locks     lock.Manager
-	publisher events.Publisher
+	ctx     context.Context
+	locks   lock.Manager
+	changes changePublisher
 
 	mu    sync.RWMutex
 	games map[string]*models.Game // id -> game
@@ -41,11 +41,11 @@ func NewMemoryStore(ctx context.Context, locks lock.Manager, publisher events.Pu
 		return nil, errors.New("publisher is required")
 	}
 	return &MemoryStore{
-		ctx:       ctx,
-		locks:     locks,
-		publisher: publisher,
-		games:     make(map[string]*models.Game),
-		codes:     make(map[string]string),
+		ctx:     ctx,
+		locks:   locks,
+		changes: changePublisher{ctx: ctx, publisher: publisher},
+		games:   make(map[string]*models.Game),
+		codes:   make(map[string]string),
 	}, nil
 }
 
@@ -270,41 +270,6 @@ func fromMap(m map[string]interface{}, dst *models.Game) error {
 	return nil
 }
 
-// publishFieldUpdate emits a partial-update event with the dotted-path field
-// change, matching MongoStore.UpdateField's behaviour.
-func (s *MemoryStore) publishFieldUpdate(id string, updated map[string]interface{}, removed []string) {
-	if s.publisher == nil {
-		return
-	}
-	updated, removed = events.SanitizeDelta(updated, removed)
-	ev := events.ChangeEvent{
-		ID:            id,
-		OperationType: events.OpUpdate,
-		Timestamp:     time.Now(),
-		Collection:    collectionName,
-		UpdatedFields: updated,
-		RemovedFields: removed,
-	}
-	if !ev.HasChanges() {
-		return
-	}
-	_ = s.publisher.Publish(s.ctx, ev)
-}
-
-// publishDiff computes the delta between the pre-mutation JSON snapshot and
-// the newly saved game, mirroring MongoStore.publishDiff.
-func (s *MemoryStore) publishDiff(id string, before map[string]interface{}, after *models.Game) {
-	if s.publisher == nil {
-		return
-	}
-	afterMap, err := events.ToMap(after)
-	if err != nil {
-		return
-	}
-	updated, removed := events.Diff(before, afterMap)
-	s.publishFieldUpdate(id, updated, removed)
-}
-
 func (s *MemoryStore) Update(id string, upd *models.UpdateGame) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -340,7 +305,7 @@ func (s *MemoryStore) Update(id string, upd *models.UpdateGame) error {
 	g.UpdatedAt = time.Now()
 	g.Version++
 
-	s.publishDiff(id, before, g)
+	s.changes.diff(id, before, g)
 	return nil
 }
 
@@ -363,7 +328,7 @@ func (s *MemoryStore) UpdateField(id string, key string, value interface{}) erro
 	g.UpdatedAt = time.Now()
 	g.Version++
 
-	s.publishFieldUpdate(id, map[string]interface{}{key: value}, nil)
+	s.changes.field(id, map[string]interface{}{key: value}, nil)
 	return nil
 }
 
@@ -386,7 +351,7 @@ func (s *MemoryStore) DeleteField(id string, key string) error {
 	g.UpdatedAt = time.Now()
 	g.Version++
 
-	s.publishFieldUpdate(id, nil, []string{key})
+	s.changes.field(id, nil, []string{key})
 	return nil
 }
 
@@ -431,7 +396,7 @@ func (s *MemoryStore) Mutate(id string, apply func(g *models.Game) error) error 
 			g.Version = expectedVersion + 1
 			g.UpdatedAt = time.Now()
 			s.games[id] = g
-			s.publishDiff(id, before, g)
+			s.changes.diff(id, before, g)
 			return true, nil
 		},
 	)
