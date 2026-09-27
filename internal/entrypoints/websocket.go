@@ -49,12 +49,12 @@ func HandleDisconnect(
 	} else if session.GameID == nil {
 		log.Print("error getting gameId from session")
 		return
-	} else if session.SlotID == nil || *session.SlotID == "" {
-		log.Print("session has no slotId; cannot mark player disconnected")
+	} else if session.SlotID == nil || *session.SlotID == "" || session.UserID == nil {
+		log.Print("session has no slotId or userId; cannot mark player disconnected")
 		return
 	}
 
-	err = gs.DisconnectPlayer(*session.GameID, *session.SlotID)
+	err = gs.DisconnectPlayer(*session.GameID, *session.SlotID, *session.UserID)
 	if err != nil {
 		log.Printf("could not set player as disconnected: %v\n", err)
 	}

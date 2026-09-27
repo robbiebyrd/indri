@@ -59,7 +59,7 @@ func (h *Handler) Handle(
 
 	targetSessionId := targetSession.ID
 
-	if err = h.i.GameRepo.RemovePlayer(gameId, targetSlotId); err != nil {
+	if err = h.i.GameRepo.RemovePlayer(gameId, targetSlotId, targetPlayer.UserID); err != nil {
 		log.Printf("could not remove player %v from game %v: %v\n", targetSlotId, gameId, err)
 	}
 

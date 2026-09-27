@@ -5,17 +5,17 @@ func (s *SQLiteStore) AssignSlot(id string, teamId string, userId string, displa
 	return assignSlot(s, id, teamId, userId, displayName)
 }
 
-// RemovePlayer empties a slot, keeping it in place for reassignment.
-func (s *SQLiteStore) RemovePlayer(id string, slotId string) error {
-	return removePlayer(s, id, slotId)
+// RemovePlayer empties userId's slot, keeping it in place for reassignment.
+func (s *SQLiteStore) RemovePlayer(id string, slotId string, userId string) error {
+	return removePlayer(s, id, slotId, userId)
 }
 
-// ConnectPlayer marks a slot's player as connected.
-func (s *SQLiteStore) ConnectPlayer(id string, slotId string) error {
-	return setConnected(s, id, slotId, true)
+// ConnectPlayer marks userId, in slotId, as connected.
+func (s *SQLiteStore) ConnectPlayer(id string, slotId string, userId string) error {
+	return setConnected(s, id, slotId, userId, true)
 }
 
-// DisconnectPlayer marks a slot's player as disconnected.
-func (s *SQLiteStore) DisconnectPlayer(id string, slotId string) error {
-	return setConnected(s, id, slotId, false)
+// DisconnectPlayer marks userId, in slotId, as disconnected.
+func (s *SQLiteStore) DisconnectPlayer(id string, slotId string, userId string) error {
+	return setConnected(s, id, slotId, userId, false)
 }

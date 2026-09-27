@@ -18,9 +18,9 @@ type Storer interface {
 	DeleteField(id string, key string) error
 	Mutate(id string, apply func(g *models.Game) error) error
 	AssignSlot(id string, teamId string, userId string, displayName string) (string, error)
-	RemovePlayer(id string, slotId string) error
-	ConnectPlayer(id string, slotId string) error
-	DisconnectPlayer(id string, slotId string) error
+	RemovePlayer(id string, slotId string, userId string) error
+	ConnectPlayer(id string, slotId string, userId string) error
+	DisconnectPlayer(id string, slotId string, userId string) error
 	HasHost(id string) bool
 	PlayerIsHost(id string, playerId string) bool
 	UnsetHost(id string) error

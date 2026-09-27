@@ -21,13 +21,15 @@ the login screen while its old slot shows as disconnected.
    has no caller. After a resume, everyone else still sees the player as disconnected.
 2. **`kick` and `leave` leave `GameID`/`SlotID`/`TeamID` in the session.** A kicked player who
    reconnects is sent the game's keyframe again, and `reconnect` never checks that the slot still
-   belongs to them.
+   belongs to them. (Partly fixed, `wip/review-fixes`: slot operations now take the caller's user and
+   act only if that user still holds the slot, so a stale session can no longer disconnect or remove
+   the slot's new holder. Clearing the session's game fields is still to do.)
 3. **A stale connection's disconnect can overwrite a fresh resume.** The old transport may only notice
    the drop after the new one has reconnected (a half-open TCP connection or SSE stream). Its
    `HandleDisconnect` then runs `DisconnectPlayer` and marks the just-resumed player offline. With
    several instances, the old and new connections can be on different servers.
-4. **`assignSlot` never checks whether the user already holds a slot.** A client that re-`join`s instead
-   of resuming takes a second slot.
+4. **Fixed** (`wip/review-fixes`): `assignSlot` now gives a user at most one slot. Joining their team
+   again keeps and reconnects it; joining another team moves them there, host flag included.
 5. **Session expiry is inconsistent.** Only Mongo expires sessions: a TTL on `createdAt`, 7 days, never
    refreshed, so it can expire an *active* player mid-game. Memory, SQLite and Postgres never expire
    sessions.
