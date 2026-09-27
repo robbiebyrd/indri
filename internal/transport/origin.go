@@ -1,0 +1,70 @@
+package transport
+
+import (
+	"net/http"
+	"strings"
+)
+
+// ConnectionIDHeader correlates an HTTP request with an already-open
+// connection on transports whose two directions travel separately (SSE).
+const ConnectionIDHeader = "X-Indri-Connection-Id"
+
+// OriginChecker guards against cross-site hijacking: requests with no Origin
+// (native/CLI clients) are allowed; browser Origins must be in the
+// comma-separated allowlist.
+func OriginChecker(allowedOrigins string) func(*http.Request) bool {
+	allowed := make(map[string]struct{})
+
+	for _, o := range strings.Split(allowedOrigins, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			allowed[o] = struct{}{}
+		}
+	}
+
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+
+		_, ok := allowed[origin]
+
+		return ok
+	}
+}
+
+// Route mounts h at method+path behind the origin policy, together with the
+// OPTIONS preflight that browsers send before a cross-origin request carrying
+// a custom header. Allowed browser origins get CORS headers so they can read
+// the response; disallowed ones are refused before h runs.
+func Route(mux *http.ServeMux, allowedOrigins, method, path string, h http.Handler) {
+	allowed := OriginChecker(allowedOrigins)
+
+	guard := func(w http.ResponseWriter, r *http.Request) bool {
+		if !allowed(r) {
+			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return false
+		}
+
+		if origin := r.Header.Get("Origin"); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
+
+		return true
+	}
+
+	mux.HandleFunc(method+" "+path, func(w http.ResponseWriter, r *http.Request) {
+		if guard(w, r) {
+			h.ServeHTTP(w, r)
+		}
+	})
+
+	mux.HandleFunc(http.MethodOptions+" "+path, func(w http.ResponseWriter, r *http.Request) {
+		if guard(w, r) {
+			w.Header().Set("Access-Control-Allow-Methods", method)
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, "+ConnectionIDHeader)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+}

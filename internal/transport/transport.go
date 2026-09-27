@@ -14,7 +14,12 @@ type Conn interface {
 	Get(key string) (value any, exists bool)
 	Set(key string, value any)
 	UnSet(key string)
+	// Write sends msg as text; it must be valid UTF-8.
 	Write(msg []byte) error
+	// WriteBinary sends msg as opaque bytes (e.g. MessagePack). Transports
+	// whose wire format is text-only encode it so the client gets the exact
+	// bytes back.
+	WriteBinary(msg []byte) error
 	Close() error
 	IsClosed() bool
 }
