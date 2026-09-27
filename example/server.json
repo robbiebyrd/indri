@@ -4,6 +4,7 @@
   "allowedOrigins": "",
   "lockBackend": "inprocess",
   "dbBackend": "mongodb",
+  "postgresUri": "",
   "mongoUri": "mongodb+srv://test:test@localhost/",
   "mongoDatabase": "indri",
   "mongoAuthDatabase": "admin",
