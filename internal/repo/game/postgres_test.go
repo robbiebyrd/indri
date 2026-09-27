@@ -3,7 +3,9 @@ package game
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/robbiebyrd/indri/internal/models"
@@ -226,5 +228,70 @@ func TestPostgresStore_ConnectDisconnectPlayer(t *testing.T) {
 	got, _ = store.Get(g.ID)
 	if got.Players["user-1"].Connected {
 		t.Errorf("Connected = true after DisconnectPlayer")
+	}
+}
+
+// TestPostgresStore_ConcurrentUpdateFieldAndAddPlayer_NoLostUpdates proves
+// that Update/UpdateField/DeleteField and Mutate-based writers (AddPlayer)
+// share the same version-fenced, lock-serialized write path: every one of
+// the N*2 concurrent writes must land, with no lost updates, and the final
+// version must equal exactly 1 (creation) + the number of committed writes.
+func TestPostgresStore_ConcurrentUpdateFieldAndAddPlayer_NoLostUpdates(t *testing.T) {
+	store := newPostgresFixture(t)
+	g, _ := store.New("ABCD", makeScript(), false)
+
+	const n = 20
+	var wg sync.WaitGroup
+	errCh := make(chan error, n*2)
+
+	for i := 0; i < n; i++ {
+		i := i
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("data.k%d", i)
+			if err := store.UpdateField(g.ID, key, i); err != nil {
+				errCh <- fmt.Errorf("UpdateField(%d): %w", i, err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			userID := fmt.Sprintf("user-%d", i)
+			if err := store.AddPlayer(g.ID, userID, fmt.Sprintf("Player %d", i)); err != nil {
+				errCh <- fmt.Errorf("AddPlayer(%d): %w", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	got, err := store.Get(g.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	for i := 0; i < n; i++ {
+		key := fmt.Sprintf("k%d", i)
+		v, ok := got.PublicData[key]
+		if !ok {
+			t.Errorf("data.%s missing", key)
+			continue
+		}
+		if fv, want := v.(float64), float64(i); fv != want {
+			t.Errorf("data.%s = %v; want %v", key, fv, want)
+		}
+
+		userID := fmt.Sprintf("user-%d", i)
+		if _, ok := got.Players[userID]; !ok {
+			t.Errorf("player %s missing", userID)
+		}
+	}
+
+	wantVersion := int64(1 + 2*n)
+	if got.Version != wantVersion {
+		t.Errorf("Version=%d; want %d (lost update if lower)", got.Version, wantVersion)
 	}
 }
