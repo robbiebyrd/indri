@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
@@ -250,5 +251,49 @@ func TestCopyGame_CopiesNonJSONContainers(t *testing.T) {
 	}
 	if got := g.PublicData["list"].([]interface{})[1].(map[string]interface{})["k"]; got != "v" {
 		t.Errorf("list[1].k = %v, want v", got)
+	}
+}
+
+// readingPublisher reads the game back while publishing, as the broadcaster
+// does when a change asks for a keyframe.
+type readingPublisher struct {
+	store *MemoryStore
+}
+
+func (p *readingPublisher) Publish(_ context.Context, e events.ChangeEvent) error {
+	_, err := p.store.Get(e.ID)
+	return err
+}
+
+func (p *readingPublisher) Subscribe(context.Context) (<-chan events.ChangeEvent, error) {
+	return make(chan events.ChangeEvent), nil
+}
+
+// TestMemoryStore_PublishesOutsideTheStoreLock proves a subscriber may read
+// the store while a change is being published: publishing under the store's
+// lock would deadlock that read.
+func TestMemoryStore_PublishesOutsideTheStoreLock(t *testing.T) {
+	pub := &readingPublisher{}
+	store, err := NewMemoryStore(context.Background(), lock.NewInProcess(), pub)
+	if err != nil {
+		t.Fatalf("NewMemoryStore: %v", err)
+	}
+	pub.store = store
+
+	g, err := store.New("LOCK", makeScript(), false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- store.UpdateField(g.ID, "data.foo", "bar") }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("UpdateField: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("UpdateField deadlocked: the change was published while holding the store lock")
 	}
 }

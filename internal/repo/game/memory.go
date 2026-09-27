@@ -374,23 +374,35 @@ func (s *MemoryStore) Mutate(id string, apply func(g *models.Game) error) error 
 		},
 		apply,
 		func(g *models.Game, expectedVersion int64) (bool, error) {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			cur, ok := s.games[id]
-			if !ok {
-				return false, fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
+			committed, err := s.commit(id, g, expectedVersion)
+			if committed {
+				// Published after the store lock is released: a subscriber
+				// may read the game back (a keyframe), and Publish may block.
+				// The mutation lock is still held, so events for one game
+				// still go out in commit order.
+				s.changes.diff(id, before, g)
 			}
-			if cur.Version != expectedVersion {
-				// Version drift — return false so mutation.Run reloads and retries.
-				return false, nil
-			}
-			g.Version = expectedVersion + 1
-			g.UpdatedAt = time.Now()
-			// Store a copy: apply may have kept references into g, or put
-			// caller-owned maps in it.
-			s.games[id] = copyGame(g)
-			s.changes.diff(id, before, g)
-			return true, nil
+			return committed, err
 		},
 	)
+}
+
+// commit saves g if the stored version is still expectedVersion, reporting
+// whether it did. It stores a copy: apply may have kept references into g, or
+// put caller-owned maps in it.
+func (s *MemoryStore) commit(id string, g *models.Game, expectedVersion int64) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.games[id]
+	if !ok {
+		return false, fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
+	}
+	if cur.Version != expectedVersion {
+		// Version drift — return false so mutation.Run reloads and retries.
+		return false, nil
+	}
+	g.Version = expectedVersion + 1
+	g.UpdatedAt = time.Now()
+	s.games[id] = copyGame(g)
+	return true, nil
 }
