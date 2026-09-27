@@ -29,6 +29,33 @@ func NewMemoryStore(ctx context.Context) (*MemoryStore, error) {
 	}, nil
 }
 
+// live reports whether sess is younger than sessionMaxAge. Expired sessions
+// are treated as absent by every read and purged on New, like the Postgres
+// store.
+func live(sess *models.Session) bool {
+	return sess.CreatedAt.After(sessionCutoff())
+}
+
+// purgeExpired drops expired sessions from every index. Callers hold s.mu.
+func (s *MemoryStore) purgeExpired() {
+	for id, sess := range s.byID {
+		if !live(sess) {
+			s.remove(id, sess)
+		}
+	}
+}
+
+// remove drops a session from every index. Callers hold s.mu.
+func (s *MemoryStore) remove(id string, sess *models.Session) {
+	delete(s.byID, id)
+	if sess.Token != "" {
+		delete(s.byToken, sess.Token)
+	}
+	if sess.UserID != nil {
+		delete(s.byUserID, *sess.UserID)
+	}
+}
+
 func copySession(s *models.Session) *models.Session {
 	if s == nil {
 		return nil
@@ -46,6 +73,9 @@ func (s *MemoryStore) New(c models.CreateSession) (*models.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Purge first so an expired session is never returned for this user.
+	s.purgeExpired()
+
 	if existingID, ok := s.byUserID[c.UserID]; ok {
 		return copySession(s.byID[existingID]), nil
 	}
@@ -62,7 +92,7 @@ func (s *MemoryStore) Get(id string) (*models.Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	sess, ok := s.byID[id]
-	if !ok {
+	if !ok || !live(sess) {
 		return nil, fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
 	}
 	return copySession(sess), nil
@@ -75,7 +105,7 @@ func (s *MemoryStore) GetByToken(token string) (*models.Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	id, ok := s.byToken[token]
-	if !ok {
+	if !ok || !live(s.byID[id]) {
 		return nil, fmt.Errorf("token: %w", repoErrors.ErrNotFound)
 	}
 	return copySession(s.byID[id]), nil
@@ -84,8 +114,8 @@ func (s *MemoryStore) GetByToken(token string) (*models.Session, error) {
 func (s *MemoryStore) Exists(id string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	_, ok := s.byID[id]
-	return ok, nil
+	sess, ok := s.byID[id]
+	return ok && live(sess), nil
 }
 
 func (s *MemoryStore) Find(key string, value string) ([]*models.Session, error) {
@@ -93,7 +123,7 @@ func (s *MemoryStore) Find(key string, value string) ([]*models.Session, error) 
 	defer s.mu.RUnlock()
 	var out []*models.Session
 	for _, sess := range s.byID {
-		if matchSessionField(sess, key, value) {
+		if live(sess) && matchSessionField(sess, key, value) {
 			out = append(out, copySession(sess))
 		}
 	}
@@ -118,7 +148,7 @@ func (s *MemoryStore) Update(id string, u *models.UpdateSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.byID[id]
-	if !ok {
+	if !ok || !live(sess) {
 		return fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
 	}
 	// byUserID is the one-session-per-user index, so it follows a change
@@ -144,13 +174,7 @@ func (s *MemoryStore) Delete(id string) error {
 	if !ok {
 		return nil // idempotent, matches MongoStore
 	}
-	delete(s.byID, id)
-	if sess.Token != "" {
-		delete(s.byToken, sess.Token)
-	}
-	if sess.UserID != nil {
-		delete(s.byUserID, *sess.UserID)
-	}
+	s.remove(id, sess)
 	return nil
 }
 

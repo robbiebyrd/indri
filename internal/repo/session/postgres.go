@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
@@ -60,11 +59,6 @@ func isPgDuplicateKey(err error) bool {
 	}
 	return strings.Contains(err.Error(), "23505") ||
 		strings.Contains(err.Error(), "duplicate key value violates unique constraint")
-}
-
-// sessionCutoff is the creation time at or before which a session has expired.
-func sessionCutoff() time.Time {
-	return time.Now().Add(-sessionMaxAge)
 }
 
 // New enforces one-session-per-userId: a second call for the same UserID

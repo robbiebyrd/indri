@@ -161,3 +161,68 @@ func TestStore_UpdateRefusesAUserWhoHasASession(t *testing.T) {
 		}
 	})
 }
+
+// backdateSession makes a stored session older than sessionMaxAge.
+func backdateSession(t *testing.T, store Storer, id string) {
+	t.Helper()
+
+	expired := time.Now().Add(-sessionMaxAge - time.Hour)
+	switch s := store.(type) {
+	case *MemoryStore:
+		s.mu.Lock()
+		s.byID[id].CreatedAt = expired
+		s.mu.Unlock()
+	case *SQLiteStore:
+		res, err := s.db.Exec(`UPDATE sessions SET created_at = ? WHERE id = ?`, expired.UnixNano(), id)
+		if err != nil {
+			t.Fatalf("backdating session: %v", err)
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			t.Fatalf("backdating session: want 1 row affected, got %d", n)
+		}
+	case *PostgresStore:
+		backdatePostgresSession(t, s, id)
+	case *MongoStore:
+		t.Skip("MongoDB expires sessions through a TTL index whose background sweep is asynchronous, so a backdated session stays readable until the sweep runs")
+	default:
+		t.Fatalf("no backdating hook for %T", store)
+	}
+}
+
+// A session older than sessionMaxAge has expired: no read finds it, and New
+// gives its user a fresh session.
+func TestStore_ExpiredSessionIsGone(t *testing.T) {
+	eachStore(t, func(t *testing.T, store Storer) {
+		user := fmt.Sprintf("u-%d", time.Now().UnixNano())
+		token := "tok-" + user
+		old, err := store.New(models.CreateSession{UserID: user, Token: token})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		backdateSession(t, store, old.ID)
+
+		if _, err := store.Get(old.ID); !errors.Is(err, repoErrors.ErrNotFound) {
+			t.Errorf("Get = %v, want repo.ErrNotFound", err)
+		}
+		if _, err := store.GetByToken(token); !errors.Is(err, repoErrors.ErrNotFound) {
+			t.Errorf("GetByToken = %v, want repo.ErrNotFound", err)
+		}
+		if _, err := store.FindFirst("userId", user); !errors.Is(err, repoErrors.ErrNotFound) {
+			t.Errorf("FindFirst(userId) = %v, want repo.ErrNotFound", err)
+		}
+		if exists, err := store.Exists(old.ID); err != nil || exists {
+			t.Errorf("Exists = %v, %v; want false, nil", exists, err)
+		}
+
+		fresh, err := store.New(models.CreateSession{UserID: user, Token: "tok2-" + user})
+		if err != nil {
+			t.Fatalf("New after expiry: %v", err)
+		}
+		if fresh.ID == old.ID {
+			t.Fatalf("New returned the expired session %s", old.ID)
+		}
+		if got, err := store.FindFirst("userId", user); err != nil || got.ID != fresh.ID {
+			t.Fatalf("FindFirst(userId) = %v, %v; want the fresh session %s", got, err, fresh.ID)
+		}
+	})
+}

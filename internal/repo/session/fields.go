@@ -43,6 +43,12 @@ func applyUpdate(sess *models.Session, u *models.UpdateSession) {
 	sess.UpdatedAt = time.Now()
 }
 
+// sessionCutoff is the creation time at or before which a session has
+// expired (sessionMaxAge, which Mongo enforces with its TTL index).
+func sessionCutoff() time.Time {
+	return time.Now().Add(-sessionMaxAge)
+}
+
 func ptrOrNil(s string) *string {
 	if s == "" {
 		return nil
