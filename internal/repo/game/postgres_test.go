@@ -337,3 +337,31 @@ func TestPostgresStore_RemovePlayerFromTeam(t *testing.T) {
 		t.Errorf("still on team after remove")
 	}
 }
+
+func TestPostgresStore_SetPlayerAsHost_ThenPlayerIsHost(t *testing.T) {
+	store := newPostgresFixture(t)
+	g, _ := store.New("ABCD", makeScript(), false)
+	_ = store.AddPlayer(g.ID, "user-1", "Alice")
+	if store.HasHost(g.ID) {
+		t.Fatal("HasHost = true before SetPlayerAsHost")
+	}
+	if err := store.SetPlayerAsHost(g.ID, "user-1"); err != nil {
+		t.Fatalf("SetPlayerAsHost: %v", err)
+	}
+	if !store.HasHost(g.ID) || !store.PlayerIsHost(g.ID, "user-1") {
+		t.Error("SetPlayerAsHost did not take effect")
+	}
+}
+
+func TestPostgresStore_UnsetHost(t *testing.T) {
+	store := newPostgresFixture(t)
+	g, _ := store.New("ABCD", makeScript(), false)
+	_ = store.AddPlayer(g.ID, "user-1", "Alice")
+	_ = store.SetPlayerAsHost(g.ID, "user-1")
+	if err := store.UnsetHost(g.ID); err != nil {
+		t.Fatalf("UnsetHost: %v", err)
+	}
+	if store.HasHost(g.ID) {
+		t.Error("HasHost = true after UnsetHost")
+	}
+}

@@ -40,8 +40,7 @@ type PostgresStore struct {
 	publisher events.Publisher
 }
 
-// TODO(postgres): reinstate after all Storer methods land in Task 7.
-// var _ Storer = (*PostgresStore)(nil)
+var _ Storer = (*PostgresStore)(nil)
 
 func NewPostgresStore(ctx context.Context, uri string, locks lock.Manager, publisher events.Publisher) (*PostgresStore, error) {
 	if uri == "" {
