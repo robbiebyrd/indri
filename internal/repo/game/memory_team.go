@@ -73,8 +73,7 @@ func (s *MemoryStore) RemovePlayerFromTeam(id string, userId string) error {
 
 func (s *MemoryStore) ChangePlayerTeam(id string, teamId string, userId string) error {
 	return s.Mutate(id, func(g *models.Game) error {
-		newTeam, ok := g.Teams[teamId]
-		if !ok {
+		if _, ok := g.Teams[teamId]; !ok {
 			return fmt.Errorf("team %q: %w", teamId, repoErrors.ErrNotFound)
 		}
 		if _, ok := g.Players[userId]; !ok {
@@ -86,6 +85,9 @@ func (s *MemoryStore) ChangePlayerTeam(id string, teamId string, userId string) 
 				g.Teams[tid] = team
 			}
 		}
+		// Read the target team after the removal loop so a player already on
+		// it isn't re-added to a stale copy that still lists them.
+		newTeam := g.Teams[teamId]
 		newTeam.PlayerIDs = append(newTeam.PlayerIDs, userId)
 		g.Teams[teamId] = newTeam
 		return nil

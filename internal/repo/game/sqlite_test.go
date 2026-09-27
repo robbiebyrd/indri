@@ -325,6 +325,10 @@ func TestSQLiteStore_ChangePlayerTeam(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_ChangePlayerTeam_ToCurrentTeam_KeepsOneEntry(t *testing.T) {
+	assertChangePlayerTeamToCurrentTeamKeepsOneEntry(t, newSQLiteFixture(t))
+}
+
 func TestSQLiteStore_RemovePlayerFromTeam(t *testing.T) {
 	store := newSQLiteFixture(t)
 	g, _ := store.New("ABCD", scriptWithTeams(), false)

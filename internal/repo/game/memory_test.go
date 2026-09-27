@@ -283,6 +283,39 @@ func TestMemoryStore_ChangePlayerTeam(t *testing.T) {
 	}
 }
 
+// assertChangePlayerTeamToCurrentTeamKeepsOneEntry checks that moving a player
+// to the team they are already on leaves exactly one entry for them there,
+// rather than listing them twice.
+func assertChangePlayerTeamToCurrentTeamKeepsOneEntry(t *testing.T, store Storer) {
+	t.Helper()
+	g, err := store.New("ABCD", scriptWithTeams(), false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := store.AddPlayer(g.ID, "user-1", "Alice"); err != nil {
+		t.Fatalf("AddPlayer: %v", err)
+	}
+	if err := store.AddPlayerToTeam(g.ID, "red", "user-1"); err != nil {
+		t.Fatalf("AddPlayerToTeam: %v", err)
+	}
+
+	if err := store.ChangePlayerTeam(g.ID, "red", "user-1"); err != nil {
+		t.Fatalf("ChangePlayerTeam: %v", err)
+	}
+
+	got, err := store.Get(g.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if ids := got.Teams["red"].PlayerIDs; len(ids) != 1 || ids[0] != "user-1" {
+		t.Errorf("red PlayerIDs: want [user-1], got %v", ids)
+	}
+}
+
+func TestMemoryStore_ChangePlayerTeam_ToCurrentTeam_KeepsOneEntry(t *testing.T) {
+	assertChangePlayerTeamToCurrentTeamKeepsOneEntry(t, newMemoryFixture(t))
+}
+
 func TestMemoryStore_RemovePlayerFromTeam(t *testing.T) {
 	store := newMemoryFixture(t)
 	g, _ := store.New("ABCD", scriptWithTeams(), false)

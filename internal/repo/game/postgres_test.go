@@ -325,6 +325,10 @@ func TestPostgresStore_ChangePlayerTeam(t *testing.T) {
 	}
 }
 
+func TestPostgresStore_ChangePlayerTeam_ToCurrentTeam_KeepsOneEntry(t *testing.T) {
+	assertChangePlayerTeamToCurrentTeamKeepsOneEntry(t, newPostgresFixture(t))
+}
+
 func TestPostgresStore_RemovePlayerFromTeam(t *testing.T) {
 	store := newPostgresFixture(t)
 	g, _ := store.New("ABCD", scriptWithTeams(), false)
