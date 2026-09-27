@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Indri is a Go backend for real-time, multiplayer, browser/mobile party games. Clients talk to it over a
-single WebSocket endpoint (`/ws`) using JSON messages routed by an `action` field. Game state lives in
+Indri is a Go backend for real-time, multiplayer, browser/mobile party games. Clients talk to it using
+JSON messages routed by an `action` field, over WebSocket (`/ws`, the default) or any other transport
+enabled in `INDRI_TRANSPORTS` (SSE, GraphQL subscriptions, WebRTC — see `docs/PROTOCOL.md`). Game state lives in
 MongoDB; each write computes its own delta in application code and publishes it on an event bus, which
 broadcasts it to everyone in that game. `client/` is a companion Expo/React Native reference client.
 
@@ -54,8 +55,8 @@ harmless.
 
 `Boot` wires a three-layer injector (`internal/injector/`), in strict order:
 
-1. **clients** (`clients.go`) — MongoDB, the melody WebSocket hub, the lock manager, and the change-event
-   publisher. Clients are process-global singletons; `GetClients` returns a cached `*ClientsInjector` on
+1. **clients** (`clients.go`) — MongoDB, the client transport (built from `INDRI_TRANSPORTS` by
+   `transport.go`), the lock manager, and the change-event publisher. Clients are process-global singletons; `GetClients` returns a cached `*ClientsInjector` on
    every call after the first, and accepts overrides for tests. `INDRI_LOCK_BACKEND=redis` is the
    *multi-instance switch*: it flips **both** the lock manager and the event bus to Redis, sharing one
    connection. Otherwise both are in-process.
@@ -64,15 +65,25 @@ harmless.
 3. **services** (`services.go`) — business logic over the repos.
 
 `*injector.Injector` embeds all three, so handlers reach anything via one struct (`h.i.GameService`,
-`h.i.GameRepo`, `h.i.MelodyClient`, …). Every handler takes it in `New(i *injector.Injector)`.
+`h.i.GameRepo`, `h.i.Transport`, …). Every handler takes it in `New(i *injector.Injector)`.
 
-`Serve` runs two goroutines under an `errgroup`: the HTTP/WebSocket server and the change-stream
+`Serve` runs two goroutines under an `errgroup`: the HTTP server and the change-stream
 broadcaster. Both shut down on root-context cancellation (SIGINT/SIGTERM), then `closeResources` drains
-the hub and the Mongo pool.
+the transport and the Mongo pool.
+
+### Transports
+
+Nothing above `internal/transport/` knows the wire protocol: handlers get a `transport.Conn`, services
+broadcast through `transport.Transport`. `ws` (melody — the only melody import), `sse`, `graphqlws`,
+and `webrtc` implement it; `transport.Composite` runs several at once as one. Every transport must
+pass `transporttest.Run`, the shared conformance suite — it pins down what callers depend on (serial
+message delivery per connection, exactly-once `Disconnect` with `IsClosed()` already true, queued
+writes flushed on a server-side close). See `docs/ARCHITECTURE.md` for the invariants and how to add
+one. `Conn.Write` is text; `Conn.WriteBinary` is for opaque bytes such as MessagePack.
 
 ### Inbound: message routing
 
-`melody.HandleMessage` → `router.HandleMessage` (`internal/handlers/router/`):
+`Transport.Handle` → `router.HandleMessage` (`internal/handlers/router/`):
 
 1. `utils.DecodeMessageWithAction` unmarshals to `map[string]interface{}`, pulls out `action`, and
    **deletes `action` from the payload** before handing it on.
@@ -80,7 +91,7 @@ the hub and the Mongo pool.
    handler registered under the literal actions `received` or `processed` therefore runs on *every*
    message — that is the intended pre/post hook mechanism. Nothing registers them by default.
 3. `invokeHandler` wraps each call in a `recover()`, converting a panic into an error so a malformed
-   client message can't kill the process or leak the melody session.
+   client message can't kill the process or leak the connection.
 
 Handlers are a flat, ordered `[]Handler` registry (`register.go`) — multiple handlers may share one
 action, and all matching handlers run. `boot.registerHandlers` installs the built-ins; a game adds its
@@ -135,8 +146,8 @@ the repo, because nothing in the database enforces it:
 
 `BroadcastService` offers game, team, player, and global fan-out. Because `sessionId` is the only
 per-connection key the app sets, every targeted send resolves its recipients through the session store
-first and then filters connections on that one key (`broadcastToSessions`). Do not invent new melody
-session keys to filter on — nothing sets them.
+first and then filters connections on that one key (`broadcastToSessions`). Do not invent new
+connection keys to filter on — nothing sets them.
 
 ### Concurrency model
 
@@ -170,7 +181,7 @@ There are **two different values both called `sessionId`**, and confusing them i
 
 | Where | Value | Notes |
 |---|---|---|
-| Melody connection key `sessionId` | `session.ID.Hex()` (Mongo ObjectID) | Server-side targeting key for broadcasts. Never sent to clients. |
+| Connection key `sessionId` | `session.ID.Hex()` (Mongo ObjectID) | Server-side targeting key for broadcasts. Never sent to clients. |
 | JSON field `sessionId` on the wire | `session.Token` (256-bit hex) | Unguessable bearer token. Client echoes it back in a `reconnect`. |
 
 `login` and `reconnect` are the only places that call `SetKey`, and the only key they set is `sessionId`.
@@ -200,8 +211,8 @@ teams, and the initial stage/scenes. It is loaded once at boot from `-script` an
 
 1. Create `example/<game>/server/handlers/<action>/handler.go` with a `Handler` struct holding
    `*injector.Injector`, a `New(i)` constructor, and
-   `Handle(s *melody.Session, decodedMsg map[string]interface{}) error`.
-2. Resolve the caller: `connection.NewService(s, h.i.MelodyClient).GetKeyAsString("sessionId")` →
+   `Handle(s transport.Conn, decodedMsg map[string]interface{}) error`.
+2. Resolve the caller: `connection.NewService(s, h.i.Transport).GetKeyAsString("sessionId")` →
    `h.i.SessionService.Get(...)` → `GetGameIDAndTeamID(...)`.
 3. Validate the move against the current game state, then write through `h.i.GameRepo.Mutate` (or
    `UpdateField` for a single independent field). Do **not** write the response yourself for state

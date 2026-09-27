@@ -1,13 +1,104 @@
-# Indri WebSocket protocol
+# Indri protocol
 
-All traffic flows over a single endpoint: `ws://<host>:<port>/ws` (default `localhost:5002`).
+The messages below are the same on every transport; only the framing differs (see
+[Transports](#transports)). By default the server speaks WebSocket at `ws://<host>:<port>/ws`
+(default `localhost:5002`); `INDRI_TRANSPORTS` can enable others alongside or instead of it.
 
 Every message is a JSON object. Client→server messages **must** carry a string `action` field; the
 router uses it to pick handlers and removes it from the payload before the handler sees it.
 
-The upgrade is origin-checked (`internal/clients/melody/client.go`). Requests with no `Origin` header
+Every transport is origin-checked (`internal/transport/origin.go`). Requests with no `Origin` header
 (native apps, CLI tools, server-to-server) are always allowed; browser requests are allowed only if
 their origin appears in `INDRI_ALLOWED_ORIGINS`. An empty allowlist rejects all cross-origin browsers.
+The HTTP-based endpoints also answer CORS preflights for allowed origins.
+
+---
+
+## Transports
+
+Server messages are **text** (JSON) or **binary** (opaque bytes, e.g. MessagePack); each transport
+below says how it tells them apart. Client messages are one JSON object each.
+
+### `ws` — WebSocket
+
+`GET /ws` upgrades to a WebSocket. Text frames carry text messages, binary frames binary ones.
+
+### `sse` — Server-Sent Events + POST
+
+```
+GET  /sse/stream     opens the stream (Content-Type: text/event-stream)
+POST /sse/send       body: one client message; header X-Indri-Connection-Id: <id>
+```
+
+The stream's first event names the connection; everything after it is a server message:
+
+```
+event: connected
+data: <connection id: 64 hex chars>
+
+data: {"stage":{"currentScene":"login"}}
+
+event: binary
+data: <base64>
+
+: ping
+```
+
+A message containing newlines spans several `data:` lines, rejoined with `\n` per the SSE spec.
+`: ping` comments arrive every `INDRI_WS_PING_PERIOD` seconds; ignore them.
+
+`POST /sse/send` answers `204` after the message has been handled, so a client that waits for each
+response before sending the next keeps its messages in order. `404` means the connection is unknown or
+closed: reconnect. `413` means the body exceeded `INDRI_WS_MAX_MESSAGE_SIZE`.
+
+**Treat the connection ID like the session token**: anyone holding it can send as that connection.
+
+### `graphqlws` — GraphQL subscriptions
+
+`GET /graphql` upgrades to a WebSocket that must negotiate the `graphql-transport-ws` subprotocol.
+This is GraphQL *framing* only — the server executes no queries and ignores the query text.
+
+```jsonc
+→ {"type": "connection_init"}
+← {"type": "connection_ack"}
+
+// Opens the server→client stream; the connection counts as connected from here.
+→ {"id": "events", "type": "subscribe",
+   "payload": {"operationName": "IndriEvents", "query": "subscription IndriEvents { indriEvents }"}}
+← {"id": "events", "type": "next", "payload": {"data": {"indriEvents": {"text": "{\"stage\":…}"}}}}
+← {"id": "events", "type": "next", "payload": {"data": {"indriEvents": {"b64": "<base64>"}}}}
+
+// Each client message is its own Send operation, completed once handled.
+→ {"id": "s1", "type": "subscribe",
+   "payload": {"operationName": "Send", "query": "mutation Send($message: String!) { send(message: $message) }",
+               "variables": {"message": "{\"action\":\"refresh\"}"}}}
+← {"id": "s1", "type": "complete"}
+```
+
+`ping` is answered with `pong`. A `Send` before `IndriEvents`, or an unknown operation, gets an
+`error` message for that id. Completing `events` disconnects. Protocol violations close the socket:
+`4400` invalid message, `4401` subscribe before `connection_ack`, `4406` subprotocol not offered,
+`4408` no `connection_init` in time, `4409` subscription id already in use, `4429` duplicate
+`connection_init`.
+
+### `webrtc` — data channels
+
+1. Create a peer connection, then an ordered data channel (the default), **then** the offer.
+2. Wait for ICE gathering to complete — signaling is a single exchange, with no trickle ICE.
+3. `POST /webrtc/offer` with the offer as `{"type": "offer", "sdp": "…"}`; the response is the
+   answer in the same shape, candidates included. Apply it.
+
+Once the data channel opens, string messages are text and binary messages are binary, both ways.
+The offer endpoint answers `503` when `INDRI_WEBRTC_MAX_PEERS` is reached, and a peer whose data
+channel hasn't opened within 15s of the answer is dropped.
+
+### Load balancers
+
+`ws` and `graphqlws` keep each client on one socket. `sse` splits a client across a stream and
+separate POSTs, and `webrtc` needs ICE traffic to reach the instance that answered the offer, so
+behind a load balancer with several instances **both need sticky sessions by client IP** (there are
+no cookies to pin on). An SSE send that lands on the wrong instance gets `404`, and the client
+reconnects.
 
 ---
 

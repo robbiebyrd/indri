@@ -134,8 +134,9 @@ Single-instance deployments use in-process locks and an in-process delta bus. Se
 ```
 cmd/server/          entry point
 internal/
-  clients/           MongoDB, Redis, melody WebSocket hub
-  entrypoints/       HTTP server, WebSocket lifecycle
+  clients/           MongoDB, Redis
+  transport/         client transports: WebSocket, SSE, GraphQL subscriptions, WebRTC
+  entrypoints/       HTTP server, connection lifecycle
   handlers/          action router + one package per built-in action
   services/          game, stage, broadcast, auth, session, mutation, lock, events
   repo/              MongoDB stores, environment config, script loader

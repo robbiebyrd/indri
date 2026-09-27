@@ -23,7 +23,7 @@ cd client && pnpm install && pnpm run typecheck && pnpm test
 
 Four things trip up newcomers:
 
-1. **`sessionId` means two different things.** On the wire it is a secret bearer token; on the melody
+1. **`sessionId` means two different things.** On the wire it is a secret bearer token; on the server-side
    connection it is the session's Mongo ObjectID. Never send the latter or trust the former from
    anywhere but the caller's own connection.
 2. **A write that doesn't publish a change event is invisible to players.** Deltas are computed in

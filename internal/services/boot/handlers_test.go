@@ -15,7 +15,7 @@ import (
 const actionsDir = "../../handlers/actions"
 
 // registeredActions runs the real registration against an injector carrying
-// only a melody hub. Handler constructors just store the injector, and
+// only a WebSocket transport. Handler constructors just store the injector, and
 // registerHandlers dereferences nothing else, so no database is needed. It
 // returns each action mapped to the base package name of the handler bound to
 // it, so tests can check not just presence but correct wiring.

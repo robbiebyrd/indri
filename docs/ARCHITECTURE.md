@@ -7,11 +7,11 @@ day-to-day commands and conventions see [../CLAUDE.md](../CLAUDE.md).
 
 ```
 browser / native client
-        │  ws://host:5002/ws
+        │  /ws, /sse/*, /graphql, /webrtc/offer   (whichever INDRI_TRANSPORTS enables)
         ▼
-internal/entrypoints/http/server.go      net/http mux, timeouts, graceful shutdown
+internal/entrypoints/http.go             net/http mux, timeouts, graceful shutdown
         ▼
-internal/clients/melody/client.go        WebSocket hub: ping/pong, size limits, origin check
+internal/transport/<kind>/               one Transport per wire protocol; Composite runs several at once
         ▼
 internal/services/boot/handlers.go       HandleConnect / HandleMessage / HandleDisconnect / HandleError
         ▼
@@ -34,7 +34,7 @@ internal/repo/*                          MongoDB stores
         │                   ▼
         │       internal/services/boot/monitor.go    Subscribe, fan out per game
         │                   ▼
-        └────── internal/services/broadcast/         melody BroadcastFilter → clients
+        └────── internal/services/broadcast/         Transport.BroadcastFilter → clients
 ```
 
 Note the delta path is driven by the **application**, not by MongoDB. Because the server is the sole
@@ -55,7 +55,7 @@ Three-stage construction, each stage depending only on the previous one.
 
 | File | Builds |
 |---|---|
-| `clients.go` | Mongo client, melody hub, lock manager, change-event publisher. Cached process-globally; all four are injectable for tests. |
+| `clients.go` | Mongo client, client transport (built from `INDRI_TRANSPORTS` by `transport.go`), lock manager, change-event publisher. Cached process-globally; all four are injectable for tests. |
 | `repos.go` | `game`, `user`, `session` Mongo stores (each creates its indexes in `NewStore`) plus the script store. |
 | `services.go` | game, broadcast, auth, user, session services. |
 
@@ -68,11 +68,44 @@ the event bus are in-process.
 
 ### `internal/entrypoints`
 
-- `http/server.go` — the `/ws` route and the HTTP server, with read/write/idle timeouts. On context
-  cancellation it closes the melody hub *first* (so hijacked connections return) and then drains the
-  HTTP server.
+- `http.go` — mounts the transport's routes and runs the HTTP server, with read/write/idle timeouts.
+  On context cancellation it closes the transport *first* (so hijacked sockets and SSE streams
+  return) and then drains the HTTP server.
 - `websocket.go` — `HandleConnect` (sends the login scene) and `HandleDisconnect` (marks the player
-  disconnected in the game, closes the socket if we still own it).
+  disconnected in the game, closes the connection if we still own it). Despite the file name, both
+  run for every transport.
+
+### `internal/transport`
+
+Everything above this package sees one `transport.Transport` (accepts connections, broadcasts, mounts
+routes) and `transport.Conn` (one client: key/value state, `Write` for text, `WriteBinary` for bytes).
+
+| Package | Wire protocol |
+|---|---|
+| `ws` | WebSocket via melody — the only file that imports melody. |
+| `sse` | Server-Sent Events down, HTTP POST up, correlated by a connection ID. |
+| `graphqlws` | `graphql-transport-ws` subprotocol over one WebSocket; framing only, no schema. |
+| `webrtc` | Data channels via pion, signaled by one `POST /webrtc/offer`. |
+
+`Composite` runs several at once as a single `Transport`; `injector/transport.go` builds it from
+`INDRI_TRANSPORTS` and rejects unknown or duplicate names.
+
+The non-melody transports share `QueuedConn` and `Hub` (`hub.go`), which enforce what callers rely on:
+
+- **One writer per connection.** Writes queue; a single goroutine owns the socket/stream. A full
+  queue returns `ErrBufferFull` instead of stalling a broadcast.
+- **Serial delivery.** A connection's messages reach handlers one at a time, in order — `login`
+  does check-then-set on connection state.
+- **Exactly-once `Disconnect`, only after `Connect`**, with `IsClosed()` already true when it fires.
+  `kick` closes a conn itself and the transport then reports the same close.
+- **Queued writes flush on server close**, so a kick's `{"disconnected": true}` still arrives.
+- **Connection IDs are bearer credentials** (256-bit, `crypto/rand`, never logged).
+
+`origin.go` holds the origin allowlist and `Route`, which mounts an HTTP route behind it with CORS.
+
+To add a transport: implement `Transport` (embedding `*Hub` gets you everything except `Register`),
+pass `transporttest.Run` — the conformance suite every transport runs — and add a case to
+`injector/transport.go`.
 
 ### `internal/handlers`
 
@@ -94,7 +127,7 @@ the event bus are in-process.
 | `game` | Game lifecycle, random code generation, `Sanitize`, player connect/disconnect. |
 | `stage` | Scene CRUD, scene ordering, loading scenes from the script. |
 | `broadcast` | Fan-out to a game, a team, specific players, or everyone. Targeted sends resolve recipients via the session store, then filter connections on the `sessionId` key. |
-| `connection` | Thin wrapper over one melody session: read/write, typed key access. |
+| `connection` | Thin wrapper over one `transport.Conn`: read/write, typed key access. |
 | `authentication` | Password check + session issuance (bcrypt via `services/utils/password.go`). |
 | `session`, `user` | Repo-backed lookups and updates. |
 | `utils` | `HashPassword`/`CheckPasswordHash`, `GenerateToken`. |
