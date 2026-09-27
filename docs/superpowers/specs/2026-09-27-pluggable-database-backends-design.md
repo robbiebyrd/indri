@@ -1,7 +1,7 @@
 # Pluggable Database Backends Design
 
 **Date:** 2026-09-27  
-**Status:** Draft
+**Status:** Reviewed
 
 ## Overview
 
@@ -40,7 +40,7 @@ ID string `bson:"_id" json:"id"`
 
 - `bson:` struct tags are kept — MongoDB stores string UUIDs under `_id` without issue, and the go-mongox ORM uses the tags for field name mapping.
 - The `go.mongodb.org/mongo-driver` package is no longer imported in `internal/models/`.
-- Each backend's constructor generates a UUID v4 when creating new records (`google/uuid` or stdlib `crypto/rand` + `encoding/hex`).
+- The `mongox:"autoID"` struct tag, which instructs go-mongox to auto-populate `bson.ObjectID`, must be removed from all model ID fields. UUID generation moves into each `MongoStore.New*()` constructor explicitly — generate a UUID v4 (`google/uuid` or `crypto/rand` + `encoding/hex`) and assign it to `ID` before inserting.
 - No migration path for existing data is in scope; this is a clean break.
 
 ### 2. Shared Error Sentinel (`internal/repo/errors.go`)
@@ -59,7 +59,10 @@ Callers never inspect driver-specific error types. Each adapter wraps its own dr
 
 ### 3. Repo Layer Structure
 
-The Storer interfaces in each `interface.go` are unchanged — they already define the contract.  
+The Storer interfaces in each `interface.go` define the contract. The only required change to these files is the compile-time assertion: each currently reads `var _ Storer = (*Store)(nil)`; after the rename to `MongoStore` this line must become `var _ Storer = (*MongoStore)(nil)`. Additional assertions are added for each new implementation (e.g., `var _ Storer = (*MemoryStore)(nil)`).
+
+The `GetIDHex` method on `game.Storer` has a MongoDB-specific name — it returns the hex-encoded string ID for a game code lookup. Non-Mongo backends implement it by returning the UUID string directly (the method is a conceptual "get ID as a string", and UUIDs are already strings). The method name is kept as-is to avoid wider interface churn; implementers should treat it as "get string ID by code."
+
 Each repo package gains multiple named implementations:
 
 ```
@@ -109,27 +112,17 @@ The `mutation.Run()` service layer (optimistic retry loop + lock manager) is alr
 
 ### 4. Config (`internal/repo/env/env.go` + `server.json`)
 
-**`server.json`** gains a top-level `database` block:
+**`server.json` — flat keys only.** The existing env loader (`applyJSONConfigToEnv`) does a flat `raw[jsonKey]` lookup. Nested JSON objects are not supported. All new database config keys must be added at the top level, consistent with every existing field:
 
 ```json
 {
-  "database": {
-    "backend": "mongodb",
-    "mongodb": {
-      "uri": "mongodb://localhost:27017",
-      "database": "indri",
-      "authDatabase": "admin"
-    },
-    "sqlite": {
-      "path": "./indri.db"
-    },
-    "postgres": {
-      "uri": "postgres://user:pass@localhost/indri?sslmode=disable"
-    },
-    "memory": {}
-  }
+  "dbBackend":    "mongodb",
+  "sqlitePath":   "./indri.db",
+  "postgresUri":  "postgres://user:pass@localhost/indri?sslmode=disable"
 }
 ```
+
+Existing top-level keys (`mongoUri`, `mongoDatabase`, `mongoAuthDatabase`) are unchanged.
 
 **`env.go`** adds:
 
@@ -157,7 +150,16 @@ UserRepo    userRepo.Storer
 SessionRepo sessionRepo.Storer
 ```
 
-**`clients.go`** — `MongoDBClient` becomes optional (nil when backend ≠ mongodb). No new generic DB client abstraction is needed; each backend constructor receives only what it needs.
+**`clients.go`** — `MongoDBClient` becomes optional. `GetClients()` currently always calls `mongoClient.New(ctx)`. The guard must be added:
+
+```go
+if env.DBBackend == "mongodb" {
+    clients.MongoDBClient, err = mongodbClient.New(ctx)
+    ...
+}
+```
+
+No new generic DB client abstraction is needed; each backend constructor receives only what it needs.
 
 **`repos.go`** — `GetRepos()` selects the implementation:
 
@@ -176,6 +178,8 @@ default:
 }
 ```
 
+`ScriptRepo` is file-based and is not database-backed; its construction (`scriptRepo.NewStore(scriptFilePath)`) is unchanged regardless of backend.
+
 Any service currently typed to `*gameRepo.Store` is updated to `gameRepo.Storer`; `go build ./...` surfaces every callsite.
 
 ### 6. Error Handling
@@ -186,14 +190,26 @@ Any service currently typed to `*gameRepo.Store` is updated to `gameRepo.Storer`
 
 ### 7. Testing
 
-Each adapter gets its own test file (`mongo_test.go`, `memory_test.go`, `sqlite_test.go`, `postgres_test.go`). A shared helper runs the full `Storer` contract against any implementation:
+Each adapter gets its own test file (`mongo_test.go`, `memory_test.go`, `sqlite_test.go`, `postgres_test.go`). A shared contract helper in the package avoids duplicating the 35-method game store test suite:
 
 ```go
-// internal/repo/game/testing.go (build tag: testing)
-func RunStorerTests(t *testing.T, s game.Storer) { ... }
+// internal/repo/game/storer_contract_test.go
+// Normal _test.go file — no special build tag needed.
+func runStorerContract(t *testing.T, s game.Storer) { ... }
 ```
 
-This avoids duplicating the 35-method game store test suite across four backends. The in-memory backend is the default for unit tests (no external deps); MongoDB tests run only when `INDRI_MONGO_URI` is set (integration tag).
+Each `*_test.go` calls `runStorerContract(t, store)` with its own implementation. The in-memory backend is the default for unit tests (no external deps); MongoDB and Postgres tests guard on environment variables:
+
+```go
+func TestMongoStore(t *testing.T) {
+    if os.Getenv("INDRI_MONGO_URI") == "" {
+        t.Skip("INDRI_MONGO_URI not set")
+    }
+    ...
+}
+```
+
+`internal/repo/utils/bson.go` (`CreateBSONDoc`) is MongoDB-specific; it moves into the `internal/repo/game/` package and is only referenced from `mongo*.go` files. Non-Mongo backends do not import it.
 
 ---
 
@@ -222,11 +238,11 @@ This avoids duplicating the 35-method game store test suite across four backends
 | `internal/injector/injector.go` | Repo fields → interfaces |
 | `internal/injector/clients.go` | `MongoDBClient` optional |
 | `internal/injector/repos.go` | Backend switch in `GetRepos()` |
-| `example/server.json` | Add `database` block |
+| `example/server.json` | Add flat `dbBackend`, `sqlitePath`, `postgresUri` keys |
 | Services holding `*gameRepo.Store` | Update to `gameRepo.Storer` |
 
 ---
 
 ## Open Questions
 
-None — all key decisions were made during the design session.
+None — all key decisions were made during the design session. All issues identified in spec review have been resolved above.
