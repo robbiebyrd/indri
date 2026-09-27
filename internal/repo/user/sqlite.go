@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	sqliteClient "github.com/robbiebyrd/indri/internal/clients/sqlite"
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	"github.com/robbiebyrd/indri/internal/repo/ids"
@@ -79,7 +79,7 @@ func (s *SQLiteStore) New(c models.CreateUser) (*models.User, error) {
 		u.ID, u.Email, pwVal, blob,
 	)
 	if err != nil {
-		if isSQLiteConstraintUnique(err) {
+		if sqliteClient.IsUniqueViolation(err) {
 			return nil, fmt.Errorf("email %q: %w", c.Email, repoErrors.ErrDuplicate)
 		}
 		return nil, fmt.Errorf("insert user: %w", err)
@@ -205,21 +205,12 @@ func (s *SQLiteStore) Update(u *models.UpdateUser) error {
 		existing.Email, pwVal, blob, u.ID,
 	)
 	if err != nil {
-		if isSQLiteConstraintUnique(err) {
+		if sqliteClient.IsUniqueViolation(err) {
 			return fmt.Errorf("email %q: %w", u.Email, repoErrors.ErrDuplicate)
 		}
 		return fmt.Errorf("update user: %w", err)
 	}
 	return nil
-}
-
-// isSQLiteConstraintUnique detects a UNIQUE constraint violation from modernc.org/sqlite.
-// The user package defines its own copy because this is a different package from game/.
-func isSQLiteConstraintUnique(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 // matchUserField is defined in memory.go (same package) — do NOT redeclare here.

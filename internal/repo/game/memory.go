@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"time"
 
@@ -50,12 +49,14 @@ func NewMemoryStore(ctx context.Context, locks lock.Manager, publisher events.Pu
 }
 
 // copyGame returns a deep copy sharing nothing mutable with g: every map,
-// slice and pointer-to-map reachable from the game is re-created. The store
-// hands copies to callers and to Mutate's apply, and keeps a copy of what it
-// saves, so no one can edit stored state outside the lock, and a failed or
-// aborted apply leaves it untouched. It copies field by field rather than
-// through JSON because a JSON round trip would drop the json:"-" fields and
-// turn empty-but-non-nil maps (omitempty) into nil ones that callers write to.
+// slice and pointer-to-map in the game's structure is re-created, and data
+// maps are copied on the assumption that they hold JSON-shaped values (see
+// deepCopyValue). The store hands copies to callers and to Mutate's apply,
+// and keeps a copy of what it saves, so no one can edit stored state outside
+// the lock, and a failed or aborted apply leaves it untouched. It copies
+// field by field rather than through JSON because a JSON round trip would
+// drop the json:"-" fields and turn empty-but-non-nil maps (omitempty) into
+// nil ones that callers write to.
 func copyGame(g *models.Game) *models.Game {
 	if g == nil {
 		return nil
@@ -94,11 +95,11 @@ func copyStage(st models.Stage) models.Stage {
 	if st.Scenes != nil {
 		out.Scenes = make(map[string]models.Scene, len(st.Scenes))
 		for k, v := range st.Scenes {
-			out.Scenes[k] = models.Scene{
-				PublicData:  copyDataPtr(v.PublicData),
-				PrivateData: copyDataPtr(v.PrivateData),
-				PlayerData:  copyPlayerDataPtr(v.PlayerData),
-			}
+			sc := v
+			sc.PublicData = copyDataPtr(v.PublicData)
+			sc.PrivateData = copyDataPtr(v.PrivateData)
+			sc.PlayerData = copyPlayerDataPtr(v.PlayerData)
+			out.Scenes[k] = sc
 		}
 	}
 	out.PublicData = copyData(st.PublicData)
@@ -157,9 +158,9 @@ func deepCopyMap(src map[string]interface{}) map[string]interface{} {
 	return dst
 }
 
-// deepCopyValue copies the containers a data value can hold. JSON-decoded
-// values (maps and []interface{}) take the fast path; any other map or slice
-// a Go caller stored is copied by reflection so it is not shared either.
+// deepCopyValue copies a data value. Data maps hold JSON-shaped values
+// (maps, []interface{} and scalars) — the form UpdateField/DeleteField leave
+// them in and clients send them in — so those are the only containers copied.
 func deepCopyValue(v interface{}) interface{} {
 	switch t := v.(type) {
 	case map[string]interface{}:
@@ -170,41 +171,9 @@ func deepCopyValue(v interface{}) interface{} {
 			out[i] = deepCopyValue(item)
 		}
 		return out
-	}
-
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.Map:
-		if rv.IsNil() {
-			return v
-		}
-		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
-		iter := rv.MapRange()
-		for iter.Next() {
-			out.SetMapIndex(iter.Key(), copiedElem(iter.Value(), rv.Type().Elem()))
-		}
-		return out.Interface()
-	case reflect.Slice:
-		if rv.IsNil() {
-			return v
-		}
-		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
-		for i := 0; i < rv.Len(); i++ {
-			out.Index(i).Set(copiedElem(rv.Index(i), rv.Type().Elem()))
-		}
-		return out.Interface()
 	default:
 		return v
 	}
-}
-
-// copiedElem deep-copies one map or slice element, keeping its static type.
-func copiedElem(v reflect.Value, elemType reflect.Type) reflect.Value {
-	c := deepCopyValue(v.Interface())
-	if c == nil {
-		return reflect.Zero(elemType)
-	}
-	return reflect.ValueOf(c)
 }
 
 func (s *MemoryStore) New(code string, script *models.Script, privateGame bool) (*models.Game, error) {

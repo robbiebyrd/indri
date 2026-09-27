@@ -6,6 +6,7 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -76,23 +77,35 @@ func Open(dsn string) (*sql.DB, error) {
 
 // migrateSessionCreatedAt gives a sessions table created before created_at
 // existed that column. created_at (Unix nanoseconds) backs session expiry.
-// SQLite has no ADD COLUMN IF NOT EXISTS, so the column is looked up first.
 // Sessions that predate the column are stamped with the migration time, so
 // they get a full lifetime instead of expiring at once.
+//
+// The ALTER and the stamp commit together (SQLite DDL is transactional), so
+// a crash cannot leave the column added but its rows unstamped. SQLite has
+// no ADD COLUMN IF NOT EXISTS, so "duplicate column name" means the column
+// is already there: a current schema, or another process migrated first.
 func migrateSessionCreatedAt(db *sql.DB) error {
-	var present int
-	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'created_at'`,
-	).Scan(&present); err != nil {
-		return fmt.Errorf("inspecting sessions: %w", err)
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("adding sessions.created_at: %w", err)
 	}
+	defer func() { _ = tx.Rollback() }()
 
-	if present == 0 {
-		if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+	if _, err := tx.Exec(`ALTER TABLE sessions ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("adding sessions.created_at: %w", err)
 		}
-		if _, err := db.Exec(`UPDATE sessions SET created_at = ?`, time.Now().UnixNano()); err != nil {
+		// Release the transaction now: the pool has one connection, which
+		// the index statement below needs.
+		if err := tx.Rollback(); err != nil {
+			return fmt.Errorf("adding sessions.created_at: %w", err)
+		}
+	} else {
+		if _, err := tx.Exec(`UPDATE sessions SET created_at = ?`, time.Now().UnixNano()); err != nil {
 			return fmt.Errorf("stamping existing sessions: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("adding sessions.created_at: %w", err)
 		}
 	}
 
@@ -101,4 +114,10 @@ func migrateSessionCreatedAt(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+// IsUniqueViolation reports whether err is a UNIQUE constraint violation.
+// modernc.org/sqlite reports one only through its message.
+func IsUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

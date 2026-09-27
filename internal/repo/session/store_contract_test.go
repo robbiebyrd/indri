@@ -152,8 +152,8 @@ func TestStore_UpdateRefusesAUserWhoHasASession(t *testing.T) {
 			t.Fatalf("New b: %v", err)
 		}
 
-		if err := store.Update(sa.ID, &models.UpdateSession{UserID: b}); err == nil {
-			t.Fatal("Update moved a session onto a user who already has one")
+		if err := store.Update(sa.ID, &models.UpdateSession{UserID: b}); !errors.Is(err, repoErrors.ErrDuplicate) {
+			t.Fatalf("Update onto a user who already has a session = %v, want repo.ErrDuplicate", err)
 		}
 
 		if found, err := store.FindFirst("userId", b); err != nil || found.ID != sb.ID {

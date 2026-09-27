@@ -247,6 +247,9 @@ func (s *PostgresStore) Update(id string, u *models.UpdateSession) error {
 		sess.ID, userID, data,
 	)
 	if err != nil {
+		if isPgDuplicateKey(err) {
+			return fmt.Errorf("user %q already has a session: %w", userID, repoErrors.ErrDuplicate)
+		}
 		return fmt.Errorf("updating session %q: %w", id, err)
 	}
 	// The session can be deleted between the Get above and this UPDATE.

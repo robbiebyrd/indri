@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	sqliteClient "github.com/robbiebyrd/indri/internal/clients/sqlite"
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	"github.com/robbiebyrd/indri/internal/services/events"
@@ -89,7 +89,7 @@ func (s *SQLiteStore) New(code string, script *models.Script, privateGame bool) 
 		g.ID, code, g.Version, private, blob,
 	)
 	if err != nil {
-		if isSQLiteConstraintUnique(err) {
+		if sqliteClient.IsUniqueViolation(err) {
 			return nil, fmt.Errorf("game with code %q: %w", code, repoErrors.ErrDuplicate)
 		}
 		return nil, fmt.Errorf("insert game: %w", err)
@@ -187,16 +187,6 @@ func (s *SQLiteStore) FindOpen(limit int) ([]*models.Game, error) {
 		out = append(out, g)
 	}
 	return out, rows.Err()
-}
-
-// isSQLiteConstraintUnique reports whether err is a SQLite UNIQUE constraint
-// violation. modernc.org/sqlite surfaces this as an error message containing
-// "UNIQUE constraint failed".
-func isSQLiteConstraintUnique(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 // saveWithVersion performs the version-fenced UPDATE. Returns (true, nil) on

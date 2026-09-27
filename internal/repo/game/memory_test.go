@@ -229,31 +229,6 @@ func TestMemoryStore_ConcurrentSceneWritesAndReadsDoNotRace(t *testing.T) {
 	wg.Wait()
 }
 
-// TestCopyGame_CopiesNonJSONContainers covers data values a Go caller stored
-// directly (not decoded from JSON): they must not be shared with the copy.
-func TestCopyGame_CopiesNonJSONContainers(t *testing.T) {
-	g := &models.Game{PublicData: map[string]interface{}{
-		"tags":   []string{"a"},
-		"counts": map[string]int{"x": 1},
-		"list":   []interface{}{nil, map[string]interface{}{"k": "v"}},
-	}}
-
-	c := copyGame(g)
-	c.PublicData["tags"].([]string)[0] = "changed"
-	c.PublicData["counts"].(map[string]int)["x"] = 2
-	c.PublicData["list"].([]interface{})[1].(map[string]interface{})["k"] = "changed"
-
-	if got := g.PublicData["tags"].([]string)[0]; got != "a" {
-		t.Errorf("tags[0] = %q, want a", got)
-	}
-	if got := g.PublicData["counts"].(map[string]int)["x"]; got != 1 {
-		t.Errorf("counts.x = %d, want 1", got)
-	}
-	if got := g.PublicData["list"].([]interface{})[1].(map[string]interface{})["k"]; got != "v" {
-		t.Errorf("list[1].k = %v, want v", got)
-	}
-}
-
 // readingPublisher reads the game back while publishing, as the broadcaster
 // does when a change asks for a keyframe.
 type readingPublisher struct {
