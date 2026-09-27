@@ -94,11 +94,11 @@ func copyStage(st models.Stage) models.Stage {
 	if st.Scenes != nil {
 		out.Scenes = make(map[string]models.Scene, len(st.Scenes))
 		for k, v := range st.Scenes {
-			out.Scenes[k] = models.Scene{
-				PublicData:  copyDataPtr(v.PublicData),
-				PrivateData: copyDataPtr(v.PrivateData),
-				PlayerData:  copyPlayerDataPtr(v.PlayerData),
-			}
+			sc := v
+			sc.PublicData = copyDataPtr(v.PublicData)
+			sc.PrivateData = copyDataPtr(v.PrivateData)
+			sc.PlayerData = copyPlayerDataPtr(v.PlayerData)
+			out.Scenes[k] = sc
 		}
 	}
 	out.PublicData = copyData(st.PublicData)
