@@ -31,8 +31,7 @@ type MemoryStore struct {
 	codes map[string]string       // code -> id (unique)
 }
 
-// TODO(memory): reinstate after all Storer methods land in Task 11.
-// var _ Storer = (*MemoryStore)(nil)
+var _ Storer = (*MemoryStore)(nil)
 
 func NewMemoryStore(ctx context.Context, locks lock.Manager, publisher events.Publisher) (*MemoryStore, error) {
 	if locks == nil {
