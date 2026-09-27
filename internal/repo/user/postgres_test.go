@@ -134,3 +134,32 @@ func TestUserPostgresStore_Update_PasswordRoundtrips(t *testing.T) {
 		t.Fatalf("Update: password did not update, got %v", got.Password)
 	}
 }
+
+// TestUserPostgresStore_Update_PreservesPasswordWhenOmitted proves that an
+// Update call which does not set UpdateUser.Password (e.g. only changing
+// Name) leaves the existing password untouched. Password lives in its own
+// column outside the JSONB blob, so a regression here would silently drop
+// every user's password on their next unrelated profile edit, breaking login.
+func TestUserPostgresStore_Update_PreservesPasswordWhenOmitted(t *testing.T) {
+	s := newPostgresUserFixture(t)
+	pw := "original-pw"
+	created, err := s.New(models.CreateUser{Email: "a@b.c", Name: "Alice", Password: &pw})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if err := s.Update(&models.UpdateUser{ID: created.ID, Name: "Alicia"}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got, err := s.Get(created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Name != "Alicia" {
+		t.Fatalf("Update: name did not update, got %q", got.Name)
+	}
+	if got.Password == nil || *got.Password != pw {
+		t.Fatalf("Update: password was not preserved, got %v", got.Password)
+	}
+}
