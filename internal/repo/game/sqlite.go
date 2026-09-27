@@ -21,10 +21,10 @@ import (
 // JSON blob per row. The write path mirrors MemoryStore: read-modify-write with
 // a version fence in the UPDATE WHERE clause.
 type SQLiteStore struct {
-	ctx       context.Context
-	db        *sql.DB
-	locks     lock.Manager
-	publisher events.Publisher
+	ctx     context.Context
+	db      *sql.DB
+	locks   lock.Manager
+	changes changePublisher
 }
 
 // TODO(sqlite): reinstate after all Storer methods land in Task 6.
@@ -43,10 +43,10 @@ func NewSQLiteStore(ctx context.Context, db *sql.DB, locks lock.Manager, publish
 		return nil, errors.New("publisher is required")
 	}
 	return &SQLiteStore{
-		ctx:       ctx,
-		db:        db,
-		locks:     locks,
-		publisher: publisher,
+		ctx:     ctx,
+		db:      db,
+		locks:   locks,
+		changes: changePublisher{ctx: ctx, publisher: publisher},
 	}, nil
 }
 
@@ -221,39 +221,6 @@ func isSQLiteConstraintUnique(err error) bool {
 	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
-// publishFieldUpdate and publishDiff mirror MemoryStore's methods. They are
-// defined on SQLiteStore because Go methods are not shared between structs.
-func (s *SQLiteStore) publishFieldUpdate(id string, updated map[string]interface{}, removed []string) {
-	if s.publisher == nil {
-		return
-	}
-	updated, removed = events.SanitizeDelta(updated, removed)
-	ev := events.ChangeEvent{
-		ID:            id,
-		OperationType: events.OpUpdate,
-		Timestamp:     time.Now(),
-		Collection:    collectionName,
-		UpdatedFields: updated,
-		RemovedFields: removed,
-	}
-	if !ev.HasChanges() {
-		return
-	}
-	_ = s.publisher.Publish(s.ctx, ev)
-}
-
-func (s *SQLiteStore) publishDiff(id string, before map[string]interface{}, after *models.Game) {
-	if s.publisher == nil {
-		return
-	}
-	afterMap, err := events.ToMap(after)
-	if err != nil {
-		return
-	}
-	updated, removed := events.Diff(before, afterMap)
-	s.publishFieldUpdate(id, updated, removed)
-}
-
 // saveWithVersion performs the version-fenced UPDATE. Returns (true, nil) on
 // success, (false, nil) if the version has drifted (triggering mutation.Run
 // retry), or (false, err) on a hard error.
@@ -347,7 +314,7 @@ func (s *SQLiteStore) Update(id string, upd *models.UpdateGame) error {
 	if !committed {
 		return fmt.Errorf("id %q: %w", id, repoErrors.ErrConflict)
 	}
-	s.publishDiff(id, before, g)
+	s.changes.diff(id, before, g)
 	return nil
 }
 
@@ -372,7 +339,7 @@ func (s *SQLiteStore) UpdateField(id string, key string, value interface{}) erro
 	if !committed {
 		return fmt.Errorf("id %q: %w", id, repoErrors.ErrConflict)
 	}
-	s.publishFieldUpdate(id, map[string]interface{}{key: value}, nil)
+	s.changes.field(id, map[string]interface{}{key: value}, nil)
 	return nil
 }
 
@@ -397,7 +364,7 @@ func (s *SQLiteStore) DeleteField(id string, key string) error {
 	if !committed {
 		return fmt.Errorf("id %q: %w", id, repoErrors.ErrConflict)
 	}
-	s.publishFieldUpdate(id, nil, []string{key})
+	s.changes.field(id, nil, []string{key})
 	return nil
 }
 
@@ -432,7 +399,7 @@ func (s *SQLiteStore) Mutate(id string, apply func(g *models.Game) error) error 
 				return false, err
 			}
 			if committed {
-				s.publishDiff(id, before, g)
+				s.changes.diff(id, before, g)
 			}
 			return committed, nil
 		},

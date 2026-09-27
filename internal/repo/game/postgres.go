@@ -32,10 +32,10 @@ CREATE INDEX IF NOT EXISTS idx_games_private ON games (private);
 // PostgresStore is a PostgreSQL-backed game.Storer. Each game is stored as a
 // JSONB blob alongside indexed scalar columns for efficient lookups.
 type PostgresStore struct {
-	ctx       context.Context
-	db        *sql.DB
-	locks     lock.Manager
-	publisher events.Publisher
+	ctx     context.Context
+	db      *sql.DB
+	locks   lock.Manager
+	changes changePublisher
 }
 
 // TODO(postgres): reinstate after all Storer methods land in Task 7.
@@ -67,10 +67,10 @@ func NewPostgresStore(ctx context.Context, uri string, locks lock.Manager, publi
 	}
 
 	return &PostgresStore{
-		ctx:       ctx,
-		db:        db,
-		locks:     locks,
-		publisher: publisher,
+		ctx:     ctx,
+		db:      db,
+		locks:   locks,
+		changes: changePublisher{ctx: ctx, publisher: publisher},
 	}, nil
 }
 
