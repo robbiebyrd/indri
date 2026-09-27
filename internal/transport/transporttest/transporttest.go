@@ -336,8 +336,18 @@ func Run(t *testing.T, h Harness) {
 		s := start(t, h)
 		c, conn := s.connect(t, h)
 
+		// Kick writes {"disconnected": true} and then closes; the notice
+		// must still reach the client.
+		if err := conn.Write([]byte("bye")); err != nil {
+			t.Fatal(err)
+		}
 		if err := conn.Close(); err != nil {
 			t.Fatal(err)
+		}
+
+		f, err := c.Receive(Timeout)
+		if err != nil || string(f.Data) != "bye" {
+			t.Fatalf("write queued before Close was lost: got %q, %v", f.Data, err)
 		}
 
 		if _, err := c.Receive(Timeout); err == nil {
