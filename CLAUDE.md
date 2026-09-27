@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Indri is a Go backend for real-time, multiplayer, browser/mobile party games. Clients talk to it using
 JSON messages routed by an `action` field, over WebSocket (`/ws`, the default) or any other transport
 enabled in `INDRI_TRANSPORTS` (SSE, GraphQL subscriptions, WebRTC — see `docs/PROTOCOL.md`). Game state lives in
-MongoDB; each write computes its own delta in application code and publishes it on an event bus, which
-broadcasts it to everyone in that game. `client/` is a companion Expo/React Native reference client.
+the database chosen by `INDRI_DB_BACKEND` (MongoDB by default; also memory, SQLite, PostgreSQL); each
+write computes its own delta in application code and publishes it on an event bus, which broadcasts it
+to everyone in that game. `client/` is a companion Expo/React Native reference client.
 
 Indri is a *framework*: the generic actions (register/login/join/create/…) ship in `internal/`, and a
 concrete game adds its own action handlers plus a JSON "script". `example/tictactoe/` is the worked
@@ -56,13 +57,14 @@ harmless.
 
 `Boot` wires a three-layer injector (`internal/injector/`), in strict order:
 
-1. **clients** (`clients.go`) — MongoDB, the client transport (built from `INDRI_TRANSPORTS` by
-   `transport.go`), the lock manager, and the change-event publisher. Clients are process-global singletons; `GetClients` returns a cached `*ClientsInjector` on
+1. **clients** (`clients.go`) — MongoDB (only for the `mongodb` backend), the client transport (built
+   from `INDRI_TRANSPORTS` by `transport.go`), the lock manager, and the change-event publisher. Clients are process-global singletons; `GetClients` returns a cached `*ClientsInjector` on
    every call after the first, and accepts overrides for tests. `INDRI_LOCK_BACKEND=redis` is the
    *multi-instance switch*: it flips **both** the lock manager and the event bus to Redis, sharing one
    connection. Otherwise both are in-process.
-2. **repos** (`repos.go`) — game/user/session Mongo stores plus the script store (loaded from the JSON
-   file). Stores create their own indexes in `NewStore`.
+2. **repos** (`repos.go`) — game/user/session stores for `INDRI_DB_BACKEND` (`mongodb` default, `memory`,
+   `sqlite`, `postgres`; see "Database backends" in `docs/ARCHITECTURE.md`) plus the script store (loaded
+   from the JSON file). The SQL backends share one `*sql.DB` (`ReposInjector.SQLDB`), closed on shutdown.
 3. **services** (`services.go`) — business logic over the repos.
 
 `*injector.Injector` embeds all three, so handlers reach anything via one struct (`h.i.GameService`,
@@ -70,7 +72,7 @@ harmless.
 
 `Serve` runs two goroutines under an `errgroup`: the HTTP server and the change-stream
 broadcaster. Both shut down on root-context cancellation (SIGINT/SIGTERM), then `closeResources` drains
-the transport and the Mongo pool.
+the transport and the Mongo or SQL pool.
 
 ### Transports
 
@@ -194,7 +196,8 @@ creating a second one (unique index on `userId`).
 
 ### Data model
 
-MongoDB collections: `game`, `user`, `session`. Models live in `internal/models/`.
+Collections: `game`, `user`, `session` (tables `games`, `users`, `sessions` on the SQL backends). Models
+live in `internal/models/`.
 
 A **Game** holds `Teams`, `Players`, and a `Stage`. A **Stage** holds ordered **Scenes** plus a
 `currentScene`; a scene is the visual unit the client renders. Games, stages, scenes, teams, and players
