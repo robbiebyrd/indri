@@ -132,7 +132,10 @@ func (s *MemoryStore) New(code string, script *models.Script, privateGame bool) 
 	if _, exists := s.codes[code]; exists {
 		return nil, fmt.Errorf("code %q: %w", code, repoErrors.ErrDuplicate)
 	}
-	g := newGame(code, script, privateGame)
+	g, err := newGame(code, script, privateGame)
+	if err != nil {
+		return nil, err
+	}
 	s.games[g.ID] = g
 	s.codes[code] = g.ID
 	return copyGame(g), nil

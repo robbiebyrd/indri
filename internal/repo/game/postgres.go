@@ -102,7 +102,10 @@ func (s *PostgresStore) New(code string, script *models.Script, privateGame bool
 	if script == nil {
 		return nil, errors.New("script is required")
 	}
-	g := newGame(code, script, privateGame)
+	g, err := newGame(code, script, privateGame)
+	if err != nil {
+		return nil, err
+	}
 
 	data, err := marshalGame(g)
 	if err != nil {

@@ -71,7 +71,10 @@ func (s *SQLiteStore) New(code string, script *models.Script, privateGame bool) 
 	if script == nil {
 		return nil, errors.New("script is required")
 	}
-	g := newGame(code, script, privateGame)
+	g, err := newGame(code, script, privateGame)
+	if err != nil {
+		return nil, err
+	}
 
 	blob, err := marshalGameText(g)
 	if err != nil {

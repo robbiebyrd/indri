@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func TestEditPath_PreservesFieldsHiddenFromJSON(t *testing.T) {
 }
 
 func TestNewGame_PreDeclaresSlotsFromScript(t *testing.T) {
-	g := newGame("C1", &models.Script{
+	g, _ := newGame("C1", &models.Script{
 		Config: models.Config{MaxPlayersPerTeam: 2},
 		Teams:  map[string]models.Team{"Red": {Name: "Red"}, "Blue": {Name: "Blue"}},
 	}, true)
@@ -107,5 +108,43 @@ func TestSlotOperations(t *testing.T) {
 
 	if err := store.ConnectPlayer(g.ID, "p99"); err == nil {
 		t.Fatal("connecting a nonexistent slot succeeded")
+	}
+}
+
+// Every game gets its own copy of the script's data: games created from one
+// script must never share state (the memory store keeps live references, so
+// aliasing made later games start with earlier games' boards).
+func TestNewGame_DoesNotShareStateWithTheScriptOrOtherGames(t *testing.T) {
+	script := &models.Script{
+		Config:     models.Config{MaxPlayersPerTeam: 1},
+		Teams:      map[string]models.Team{"A": {Name: "A", PublicData: map[string]interface{}{"turn": true}}},
+		PublicData: map[string]interface{}{"round": 1.0},
+		Stage: models.Stage{CurrentScene: "board", Scenes: map[string]models.Scene{
+			"board": {PublicData: &map[string]interface{}{"board": []interface{}{""}}},
+		}},
+	}
+
+	store := newMemoryStoreWith(t, events.NewInProcess())
+	first, _ := store.New("ONE", script, false)
+	second, _ := store.New("TWO", script, false)
+
+	if err := store.Mutate(first.ID, func(g *models.Game) error {
+		(*g.Stage.Scenes["board"].PublicData)["board"] = []interface{}{"X"}
+		g.PublicData["round"] = 2.0
+		g.Teams["A"].PublicData["turn"] = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _ := store.Get(second.ID)
+	if b := (*got.Stage.Scenes["board"].PublicData)["board"]; !reflect.DeepEqual(b, []interface{}{""}) {
+		t.Errorf("second game's board = %v; it shares state with the first", b)
+	}
+	if got.PublicData["round"] != 1.0 || got.Teams["A"].PublicData["turn"] != true {
+		t.Errorf("second game's data changed with the first: round=%v turn=%v", got.PublicData["round"], got.Teams["A"].PublicData["turn"])
+	}
+	if (*script.Stage.Scenes["board"].PublicData)["board"].([]interface{})[0] != "" || script.PublicData["round"] != 1.0 {
+		t.Error("playing a game modified the script")
 	}
 }

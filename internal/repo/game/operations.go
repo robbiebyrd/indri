@@ -1,6 +1,7 @@
 package game
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -24,8 +25,10 @@ type mutator interface {
 }
 
 // newGame builds a game from the script, with every player slot pre-declared
-// so positional delta paths stay stable as players join and leave.
-func newGame(code string, script *models.Script, privateGame bool) *models.Game {
+// so positional delta paths stay stable as players join and leave. The game
+// gets its own copy of the script's data: sharing its maps would let one game's
+// moves leak into the script and every later game.
+func newGame(code string, script *models.Script, privateGame bool) (*models.Game, error) {
 	now := time.Now()
 
 	g := &models.Game{
@@ -43,7 +46,12 @@ func newGame(code string, script *models.Script, privateGame bool) *models.Game 
 	}
 
 	if script == nil {
-		return g
+		return g, nil
+	}
+
+	script, err := cloneScript(script)
+	if err != nil {
+		return nil, err
 	}
 
 	g.Players, g.Teams = preDeclareSlots(script)
@@ -57,7 +65,22 @@ func newGame(code string, script *models.Script, privateGame bool) *models.Game 
 		g.PrivateData = script.PrivateData
 	}
 
-	return g
+	return g, nil
+}
+
+// cloneScript deep-copies a script through JSON, the form it was loaded from.
+func cloneScript(script *models.Script) (*models.Script, error) {
+	data, err := json.Marshal(script)
+	if err != nil {
+		return nil, fmt.Errorf("copying script: %w", err)
+	}
+
+	var clone models.Script
+	if err := json.Unmarshal(data, &clone); err != nil {
+		return nil, fmt.Errorf("copying script: %w", err)
+	}
+
+	return &clone, nil
 }
 
 // preDeclareSlots creates the fixed player-slot map from the script config.

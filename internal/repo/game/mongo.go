@@ -59,7 +59,10 @@ func NewMongoStore(ctx context.Context, client *mongodb.Client, locks lock.Manag
 
 // New creates a new game, given a code.
 func (s *MongoStore) New(code string, script *models.Script, privateGame bool) (*models.Game, error) {
-	g := newGame(code, script, privateGame)
+	g, err := newGame(code, script, privateGame)
+	if err != nil {
+		return nil, err
+	}
 
 	doc, err := repoUtils.CreateBSONDoc(g)
 	if err != nil {
