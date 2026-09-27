@@ -3,6 +3,7 @@ import {useEffect, useRef, useState} from "react"
 import {fetch as expoFetch} from "expo/fetch"
 import {createTransportClient} from "@indri/protocol-client"
 import {MessageHandler} from "@/services/message-handler";
+import {peerConnection} from "@/services/peer-connection";
 import Login from "@/components/auth/login";
 import {useGameState} from "@/providers/game-state/use-game-state";
 import {useUserState} from "@/providers/user-state/use-user-state";
@@ -35,11 +36,14 @@ export default function Index() {
                 "and restart Metro — EXPO_PUBLIC_* values are inlined at build time.",
             )
         }
-        const transport = createTransportClient(process.env.EXPO_PUBLIC_TRANSPORT || "ws", {
+        const kind = process.env.EXPO_PUBLIC_TRANSPORT || "ws"
+        const transport = createTransportClient(kind, {
             url: apiUrl ?? "",
             // React Native's global fetch buffers whole responses; SSE needs a
             // streaming body, which expo/fetch provides.
             fetch: Platform.OS === "web" ? undefined : expoFetch,
+            // Only loaded when selected: it needs a development build.
+            RTCPeerConnection: kind === "webrtc" ? peerConnection() : undefined,
         })
         wsRef.current = new MessageHandler(transport, userDispatch, gameDispatch, gameListDispatch)
     }
