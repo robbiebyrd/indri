@@ -63,3 +63,4 @@ client/.expo-*-check
 # Git worktrees
 .worktrees/
 .remember
+.playwright-mcp
