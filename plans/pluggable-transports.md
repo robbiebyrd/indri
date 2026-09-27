@@ -111,3 +111,27 @@ Findings worth keeping:
 - Session resume on reconnect: the persisted `sessionId` is written but never read.
 - TURN hosting.
 - Verifying native (non-web) RN WebRTC.
+
+## Compact-delta merge (2026-09-27)
+
+`POC-00002/compact-delta-protocol` was merged in, taking `feat/compact-delta-protocol`'s layout-hash
+`sv`. Integration work and bugs found along the way:
+
+- **Shared store layer.** Slot operations, field writes, connect/disconnect, and game construction live
+  once in `repo/game/operations.go`, over `Mutate`. The delta pipeline lives once in
+  `repo/game/changes.go`. Before this, MongoDB, memory, and SQLite each had their own copy, and the
+  copies had already drifted apart. `store_contract_test.go` runs against every available backend.
+- **MessagePack sent Go field names.** Only `?debug=1` JSON worked on either branch. `WriteEncoded` now
+  encodes with the json tags and sends through `WriteBinary`, and a wire-contract test covers it.
+- **Positions were computed from the full document.** Clients decode against the keyframe, which lacks
+  `privateData` and `data.layout`, so paths were off by one. Keyframes and deltas now share
+  `events.ClientView`. A write that changes the view's shape triggers a fresh keyframe (`OpKeyframe`).
+- **Other bugs found and fixed:**
+  - `?debug=1` now works on every transport.
+  - The tic-tac-toe board assumed `bson.A`, so moves failed on non-Mongo stores.
+  - New games shared the script's maps: the memory store leaked one game's board into later games.
+  - JSON `null` reached Lua as a truthy object, which broke the board on every new game.
+- **Verification:**
+  - Two-player games over ws, sse, and graphqlws on MongoDB and on memory, where the state rebuilt from
+    deltas equals a fresh keyframe.
+  - A full game in the browser over WebRTC.

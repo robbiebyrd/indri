@@ -351,6 +351,13 @@ Follows the layout frame. `PrivateData` and the `layout` key are stripped from `
 - `game` is a sanitized `models.Game`. The client must build its positional map from `game` before
   merging the cached layout back for rendering.
 
+### Keyframes mid-game
+
+Positional paths decode only against the schema of the keyframe the client holds. When a write adds or
+removes an object key (the game's *shape* changes), the server sends every client in the game a fresh
+keyframe instead of a delta; apply it exactly like the keyframe from `join`. Deleting a key therefore
+always arrives as a keyframe; shrinking an array arrives as a delta with removed paths.
+
 ### Delta — change event
 
 Published by the store at each write and broadcast to every session in the affected game.

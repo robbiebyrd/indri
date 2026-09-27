@@ -123,7 +123,7 @@ pass `transporttest.Run` — the conformance suite every transport runs — and 
 | `boot` | Assemble the injector, register built-in handlers, run and shut down the two serving goroutines. |
 | `mutation` | Generic serialized read-modify-write with a version fence. Backend-agnostic. |
 | `lock` | `Manager`/`Handle` interface; `InProcess` and `Redis` implementations. |
-| `events` | `Publisher` interface (`InProcess` channel, `Redis` Pub/Sub on `indri:changes`), the `ChangeEvent` wire type, `Diff`/`ToMap` for computing dotted-path deltas from JSON representations, and `SanitizeDelta` for stripping private data out of them. |
+| `events` | `Publisher` interface (`InProcess` channel, `Redis` Pub/Sub on `indri:changes`), the `ChangeEvent` wire type, `ClientView` (the game as clients hold it; shared by keyframes and deltas), `Diff`/`ToMap`, positional path encoding, and `SanitizeDelta`. |
 | `game` | Game lifecycle, random code generation, `Sanitize`, player connect/disconnect. |
 | `stage` | Scene CRUD, scene ordering, loading scenes from the script. |
 | `broadcast` | Fan-out to a game, a team, specific players, or everyone. Targeted sends resolve recipients via the session store, then filter connections on the `sessionId` key. |
@@ -145,21 +145,22 @@ interfaces as an abstraction yet — callers use the concrete `*Store` types.
 
 ## Concurrency
 
-Every multi-field edit to a game goes through `gameRepo.Store.Mutate`, which delegates to
-`mutation.Run`:
+Every write to a game goes through a store's `Mutate`, which delegates to `mutation.Run`:
 
 1. Acquire a lock on `"game:<id>"`.
 2. Load the game and its `version`, and snapshot its JSON form for the later diff.
 3. Run the caller's `apply(*models.Game)` in memory (`mutation.ErrAbort` skips the write).
-4. `UpdateOne` filtered on `{_id, version: expected}` with `$set` of the whole document and
-   `version: expected+1`. If `MatchedCount == 0`, someone raced us — loop.
-5. On a committed save, diff the snapshot against the saved game and publish the delta.
+4. Save only if the stored version still equals `expected` (Mongo: `UpdateOne` filtered on
+   `{_id, version}`), setting `version: expected+1`. If nothing matched, someone raced us — loop.
+5. On a committed save, report the snapshot and saved game to the shared `changePublisher`
+   (`repo/game/changes.go`), which diffs their client views and publishes a positional delta, or a
+   keyframe request if the write changed the view's shape.
 6. After 10 failed attempts, return `mutation.ErrConflict`.
 
 The lock avoids the retry loop in the common case; the version fence is what makes a lease expiring
-mid-mutation safe. Single-field writes (`UpdateField`, `DeleteField`, `markPlayerConnected`) skip the
-lock but still `$inc` `version`, keeping them coherent with the CAS, and publish their own delta
-explicitly.
+mid-mutation safe. Single-field writes (`UpdateField`, `DeleteField`, connect/disconnect) are shared
+operations over `Mutate` (`repo/game/operations.go`), so every store changes and publishes games
+identically; a store supplies only load, a version-fenced save, and queries.
 
 `InProcess` locks and the in-process event bus are correct for a single instance only. Multi-instance
 deployments must set `INDRI_LOCK_BACKEND=redis`, which switches both to Redis.
@@ -186,7 +187,7 @@ Three data stores repeat at every level:
 | Field | JSON/BSON | Visibility |
 |---|---|---|
 | `PublicData` | `data` | broadcast to everyone in the game |
-| `PrivateData` | `privateData` | server-only; removed from keyframes by `GameService.Sanitize` and from deltas by `events.SanitizeDelta` |
+| `PrivateData` | `privateData` | server-only; removed from keyframes and deltas alike by `events.ClientView` |
 | `PlayerData` | `playerData` | keyed per player |
 
 `Session` links a `userId` to a `gameId` and `teamId`, and holds the secret resume `Token`. Unique

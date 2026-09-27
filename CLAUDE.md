@@ -103,45 +103,48 @@ own with `router.RegisterHandler(name, action, handler)` **after** `boot.Boot` a
 
 Two different shapes reach the client:
 
-- **Keyframe** — a full, sanitized `models.Game` written directly to the requesting connection (on
-  join/create/refresh/reconnect). `GameService.Sanitize` strips `PrivateData` from the game, stage,
-  scenes, teams, and players before it goes out.
-- **Delta** — an `events.ChangeEvent` (`{id, op, ts, type, updated, removed}`) broadcast to every session
-  in the affected game.
+- **Keyframe** — the game's *client view* (`events.ClientView`: private data removed at every depth,
+  `data.layout` removed because it is sent once in a layout frame) with a schema version `sv` (the layout
+  hash). Written to the requesting connection on join/create/refresh/reconnect, and broadcast to a whole
+  game when a write changes its shape (below).
+- **Delta** — an `events.ChangeEvent` (`{o, t, u, r}`) broadcast to every session in the affected game.
+  Paths are **positional**: each object key is replaced by its index among its sorted siblings in the
+  client view, so a client decodes them against the keyframe it holds.
 
-Both paths are sanitized, and deliberately in step: `Store.publish` runs every delta through
-`events.SanitizeDelta`, which drops any dotted path containing a `privateData` segment and recursively
-strips `privateData` out of whole-object update values (e.g. a newly added player). If you change what
-`GameService.Sanitize` hides, change `SanitizeDelta` to match or the two disagree.
+Keyframes and deltas share one definition of what the client holds: both are built from
+`events.ClientView`. Change what clients may see there, and nowhere else.
 
 The delta path is **application-computed, not database-driven** (`internal/services/events`; there is no
 MongoDB change stream):
 
 ```
-store write ──► events.Diff(before, after) ──► Publisher.Publish
-                                                     │
-                       in-process channel ───────────┤
-                       or Redis Pub/Sub  ────────────┘
-                                                     ▼
-                              boot.monitorGameChanges (Subscribe)
-                                                     ▼
-                              BroadcastService.Broadcast(gameID, …)
+Store.Mutate commit ──► changePublisher.diff (repo/game/changes.go) ──► Publisher.Publish
+                          ClientView(before/after), Diff,                 │
+                          positional encode                               │
+                                         in-process channel ──────────────┤
+                                         or Redis Pub/Sub  ───────────────┘
+                                                                          ▼
+                                         boot.monitorGameChanges (Subscribe)
+                                                                          ▼
+                                         BroadcastService.Broadcast(gameID, …)
 ```
 
-`events.Diff` walks the **JSON** representation of before/after (`events.ToMap`), so paths look like
-`players.<id>.host` and use json tag names, matching what the client already holds. Nested maps are
-walked; arrays and scalars are compared whole with `reflect.DeepEqual`.
+**Shape changes re-keyframe.** A write that adds or removes an object key in the client view shifts
+positions the client's schema can't know, so instead of a delta `changePublisher` publishes an
+`OpKeyframe` request and the broadcaster sends that game a fresh keyframe. Value changes and array
+growth/shrink stay deltas. Pre-declared player slots and `null` placeholders (e.g. `winningTeam`) exist to
+keep ordinary play shape-stable, so avoid adding and removing keys during a game where a value will do.
 
 The client (`client/services/game-state-parser.ts`) rebuilds state by cloning the last keyframe and
 replaying timestamp-ordered deltas over it, discarding deltas older than the keyframe's cutoff.
 
-**A write that never publishes is invisible to players.** This is now the single most important rule in
-the repo, because nothing in the database enforces it:
+**A write that never publishes is invisible to players.** Every game write now goes through `Mutate`, and
+every store reports each committed `Mutate` to the one shared `changePublisher`, so a new write path gets
+publishing for free as long as it is built on `Mutate`:
 
-- `Store.Mutate` snapshots the game before `apply`, diffs it after a committed save, and publishes
-  automatically. Prefer it.
-- `UpdateField`, `DeleteField`, and `markPlayerConnected` publish explicitly via `s.publish(...)`. Any
-  new write path must do the same.
+- `UpdateField`, `DeleteField`, and connect/disconnect are shared operations over `Mutate`
+  (`repo/game/operations.go`), not per-store partial updates. A write that changes nothing clients can
+  see publishes nothing.
 - Publish failures are logged, never returned — the write already committed, so a fan-out hiccup must
   not fail the mutation.
 
@@ -167,11 +170,11 @@ mutation.Run(ctx, lockManager, key, load, apply, save)
   compared in the update filter and incremented on commit, so a lease that expires mid-mutation cannot
   cause a lost update. `mutation.Run` retries up to 10 times, then returns `ErrConflict`.
 - `apply` may return `mutation.ErrAbort` to signal "no change needed" and skip the write.
-- `gameRepo.Store.Mutate` is the concrete binding. **Use `Mutate` for any read-modify-write on a game.**
-  Multi-field edits (add player to team, change team, set host) all go through it; see
-  `internal/repo/game/{player,team,host}.go`.
-- Single-field sets that don't depend on prior state can use `UpdateField`/`DeleteField`, which
-  `$inc` the version so they stay coherent with `Mutate`'s CAS.
+- Each game store (`MongoStore`, `MemoryStore`, `SQLiteStore`, `PostgresStore`) binds `Mutate` to its
+  own load and version-conditional save. **Use `Mutate` for any read-modify-write on a game.** Game
+  logic shared by every store — slot assignment, removal, connect/disconnect, field writes, building a
+  new game from the script — lives once in `internal/repo/game/operations.go` over `Mutate`, and
+  `store_contract_test.go` runs the same player tests against every available backend.
 
 Nothing here is Mongo-specific by design: a different backend only needs to supply `load` and a
 version-conditional `save`.
@@ -201,7 +204,7 @@ A **Game** holds `Teams`, `Players`, and a `Stage`. A **Stage** holds ordered **
 each carry up to three data stores:
 
 - `PublicData` (`data`) — broadcast to everyone in the game.
-- `PrivateData` (`privateData`) — server-only; stripped by `Sanitize`.
+- `PrivateData` (`privateData`) — server-only; removed from everything sent to clients by `events.ClientView`.
 - `PlayerData` (`playerData`) — keyed per player.
 
 A **Script** (`config.json`, `models.Script`) is the template a new game is stamped from: config, initial
