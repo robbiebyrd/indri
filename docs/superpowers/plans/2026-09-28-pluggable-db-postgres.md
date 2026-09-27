@@ -44,6 +44,16 @@ export INDRI_TEST_POSTGRES_URI="postgres://indri:indri@localhost:5432/indri?sslm
 
 ---
 
+## Caveat: `Game.Version` is `json:"-"`
+
+`models.Game.Version` is tagged `json:"-"` — `json.Marshal` drops it and `json.Unmarshal` never fills it in. The version is the CAS fence for `Mutate`, so every Postgres read path MUST select the scalar `version` column alongside the JSONB `data` and assign it back onto the unmarshalled game (`g.Version = version`). The code snippets in Tasks 3–4 already do this; when adding new read paths, follow the same pattern. The scalar column is the sole durable source of truth; the JSON blob's version field would always be 0 and must never be trusted.
+
+## Caveat: no redeclarations across the package
+
+`internal/repo/user/memory.go` already defines `matchUserField`; `internal/repo/session/memory.go` already defines `matchSessionField`. Since Postgres stores live in the same packages, DO NOT redeclare these — reuse them. The Postgres store files must only introduce truly new helpers.
+
+---
+
 ## File Map
 
 | File | Action | Responsibility |
@@ -379,31 +389,48 @@ func (s *PostgresStore) New(code string, script *models.Script, privateGame bool
 }
 
 func (s *PostgresStore) Get(id string) (*models.Game, error) {
-	var data []byte
+	var (
+		data    []byte
+		version int64
+	)
 	err := s.db.QueryRowContext(s.ctx,
-		`SELECT data FROM games WHERE id = $1`, id,
-	).Scan(&data)
+		`SELECT data, version FROM games WHERE id = $1`, id,
+	).Scan(&data, &version)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying game: %w", err)
 	}
-	return unmarshalGame(data)
+	g, err := unmarshalGame(data)
+	if err != nil {
+		return nil, err
+	}
+	// models.Game.Version is json:"-" — restore from column.
+	g.Version = version
+	return g, nil
 }
 
 func (s *PostgresStore) FindByCode(gameCode string) (*models.Game, error) {
-	var data []byte
+	var (
+		data    []byte
+		version int64
+	)
 	err := s.db.QueryRowContext(s.ctx,
-		`SELECT data FROM games WHERE code = $1`, gameCode,
-	).Scan(&data)
+		`SELECT data, version FROM games WHERE code = $1`, gameCode,
+	).Scan(&data, &version)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("code %q: %w", gameCode, repoErrors.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying game by code: %w", err)
 	}
-	return unmarshalGame(data)
+	g, err := unmarshalGame(data)
+	if err != nil {
+		return nil, err
+	}
+	g.Version = version
+	return g, nil
 }
 
 func (s *PostgresStore) GetIDHex(gameCode string) (*string, error) {
@@ -427,7 +454,7 @@ func (s *PostgresStore) Exists(id string) (bool, error) {
 
 func (s *PostgresStore) FindOpen(limit int) ([]*models.Game, error) {
 	rows, err := s.db.QueryContext(s.ctx,
-		`SELECT data FROM games WHERE private = FALSE LIMIT $1`, limit,
+		`SELECT data, version FROM games WHERE private = FALSE LIMIT $1`, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("querying open games: %w", err)
@@ -436,14 +463,18 @@ func (s *PostgresStore) FindOpen(limit int) ([]*models.Game, error) {
 
 	var out []*models.Game
 	for rows.Next() {
-		var data []byte
-		if err := rows.Scan(&data); err != nil {
+		var (
+			data    []byte
+			version int64
+		)
+		if err := rows.Scan(&data, &version); err != nil {
 			return nil, fmt.Errorf("scanning open game: %w", err)
 		}
 		g, err := unmarshalGame(data)
 		if err != nil {
 			return nil, fmt.Errorf("unmarshaling game: %w", err)
 		}
+		g.Version = version // Game.Version is json:"-" — restore from column
 		out = append(out, g)
 	}
 	return out, rows.Err()
@@ -1676,18 +1707,9 @@ func scanUsers(rows *sql.Rows) ([]*models.User, error) {
 	}
 	return out, rows.Err()
 }
-
-func matchUserField(u *models.User, key, value string) bool {
-	switch key {
-	case "email":
-		return u.Email == value
-	case "name":
-		return u.Name == value
-	default:
-		return false
-	}
-}
 ```
+
+Note: `matchUserField` is already defined in `user/memory.go` (same package), so do NOT redeclare it here. Its existing signature and semantics work identically for the Postgres store.
 
 - [ ] **Step 8.3 — Run user tests**
 
@@ -2056,22 +2078,9 @@ func scanSessions(rows *sql.Rows) ([]*models.Session, error) {
 	}
 	return out, rows.Err()
 }
-
-func matchSessionField(sess *models.Session, key, value string) bool {
-	switch key {
-	case "token":
-		return sess.Token == value
-	case "userId":
-		return sess.UserID != nil && *sess.UserID == value
-	case "gameId":
-		return sess.GameID != nil && *sess.GameID == value
-	case "teamId":
-		return sess.TeamID != nil && *sess.TeamID == value
-	default:
-		return false
-	}
-}
 ```
+
+Note: `matchSessionField` is already defined in `session/memory.go` (same package), so do NOT redeclare it here.
 
 - [ ] **Step 8.6 — Run session tests**
 

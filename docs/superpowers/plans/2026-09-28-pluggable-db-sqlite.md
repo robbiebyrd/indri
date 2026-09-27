@@ -40,6 +40,16 @@
 - `internal/repo/game/interface.go` — 24-method `Storer` interface (read this file before coding to confirm the exact method signatures).
 - `internal/repo/game/memory.go` — canonical reference for `applyDottedPath`, `splitPath`, `fromMap`, `publishFieldUpdate`, `publishDiff`, `collectionName` — all usable by SQLiteStore in the same package without re-declaration.
 
+### Caveat: `Game.Version` is `json:"-"`
+
+`models.Game.Version` is tagged `json:"-"` — `json.Marshal` drops it and `json.Unmarshal` never fills it in. The version is the CAS fence for `Mutate`, so every SQLite read path MUST select the scalar `version` column alongside the `data` blob and assign it back onto the unmarshalled game (`g.Version = version`). The code snippets in Tasks 2–3 already do this; when adding new read paths, follow the same pattern.
+
+The scalar `version` column is the sole durable source of truth; the JSON blob's version field would always be 0 and must never be trusted.
+
+### Caveat: session `user_id` UNIQUE and NULL
+
+SQLite treats each NULL value in a UNIQUE column as distinct — the DDL alone does NOT prevent two sessions with `NULL` user_id. Task 8 requires the `New()` guard (SELECT-then-INSERT) to enforce one-session-per-user, and to store empty UserID as NULL. Never rely on the UNIQUE constraint alone; the SELECT guard is load-bearing.
+
 ---
 
 ## File Map
@@ -400,31 +410,47 @@ func (s *SQLiteStore) New(code string, script *models.Script, privateGame bool) 
 }
 
 func (s *SQLiteStore) Get(id string) (*models.Game, error) {
-	var data string
+	var (
+		data    string
+		version int64
+	)
 	err := s.db.QueryRowContext(s.ctx,
-		`SELECT data FROM games WHERE id = ?`, id,
-	).Scan(&data)
+		`SELECT data, version FROM games WHERE id = ?`, id,
+	).Scan(&data, &version)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get game: %w", err)
 	}
-	return unmarshalGame(data)
+	g, err := unmarshalGame(data)
+	if err != nil {
+		return nil, err
+	}
+	g.Version = version // Game.Version is json:"-" — restore from column
+	return g, nil
 }
 
 func (s *SQLiteStore) FindByCode(gameCode string) (*models.Game, error) {
-	var data string
+	var (
+		data    string
+		version int64
+	)
 	err := s.db.QueryRowContext(s.ctx,
-		`SELECT data FROM games WHERE code = ?`, gameCode,
-	).Scan(&data)
+		`SELECT data, version FROM games WHERE code = ?`, gameCode,
+	).Scan(&data, &version)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("code %q: %w", gameCode, repoErrors.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("find game by code: %w", err)
 	}
-	return unmarshalGame(data)
+	g, err := unmarshalGame(data)
+	if err != nil {
+		return nil, err
+	}
+	g.Version = version
+	return g, nil
 }
 
 func (s *SQLiteStore) GetIDHex(gameCode string) (*string, error) {
@@ -448,7 +474,7 @@ func (s *SQLiteStore) Exists(id string) (bool, error) {
 
 func (s *SQLiteStore) FindOpen(limit int) ([]*models.Game, error) {
 	rows, err := s.db.QueryContext(s.ctx,
-		`SELECT data FROM games WHERE private = 0 LIMIT ?`, limit,
+		`SELECT data, version FROM games WHERE private = 0 LIMIT ?`, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("find open games: %w", err)
@@ -457,14 +483,18 @@ func (s *SQLiteStore) FindOpen(limit int) ([]*models.Game, error) {
 
 	var out []*models.Game
 	for rows.Next() {
-		var data string
-		if err := rows.Scan(&data); err != nil {
+		var (
+			data    string
+			version int64
+		)
+		if err := rows.Scan(&data, &version); err != nil {
 			return nil, fmt.Errorf("scan game: %w", err)
 		}
 		g, err := unmarshalGame(data)
 		if err != nil {
 			return nil, err
 		}
+		g.Version = version // Game.Version is json:"-" — restore from column
 		out = append(out, g)
 	}
 	return out, rows.Err()
@@ -774,6 +804,10 @@ func (s *SQLiteStore) loadWithVersion(id string) (*models.Game, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	// models.Game.Version is tagged json:"-", so json.Unmarshal always leaves
+	// it at 0. Restore it from the scalar column so callers of apply()
+	// (including delta diffs) see the correct version.
+	g.Version = version
 	return g, version, nil
 }
 
