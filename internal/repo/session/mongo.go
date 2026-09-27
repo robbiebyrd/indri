@@ -158,6 +158,9 @@ func (s *MongoStore) Update(sessionId string, session *models.UpdateSession) err
 		bson.D{{Key: "$set", Value: set}},
 	)
 	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return fmt.Errorf("user %q already has a session: %w", session.UserID, repoErrors.ErrDuplicate)
+		}
 		return err
 	}
 

@@ -115,3 +115,9 @@ func migrateSessionCreatedAt(db *sql.DB) error {
 
 	return nil
 }
+
+// IsUniqueViolation reports whether err is a UNIQUE constraint violation.
+// modernc.org/sqlite reports one only through its message.
+func IsUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}

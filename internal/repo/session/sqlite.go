@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	sqliteClient "github.com/robbiebyrd/indri/internal/clients/sqlite"
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 )
@@ -216,6 +217,9 @@ func (s *SQLiteStore) Update(id string, u *models.UpdateSession) error {
 		userID, blob, id,
 	)
 	if err != nil {
+		if sqliteClient.IsUniqueViolation(err) {
+			return fmt.Errorf("user %q already has a session: %w", userID.String, repoErrors.ErrDuplicate)
+		}
 		return fmt.Errorf("update session: %w", err)
 	}
 	// The session can be deleted between the Get above and this UPDATE.
