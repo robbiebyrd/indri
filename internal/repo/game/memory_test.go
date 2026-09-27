@@ -122,3 +122,69 @@ func TestMemoryStore_FindOpen_ExcludesPrivate(t *testing.T) {
 		t.Fatalf("want [PUB1], got %v", games)
 	}
 }
+
+func TestMemoryStore_Update_BumpsVersion(t *testing.T) {
+	store := newMemoryFixture(t)
+	g, _ := store.New("ABCD", makeScript(), false)
+
+	upd := &models.UpdateGame{Private: true}
+	if err := store.Update(g.ID, upd); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, _ := store.Get(g.ID)
+	if !got.Private || got.Version != 2 {
+		t.Errorf("Version=%d Private=%v; want 2, true", got.Version, got.Private)
+	}
+}
+
+func TestMemoryStore_UpdateField(t *testing.T) {
+	store := newMemoryFixture(t)
+	g, _ := store.New("ABCD", makeScript(), false)
+
+	if err := store.UpdateField(g.ID, "data.foo", "bar"); err != nil {
+		t.Fatalf("UpdateField: %v", err)
+	}
+	got, _ := store.Get(g.ID)
+	if v, _ := got.PublicData["foo"]; v != "bar" {
+		t.Errorf("data.foo = %v; want bar", v)
+	}
+}
+
+func TestMemoryStore_DeleteField(t *testing.T) {
+	store := newMemoryFixture(t)
+	g, _ := store.New("ABCD", makeScript(), false)
+	_ = store.UpdateField(g.ID, "data.foo", "bar")
+
+	if err := store.DeleteField(g.ID, "data.foo"); err != nil {
+		t.Fatalf("DeleteField: %v", err)
+	}
+	got, _ := store.Get(g.ID)
+	if _, still := got.PublicData["foo"]; still {
+		t.Errorf("data.foo not deleted")
+	}
+}
+
+func TestMemoryStore_Mutate_SuccessfulApply(t *testing.T) {
+	store := newMemoryFixture(t)
+	g, _ := store.New("ABCD", makeScript(), false)
+
+	err := store.Mutate(g.ID, func(game *models.Game) error {
+		game.Private = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Mutate: %v", err)
+	}
+	got, _ := store.Get(g.ID)
+	if !got.Private || got.Version != 2 {
+		t.Errorf("Mutate did not apply or bump version: %+v", got)
+	}
+}
+
+func TestMemoryStore_Mutate_UnknownID(t *testing.T) {
+	store := newMemoryFixture(t)
+	err := store.Mutate("no-such-id", func(g *models.Game) error { return nil })
+	if !errors.Is(err, repoErrors.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
