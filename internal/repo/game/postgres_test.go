@@ -24,6 +24,9 @@ func postgresURI(t *testing.T) string {
 	return uri
 }
 
+// newPostgresFixture TRUNCATEs the games table of whatever database
+// INDRI_TEST_POSTGRES_URI points at, both before the test (so rows left by a
+// crashed run can't break it) and after it. Never point it at real data.
 func newPostgresFixture(t *testing.T) *PostgresStore {
 	t.Helper()
 	db, err := postgresClient.Open(context.Background(), postgresURI(t))
@@ -39,6 +42,9 @@ func newPostgresFixture(t *testing.T) *PostgresStore {
 	)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	if _, err := db.Exec("TRUNCATE TABLE games"); err != nil {
+		t.Fatalf("truncating games: %v", err)
 	}
 	t.Cleanup(func() { _, _ = db.Exec("TRUNCATE TABLE games") })
 	return store

@@ -20,6 +20,9 @@ func postgresSessionURI(t *testing.T) string {
 	return uri
 }
 
+// newPostgresSessionFixture TRUNCATEs the sessions table of whatever database
+// INDRI_TEST_POSTGRES_URI points at, both before the test (so rows left by a
+// crashed run can't break it) and after it. Never point it at real data.
 func newPostgresSessionFixture(t *testing.T) *PostgresStore {
 	t.Helper()
 	db, err := postgresClient.Open(context.Background(), postgresSessionURI(t))
@@ -30,6 +33,9 @@ func newPostgresSessionFixture(t *testing.T) *PostgresStore {
 	store, err := NewPostgresStore(context.Background(), db)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	if _, err := db.Exec("TRUNCATE TABLE sessions"); err != nil {
+		t.Fatalf("truncating sessions: %v", err)
 	}
 	t.Cleanup(func() { _, _ = db.Exec("TRUNCATE TABLE sessions") })
 	return store
