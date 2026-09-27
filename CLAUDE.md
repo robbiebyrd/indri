@@ -37,7 +37,8 @@ pnpm install
 pnpm run typecheck
 pnpm test          # node --experimental-strip-types on services/game-state-parser.node-test.ts
 pnpm run lint
-pnpm run web       # or: start / ios / android
+pnpm run web       # or: start / ios / android (Expo Go)
+npx expo run:ios   # development build: needed for EXPO_PUBLIC_TRANSPORT=webrtc on native; ios/ + android/ are generated, gitignored
 ```
 
 Config is environment-driven with an `INDRI_` prefix (`internal/repo/env/env.go`); `.env.example`

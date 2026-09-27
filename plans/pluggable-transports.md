@@ -92,7 +92,19 @@ Findings worth keeping:
   - Adapters called `fetch` as a method, which browsers reject ("Illegal invocation"). Fixed with
     `resolveFetch`, and the fakes now enforce the same check.
   - A pre-existing crash: the Join screen with zero games (`"games": null`).
-- Native React Native was not verified for any transport.
+- Native iOS (iPhone 16 simulator, iOS 26), driven from inside the app's Hermes runtime through
+  Metro's debugger endpoint and using the device's own `WebSocket`, `expo/fetch` and
+  `react-native-webrtc`:
+  - Expo Go: `ws`, `graphqlws` and `sse` pass register → login → inquire. `webrtc` fails with the
+    "needs a development build" error, as intended.
+  - Development build (`npx expo run:ios`, new architecture): all four pass, WebRTC included.
+  - Found along the way: RN's iOS WebSocket always sends its target's own origin, which the origin
+    check rejected (403). Same-origin requests are now allowed, matching gorilla's default.
+  - Native WebRTC setup: `react-native-webrtc` 124.0.5, the version paired with SDK 53. It is
+    loaded lazily and only when selected, so Expo Go keeps working. No config plugin, since it
+    only adds camera/mic permissions; `ios/` and `android/` are generated and gitignored.
+- Android was not verified: there's no emulator image set up, and RN 0.79's Gradle build needs
+  JDK 17 while this machine has 24.
 
 ## Out of scope
 
