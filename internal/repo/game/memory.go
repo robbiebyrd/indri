@@ -254,15 +254,21 @@ func splitPath(path string) []string {
 	return segs
 }
 
-// fromMap re-hydrates a game from its map[string]interface{} JSON view. We
-// keep this local rather than exporting events.FromMap to avoid widening the
-// events package's surface area for a single use.
-func fromMap(m map[string]interface{}, dst interface{}) error {
+// fromMap re-hydrates a game from its map[string]interface{} JSON view.
+// It unmarshals into a fresh Game before assigning to dst, because Go's
+// json.Unmarshal merges into existing maps rather than replacing them —
+// a subtle behaviour that would silently drop DeleteField's removals.
+func fromMap(m map[string]interface{}, dst *models.Game) error {
 	data, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, dst)
+	var fresh models.Game
+	if err := json.Unmarshal(data, &fresh); err != nil {
+		return err
+	}
+	*dst = fresh
+	return nil
 }
 
 // publishFieldUpdate emits a partial-update event with the dotted-path field
