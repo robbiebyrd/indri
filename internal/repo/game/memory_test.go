@@ -26,6 +26,15 @@ func makeScript() *models.Script {
 	}
 }
 
+func scriptWithTeams() *models.Script {
+	return &models.Script{
+		Teams: map[string]models.Team{
+			"red":  {Name: "Red", PlayerIDs: []string{}},
+			"blue": {Name: "Blue", PlayerIDs: []string{}},
+		},
+	}
+}
+
 func TestNewMemoryStore_ReturnsUsableStore(t *testing.T) {
 	store := newMemoryFixture(t)
 	if store == nil {
@@ -240,5 +249,50 @@ func TestMemoryStore_ConnectDisconnectPlayer(t *testing.T) {
 	got, _ = store.Get(g.ID)
 	if got.Players["user-1"].Connected {
 		t.Errorf("Connected = true after DisconnectPlayer")
+	}
+}
+
+func TestMemoryStore_AddPlayerToTeam_ThenHasPlayerOnTeam(t *testing.T) {
+	store := newMemoryFixture(t)
+	g, _ := store.New("ABCD", scriptWithTeams(), false)
+	_ = store.AddPlayer(g.ID, "user-1", "Alice")
+
+	if err := store.AddPlayerToTeam(g.ID, "red", "user-1"); err != nil {
+		t.Fatalf("AddPlayerToTeam: %v", err)
+	}
+	if !store.HasPlayerOnTeam(g.ID, "red", "user-1") {
+		t.Fatal("HasPlayerOnTeam(red, user-1) = false")
+	}
+}
+
+func TestMemoryStore_ChangePlayerTeam(t *testing.T) {
+	store := newMemoryFixture(t)
+	g, _ := store.New("ABCD", scriptWithTeams(), false)
+	_ = store.AddPlayer(g.ID, "user-1", "Alice")
+	_ = store.AddPlayerToTeam(g.ID, "red", "user-1")
+
+	if err := store.ChangePlayerTeam(g.ID, "blue", "user-1"); err != nil {
+		t.Fatalf("ChangePlayerTeam: %v", err)
+	}
+	teamID, err := store.PlayerOnWhichTeam(g.ID, "user-1")
+	if err != nil {
+		t.Fatalf("PlayerOnWhichTeam: %v", err)
+	}
+	if teamID == nil || *teamID != "blue" {
+		t.Errorf("team: want blue, got %v", teamID)
+	}
+}
+
+func TestMemoryStore_RemovePlayerFromTeam(t *testing.T) {
+	store := newMemoryFixture(t)
+	g, _ := store.New("ABCD", scriptWithTeams(), false)
+	_ = store.AddPlayer(g.ID, "user-1", "Alice")
+	_ = store.AddPlayerToTeam(g.ID, "red", "user-1")
+
+	if err := store.RemovePlayerFromTeam(g.ID, "user-1"); err != nil {
+		t.Fatalf("RemovePlayerFromTeam: %v", err)
+	}
+	if store.HasPlayerOnTeam(g.ID, "red", "user-1") {
+		t.Errorf("still on team after remove")
 	}
 }
