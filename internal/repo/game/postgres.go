@@ -7,12 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers "pgx" driver for database/sql
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
-	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 )
@@ -104,31 +102,7 @@ func (s *PostgresStore) New(code string, script *models.Script, privateGame bool
 	if script == nil {
 		return nil, errors.New("script is required")
 	}
-	now := time.Now()
-	teams := make(map[string]models.Team, len(script.Teams))
-	for k, v := range script.Teams {
-		teams[k] = v
-	}
-	g := &models.Game{
-		ID:          ids.New(),
-		Version:     1,
-		Code:        code,
-		Teams:       teams,
-		Players:     map[string]models.Player{},
-		Stage:       script.Stage,
-		PublicData:  map[string]interface{}{},
-		PrivateData: map[string]interface{}{},
-		PlayerData:  map[string]interface{}{},
-		Private:     privateGame,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	if script.PublicData != nil {
-		g.PublicData = script.PublicData
-	}
-	if script.PrivateData != nil {
-		g.PrivateData = script.PrivateData
-	}
+	g := newGame(code, script, privateGame)
 
 	data, err := marshalGame(g)
 	if err != nil {

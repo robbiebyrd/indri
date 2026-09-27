@@ -14,7 +14,6 @@ import (
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
-	"github.com/robbiebyrd/indri/internal/repo/ids"
 	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
@@ -60,32 +59,7 @@ func NewMongoStore(ctx context.Context, client *mongodb.Client, locks lock.Manag
 
 // New creates a new game, given a code.
 func (s *MongoStore) New(code string, script *models.Script, privateGame bool) (*models.Game, error) {
-	now := time.Now()
-	g := &models.Game{
-		ID:          ids.New(),
-		Version:     1,
-		Code:        code,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Private:     privateGame,
-		Teams:       map[string]models.Team{},
-		Players:     map[string]models.Player{},
-		PublicData:  map[string]interface{}{},
-		PrivateData: map[string]interface{}{},
-		PlayerData:  map[string]interface{}{},
-	}
-	if script != nil {
-		for k, v := range script.Teams {
-			g.Teams[k] = v
-		}
-		g.Stage = script.Stage
-		if script.PublicData != nil {
-			g.PublicData = script.PublicData
-		}
-		if script.PrivateData != nil {
-			g.PrivateData = script.PrivateData
-		}
-	}
+	g := newGame(code, script, privateGame)
 
 	doc, err := repoUtils.CreateBSONDoc(g)
 	if err != nil {
@@ -164,68 +138,14 @@ func (s *MongoStore) Update(id string, game *models.UpdateGame) error {
 	return nil
 }
 
-// UpdateField updates a field in the game.
+// UpdateField sets the value at a dotted JSON path.
 func (s *MongoStore) UpdateField(id string, key string, value interface{}) error {
-	filterDoc, err := s.getBsonDocForID(id)
-	if err != nil {
-		return err
-	}
-
-	result, err := s.collection.Collection().UpdateOne(
-		*s.ctx,
-		filterDoc,
-		bson.D{
-			{Key: "$set", Value: bson.D{
-				{Key: key, Value: value},
-				{Key: "updatedAt", Value: time.Now()},
-			}},
-			{Key: "$inc", Value: bson.D{{Key: "version", Value: 1}}},
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("error updating game field: game with id %v does not exists", id)
-	}
-
-	s.changes.field(id, map[string]interface{}{key: value}, nil)
-
-	return nil
+	return updateField(s, id, key, value)
 }
 
-// DeleteField removes a field from a game.
+// DeleteField removes the value at a dotted JSON path.
 func (s *MongoStore) DeleteField(id string, key string) error {
-	filterDoc, err := s.getBsonDocForID(id)
-	if err != nil {
-		return err
-	}
-
-	result, err := s.collection.Collection().UpdateOne(
-		*s.ctx,
-		filterDoc,
-		bson.D{
-			{Key: "$unset", Value: bson.D{
-				{Key: key, Value: ""},
-			}},
-			{Key: "$set", Value: bson.D{
-				{Key: "updatedAt", Value: time.Now()},
-			}},
-			{Key: "$inc", Value: bson.D{{Key: "version", Value: 1}}},
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("field %v does not exists", key)
-	}
-
-	s.changes.field(id, nil, []string{key})
-
-	return nil
+	return deleteField(s, id, key)
 }
 
 // Mutate applies apply to the game as a conflict-free read-modify-write. The

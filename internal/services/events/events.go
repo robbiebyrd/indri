@@ -11,24 +11,24 @@ import (
 	"time"
 )
 
-type OperationType string
+type OpCode uint8
 
 const (
-	OpUpdate OperationType = "update"
-	OpInsert OperationType = "insert"
-	OpDelete OperationType = "delete"
+	OpUpdate OpCode = 1
+	OpInsert OpCode = 2
+	OpDelete OpCode = 3
+	OpLayout OpCode = 4
 )
 
-// ChangeEvent is the delta broadcast to clients. Its JSON shape matches what
-// the client reducer consumes: dotted-path "updated" fields and "removed"
-// paths.
+// ChangeEvent is the delta broadcast to clients. UpdatedFields is a slice of
+// [path, value] pairs. RemovedFields is a slice of paths.
 type ChangeEvent struct {
-	ID            string                 `json:"id"`
-	OperationType OperationType          `json:"op"`
-	Timestamp     time.Time              `json:"ts"`
-	Collection    string                 `json:"type,omitempty"`
-	UpdatedFields map[string]interface{} `json:"updated,omitempty"`
-	RemovedFields []string               `json:"removed,omitempty"`
+	ID            string          `json:"id"`
+	OperationType OpCode          `json:"o"`
+	Timestamp     time.Time       `json:"t"`
+	Collection    string          `json:"type,omitempty"`
+	UpdatedFields [][]interface{} `json:"u,omitempty"`
+	RemovedFields []interface{}   `json:"r,omitempty"`
 }
 
 // HasChanges reports whether the event carries any field change worth

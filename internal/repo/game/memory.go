@@ -10,7 +10,6 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
-	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
@@ -133,31 +132,7 @@ func (s *MemoryStore) New(code string, script *models.Script, privateGame bool) 
 	if _, exists := s.codes[code]; exists {
 		return nil, fmt.Errorf("code %q: %w", code, repoErrors.ErrDuplicate)
 	}
-	now := time.Now()
-	teams := make(map[string]models.Team, len(script.Teams))
-	for k, v := range script.Teams {
-		teams[k] = v
-	}
-	g := &models.Game{
-		ID:          ids.New(),
-		Version:     1,
-		Code:        code,
-		Teams:       teams,
-		Players:     map[string]models.Player{},
-		Stage:       script.Stage,
-		PublicData:  map[string]interface{}{},
-		PrivateData: map[string]interface{}{},
-		PlayerData:  map[string]interface{}{},
-		Private:     privateGame,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	if script.PublicData != nil {
-		g.PublicData = script.PublicData
-	}
-	if script.PrivateData != nil {
-		g.PrivateData = script.PrivateData
-	}
+	g := newGame(code, script, privateGame)
 	s.games[g.ID] = g
 	s.codes[code] = g.ID
 	return copyGame(g), nil
@@ -310,49 +285,11 @@ func (s *MemoryStore) Update(id string, upd *models.UpdateGame) error {
 }
 
 func (s *MemoryStore) UpdateField(id string, key string, value interface{}) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	g, ok := s.games[id]
-	if !ok {
-		return fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
-	}
-	m, err := events.ToMap(g)
-	if err != nil {
-		return fmt.Errorf("snapshot: %w", err)
-	}
-	applyDottedPath(m, key, value, false)
-	if err := fromMap(m, g); err != nil {
-		return fmt.Errorf("rehydrate: %w", err)
-	}
-	g.UpdatedAt = time.Now()
-	g.Version++
-
-	s.changes.field(id, map[string]interface{}{key: value}, nil)
-	return nil
+	return updateField(s, id, key, value)
 }
 
 func (s *MemoryStore) DeleteField(id string, key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	g, ok := s.games[id]
-	if !ok {
-		return fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
-	}
-	m, err := events.ToMap(g)
-	if err != nil {
-		return fmt.Errorf("snapshot: %w", err)
-	}
-	applyDottedPath(m, key, nil, true)
-	if err := fromMap(m, g); err != nil {
-		return fmt.Errorf("rehydrate: %w", err)
-	}
-	g.UpdatedAt = time.Now()
-	g.Version++
-
-	s.changes.field(id, nil, []string{key})
-	return nil
+	return deleteField(s, id, key)
 }
 
 // Mutate uses mutation.Run for the retry-on-conflict CAS loop. The store's

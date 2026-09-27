@@ -11,7 +11,6 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
-	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
@@ -72,31 +71,7 @@ func (s *SQLiteStore) New(code string, script *models.Script, privateGame bool) 
 	if script == nil {
 		return nil, errors.New("script is required")
 	}
-	now := time.Now()
-	teams := make(map[string]models.Team, len(script.Teams))
-	for k, v := range script.Teams {
-		teams[k] = v
-	}
-	g := &models.Game{
-		ID:          ids.New(),
-		Version:     1,
-		Code:        code,
-		Teams:       teams,
-		Players:     map[string]models.Player{},
-		Stage:       script.Stage,
-		PublicData:  map[string]interface{}{},
-		PrivateData: map[string]interface{}{},
-		PlayerData:  map[string]interface{}{},
-		Private:     privateGame,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	if script.PublicData != nil {
-		g.PublicData = script.PublicData
-	}
-	if script.PrivateData != nil {
-		g.PrivateData = script.PrivateData
-	}
+	g := newGame(code, script, privateGame)
 
 	blob, err := marshalGameText(g)
 	if err != nil {
@@ -319,53 +294,11 @@ func (s *SQLiteStore) Update(id string, upd *models.UpdateGame) error {
 }
 
 func (s *SQLiteStore) UpdateField(id string, key string, value interface{}) error {
-	g, version, err := s.loadWithVersion(id)
-	if err != nil {
-		return err
-	}
-	m, err := events.ToMap(g)
-	if err != nil {
-		return fmt.Errorf("snapshot: %w", err)
-	}
-	applyDottedPath(m, key, value, false)
-	if err := fromMap(m, g); err != nil {
-		return fmt.Errorf("rehydrate: %w", err)
-	}
-
-	committed, err := s.saveWithVersion(g, version)
-	if err != nil {
-		return err
-	}
-	if !committed {
-		return fmt.Errorf("id %q: %w", id, repoErrors.ErrConflict)
-	}
-	s.changes.field(id, map[string]interface{}{key: value}, nil)
-	return nil
+	return updateField(s, id, key, value)
 }
 
 func (s *SQLiteStore) DeleteField(id string, key string) error {
-	g, version, err := s.loadWithVersion(id)
-	if err != nil {
-		return err
-	}
-	m, err := events.ToMap(g)
-	if err != nil {
-		return fmt.Errorf("snapshot: %w", err)
-	}
-	applyDottedPath(m, key, nil, true)
-	if err := fromMap(m, g); err != nil {
-		return fmt.Errorf("rehydrate: %w", err)
-	}
-
-	committed, err := s.saveWithVersion(g, version)
-	if err != nil {
-		return err
-	}
-	if !committed {
-		return fmt.Errorf("id %q: %w", id, repoErrors.ErrConflict)
-	}
-	s.changes.field(id, nil, []string{key})
-	return nil
+	return deleteField(s, id, key)
 }
 
 // Mutate uses mutation.Run for the optimistic retry loop. The load/save

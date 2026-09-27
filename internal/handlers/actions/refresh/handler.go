@@ -1,7 +1,6 @@
 package refresh
 
 import (
-	"encoding/json"
 	"errors"
 
 	"github.com/robbiebyrd/indri/internal/transport"
@@ -48,13 +47,10 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	jsonData, err := json.Marshal(h.i.GameService.Sanitize(g))
-	if err != nil {
+	if err = h.i.GameService.WriteSlimKeyframe(s, g); err != nil {
 		_ = cs.WriteError(models.ErrServerError)
 		return err
 	}
-
-	_ = cs.Write(jsonData)
 
 	return nil
 }

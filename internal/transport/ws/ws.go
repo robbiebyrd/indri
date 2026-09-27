@@ -57,7 +57,12 @@ func New() *Transport {
 
 func (t *Transport) Handle(h transport.Handlers) {
 	if h.Connect != nil {
-		t.m.HandleConnect(func(s *melody.Session) { h.Connect(conn{s}) })
+		t.m.HandleConnect(func(s *melody.Session) {
+			if s.Request != nil && s.Request.URL.Query().Get("debug") == "1" {
+				s.Set("debug", true)
+			}
+			h.Connect(conn{s})
+		})
 	}
 
 	if h.Disconnect != nil {

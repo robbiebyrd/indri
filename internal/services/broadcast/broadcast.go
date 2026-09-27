@@ -2,7 +2,6 @@ package broadcast
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"slices"
@@ -46,16 +45,11 @@ func (bs *Service) Broadcast(gameId *string, teamId *string, data interface{}) e
 		return errors.New("game id is required")
 	}
 
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-
 	if teamId != nil {
-		return bs.sendToTeam(*gameId, *teamId, jsonData)
+		return bs.sendToTeam(*gameId, *teamId, data)
 	}
 
-	return bs.sendToGame(*gameId, jsonData)
+	return bs.sendToGame(*gameId, data)
 }
 
 func (bs *Service) BroadcastToPlayer(gameId *string, data interface{}, playerId string) error {
@@ -63,12 +57,7 @@ func (bs *Service) BroadcastToPlayer(gameId *string, data interface{}, playerId 
 		return errors.New("game id is required")
 	}
 
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-
-	return bs.sendToPlayer(*gameId, playerId, jsonData)
+	return bs.sendToPlayer(*gameId, playerId, data)
 }
 
 func (bs *Service) BroadcastToPlayers(gameId *string, data interface{}, playerIds ...string) error {
@@ -78,24 +67,10 @@ func (bs *Service) BroadcastToPlayers(gameId *string, data interface{}, playerId
 
 	sort.Strings(playerIds)
 
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-
-	return bs.sendToPlayers(*gameId, playerIds, jsonData)
+	return bs.sendToPlayers(*gameId, playerIds, data)
 }
 
-func (bs *Service) BroadcastToAll(data interface{}) error {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-
-	return bs.sendToAll(jsonData)
-}
-
-func (bs *Service) sendToGame(gameId string, jsonData []byte) error {
+func (bs *Service) sendToGame(gameId string, payload interface{}) error {
 	log.Printf("Broadcasting to game %v\n", gameId)
 
 	sessions, err := bs.sr.Find("gameId", gameId)
@@ -103,10 +78,10 @@ func (bs *Service) sendToGame(gameId string, jsonData []byte) error {
 		return err
 	}
 
-	return bs.broadcastToSessions(sessionIDs(sessions), jsonData)
+	return bs.broadcastToSessions(sessionIDs(sessions), payload)
 }
 
-func (bs *Service) sendToTeam(gameId, teamId string, jsonData []byte) error {
+func (bs *Service) sendToTeam(gameId, teamId string, payload interface{}) error {
 	log.Printf("Broadcasting to game %v and team %v\n", gameId, teamId)
 
 	sessions, err := bs.sr.Find("gameId", gameId)
@@ -122,21 +97,10 @@ func (bs *Service) sendToTeam(gameId, teamId string, jsonData []byte) error {
 		}
 	}
 
-	return bs.broadcastToSessions(ids, jsonData)
+	return bs.broadcastToSessions(ids, payload)
 }
 
-func (bs *Service) sendToAll(jsonData []byte) error {
-	log.Printf("Broadcasting to all\n")
-
-	err := bs.t.Broadcast(jsonData)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (bs *Service) sendToPlayer(gameId, playerId string, jsonData []byte) error {
+func (bs *Service) sendToPlayer(gameId, playerId string, payload interface{}) error {
 	log.Printf("Broadcasting to game %v and player %v\n", gameId, playerId)
 
 	sessions, err := bs.sr.Find("userId", playerId)
@@ -144,10 +108,10 @@ func (bs *Service) sendToPlayer(gameId, playerId string, jsonData []byte) error 
 		return err
 	}
 
-	return bs.broadcastToSessions(sessionsInGame(sessions, gameId), jsonData)
+	return bs.broadcastToSessions(sessionsInGame(sessions, gameId), payload)
 }
 
-func (bs *Service) sendToPlayers(gameId string, playerIds []string, jsonData []byte) error {
+func (bs *Service) sendToPlayers(gameId string, playerIds []string, payload interface{}) error {
 	log.Printf("Broadcasting to game %v and players %v\n", gameId, playerIds)
 
 	var ids []string
@@ -161,28 +125,36 @@ func (bs *Service) sendToPlayers(gameId string, playerIds []string, jsonData []b
 		ids = append(ids, sessionsInGame(sessions, gameId)...)
 	}
 
-	return bs.broadcastToSessions(ids, jsonData)
+	return bs.broadcastToSessions(ids, payload)
 }
 
-// broadcastToSessions sends jsonData to the connections whose
-// "sessionId" key is in sessionIds. "sessionId" (the session ObjectID) is the
-// only per-connection key the app sets, so all targeted sends resolve their
-// recipients through the session store and match on it.
-func (bs *Service) broadcastToSessions(sessionIds []string, jsonData []byte) error {
+// broadcastToSessions sends payload to connections whose "sessionId" key is in
+// sessionIds, encoding per-connection (MessagePack by default, JSON on ?debug=1).
+func (bs *Service) broadcastToSessions(sessionIds []string, payload interface{}) error {
 	if len(sessionIds) == 0 {
 		return nil
 	}
 
-	return bs.t.BroadcastFilter(jsonData, func(c transport.Conn) bool {
+	conns, err := bs.t.Conns()
+	if err != nil {
+		return err
+	}
+
+	for _, c := range conns {
 		value, ok := c.Get("sessionId")
 		if !ok {
-			return false
+			continue
 		}
-
 		id, ok := value.(string)
+		if !ok || !slices.Contains(sessionIds, id) {
+			continue
+		}
+		if err := transport.WriteEncoded(c, payload); err != nil {
+			log.Printf("broadcast write error to session %s: %v", id, err)
+		}
+	}
 
-		return ok && slices.Contains(sessionIds, id)
-	})
+	return nil
 }
 
 // sessionIDs returns the ids of the given sessions.

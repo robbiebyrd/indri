@@ -59,18 +59,18 @@ func (h *Handler) Handle(
 		displayName = *user.DisplayName
 	}
 
-	err = h.i.GameService.ConnectPlayer(g.ID, *teamId, *session.UserID, displayName)
+	slotId, err := h.i.GameRepo.AssignSlot(g.ID, *teamId, *session.UserID, displayName)
 	if err != nil {
-		log.Printf("error adding player %v to game %v: %v\n", *session.UserID, *gameCode, err)
+		log.Printf("error assigning slot for player %v in game %v: %v\n", *session.UserID, *gameCode, err)
+		return err
 	}
 
-	gameJSONBytes, err := h.i.GameService.GetJSONBytes(g.ID)
+	fresh, err := h.i.GameService.Get(g.ID)
 	if err != nil {
 		return err
 	}
 
-	err = cs.Write(*gameJSONBytes)
-	if err != nil {
+	if err = h.i.GameService.WriteKeyframe(s, fresh, h.i.LayoutHash, h.i.LayoutData); err != nil {
 		return err
 	}
 
@@ -78,7 +78,8 @@ func (h *Handler) Handle(
 		GameID:    g.ID,
 		UserID:    *session.UserID,
 		TeamID:    *teamId,
-		UpdatedAt: time.Time{},
+		SlotID:    slotId,
+		UpdatedAt: time.Now(),
 	}); err != nil {
 		return err
 	}

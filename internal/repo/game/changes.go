@@ -10,8 +10,8 @@ import (
 )
 
 // changePublisher turns committed game writes into broadcast deltas. Every
-// store delegates to it so what players receive never depends on the backend;
-// a store only reports what it wrote.
+// store reports each committed Mutate here, so what players receive never
+// depends on the backend.
 //
 // Publish failures are logged, never returned: the write already committed,
 // so a fan-out hiccup must not fail the mutation.
@@ -20,7 +20,8 @@ type changePublisher struct {
 	publisher events.Publisher
 }
 
-// diff publishes the delta between the pre-write snapshot and the saved game.
+// diff publishes the delta between the pre-write snapshot and the saved game,
+// with paths positionally encoded against the game's own key order.
 func (p changePublisher) diff(id string, before map[string]interface{}, after *models.Game) {
 	if p.publisher == nil {
 		return
@@ -32,20 +33,32 @@ func (p changePublisher) diff(id string, before map[string]interface{}, after *m
 		return
 	}
 
-	updated, removed := events.Diff(before, afterMap)
+	updatedMap, removedPaths := events.Diff(before, afterMap)
 
-	p.field(id, updated, removed)
-}
+	// Sanitize on string paths first, then encode to positional indices.
+	rawUpdated := make([][]interface{}, 0, len(updatedMap))
+	for k, v := range updatedMap {
+		rawUpdated = append(rawUpdated, []interface{}{k, v})
+	}
+	rawRemoved := make([]interface{}, 0, len(removedPaths))
+	for _, r := range removedPaths {
+		rawRemoved = append(rawRemoved, r)
+	}
+	sanitized, sanitizedRemoved := events.SanitizeDelta(rawUpdated, rawRemoved)
 
-// field publishes dotted-path changes the store made directly.
-func (p changePublisher) field(id string, updated map[string]interface{}, removed []string) {
-	if p.publisher == nil {
-		return
+	afterPos := events.BuildPositionalMap(afterMap)
+	updated := make([][]interface{}, 0, len(sanitized))
+	for _, pair := range sanitized {
+		updated = append(updated, []interface{}{events.EncodePath(pair[0].(string), afterMap, afterPos), pair[1]})
 	}
 
-	// Strip private data so a broadcast delta never exposes more than a
-	// sanitized keyframe would.
-	updated, removed = events.SanitizeDelta(updated, removed)
+	// A removed key is absent from the after-state, so its position comes
+	// from the before-state schema.
+	beforePos := events.BuildPositionalMap(before)
+	removed := make([]interface{}, 0, len(sanitizedRemoved))
+	for _, r := range sanitizedRemoved {
+		removed = append(removed, events.EncodePath(r.(string), before, beforePos))
+	}
 
 	event := events.ChangeEvent{
 		ID:            id,

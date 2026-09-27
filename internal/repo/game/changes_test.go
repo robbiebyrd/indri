@@ -23,7 +23,18 @@ func (p *recordingPublisher) Subscribe(context.Context) (<-chan events.ChangeEve
 	return nil, nil
 }
 
-func TestChangePublisher_DiffPublishesSanitizedDelta(t *testing.T) {
+func snapshot(t *testing.T, g *models.Game) map[string]interface{} {
+	t.Helper()
+
+	m, err := events.ToMap(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return m
+}
+
+func TestChangePublisher_DiffPublishesSanitizedPositionalDelta(t *testing.T) {
 	pub := &recordingPublisher{}
 	cp := changePublisher{ctx: context.Background(), publisher: pub}
 
@@ -34,12 +45,7 @@ func TestChangePublisher_DiffPublishesSanitizedDelta(t *testing.T) {
 		PrivateData: map[string]interface{}{"secret": "x"},
 	}
 
-	beforeMap, err := events.ToMap(before)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cp.diff("g1", beforeMap, after)
+	cp.diff("g1", snapshot(t, before), after)
 
 	if len(pub.events) != 1 {
 		t.Fatalf("published %d events, want 1", len(pub.events))
@@ -49,32 +55,32 @@ func TestChangePublisher_DiffPublishesSanitizedDelta(t *testing.T) {
 	if ev.ID != "g1" || ev.OperationType != events.OpUpdate || ev.Collection != collectionName {
 		t.Errorf("event header = %+v", ev)
 	}
-	if ev.UpdatedFields["data.n"] != 2.0 {
-		t.Errorf("data.n = %v, want 2", ev.UpdatedFields["data.n"])
+	if len(ev.UpdatedFields) != 1 {
+		t.Fatalf("updated = %v, want only data.n (private data must be stripped)", ev.UpdatedFields)
 	}
-	for k := range ev.UpdatedFields {
-		if k == "privateData" || k == "privateData.secret" {
-			t.Errorf("private data leaked into the delta: %v", k)
-		}
+
+	path, ok := ev.UpdatedFields[0][0].([]interface{})
+	if !ok || len(path) != 2 {
+		t.Fatalf("path = %#v, want a two-segment positional path", ev.UpdatedFields[0][0])
+	}
+	if _, isInt := path[0].(int); !isInt {
+		t.Errorf("first segment %#v is not positional", path[0])
+	}
+	if ev.UpdatedFields[0][1] != 2.0 {
+		t.Errorf("value = %v, want 2", ev.UpdatedFields[0][1])
 	}
 }
 
-func TestChangePublisher_FieldAndNoChangeAndNilPublisher(t *testing.T) {
+func TestChangePublisher_NoChangeAndNilPublisherPublishNothing(t *testing.T) {
 	pub := &recordingPublisher{}
-	cp := changePublisher{ctx: context.Background(), publisher: pub}
+	g := &models.Game{Code: "G1"}
 
-	cp.field("g1", map[string]interface{}{"data.x": 1}, nil)
-	cp.field("g1", nil, []string{"data.y"})
-	cp.field("g1", nil, nil)
-
-	if len(pub.events) != 2 {
-		t.Fatalf("published %d events, want 2 (a no-change write publishes nothing)", len(pub.events))
-	}
-	if pub.events[1].RemovedFields[0] != "data.y" {
-		t.Errorf("removed = %v", pub.events[1].RemovedFields)
+	changePublisher{ctx: context.Background(), publisher: pub}.diff("g1", snapshot(t, g), g)
+	if len(pub.events) != 0 {
+		t.Fatalf("published %d events for an unchanged game", len(pub.events))
 	}
 
-	changePublisher{ctx: context.Background()}.field("g1", map[string]interface{}{"data.x": 1}, nil)
+	changePublisher{ctx: context.Background()}.diff("g1", snapshot(t, g), &models.Game{Code: "G2"})
 }
 
 // A publish failure must not fail the write that already committed.
@@ -82,7 +88,7 @@ func TestChangePublisher_PublishErrorIsNotFatal(t *testing.T) {
 	pub := &recordingPublisher{err: errors.New("bus down")}
 	cp := changePublisher{ctx: context.Background(), publisher: pub}
 
-	cp.field("g1", map[string]interface{}{"data.x": 1}, nil)
+	cp.diff("g1", snapshot(t, &models.Game{Code: "A"}), &models.Game{Code: "B"})
 
 	if len(pub.events) != 1 {
 		t.Fatalf("published %d events, want 1", len(pub.events))

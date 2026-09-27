@@ -1,4 +1,5 @@
 import type {UpdateMessage} from "@/models/models";
+import { resolvePath } from "./positional-map.ts"
 
 declare interface Delta {
     timestamp: Date
@@ -18,10 +19,18 @@ export class GameStateParser<T> {
     private cutoff: number = new Date(0).getTime()
     private baseState?: T = undefined
     private currentState?: T = undefined
+    private schema?: Record<string, unknown> = undefined
+
+    setSchema(schema: Record<string, unknown>): void {
+        this.schema = schema
+    }
 
     set(data: T, timestamp: Date): void {
         this.setCutoff(timestamp)
         this.baseState = deepClone(data)
+        if (!this.schema && data !== null && typeof data === "object" && !Array.isArray(data)) {
+            this.setSchema(data as Record<string, unknown>)
+        }
         this.deleteBefore(timestamp)
         this.reapply()
     }
@@ -31,7 +40,7 @@ export class GameStateParser<T> {
     }
 
     update(data: UpdateMessage): void {
-        const timestamp = new Date(data.ts)
+        const timestamp = new Date(data.t)
         if (timestamp.getTime() < this.cutoff) {
             return
         }
@@ -42,6 +51,23 @@ export class GameStateParser<T> {
 
     current(): T | undefined {
         return this.currentState
+    }
+
+    private toDotPath(rawPath: unknown): string {
+        if (typeof rawPath === "string") {
+            // Debug mode: numeric-dotted string like "0.1.1"
+            if (this.schema && /^\d/.test(rawPath)) {
+                const ints = rawPath.split(".").map(Number)
+                return resolvePath(ints, this.schema)
+            }
+            return rawPath
+        }
+        if (Array.isArray(rawPath) && this.schema) {
+            return resolvePath(rawPath as number[], this.schema)
+        }
+        // reapply() exits early when baseState is undefined (set() not yet called),
+        // so schema is always present when toDotPath runs on number[] paths.
+        return String(rawPath)
     }
 
     private reapply(): void {
@@ -57,14 +83,14 @@ export class GameStateParser<T> {
         let state: T = deepClone(this.baseState)
 
         for (const updateMsg of this.deltas) {
-            if (updateMsg.data.removed && updateMsg.data.removed.length > 0) {
-                for (const key of updateMsg.data.removed) {
-                    state = this.deleteJSONKeyByDotPath(state, key)
+            if (updateMsg.data.r) {
+                for (const rawPath of updateMsg.data.r) {
+                    state = this.deleteJSONKeyByDotPath(state, this.toDotPath(rawPath))
                 }
             }
-            if (updateMsg.data.updated && Object.keys(updateMsg.data.updated).length > 0) {
-                for (const [key, value] of Object.entries(updateMsg.data.updated)) {
-                    state = this.updateJSONKeyByDotPath(state, key, value)
+            if (updateMsg.data.u) {
+                for (const [rawPath, value] of updateMsg.data.u) {
+                    state = this.updateJSONKeyByDotPath(state, this.toDotPath(rawPath), value)
                 }
             }
         }
