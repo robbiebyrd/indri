@@ -25,8 +25,9 @@ go test -race ./...                                   # what CI runs
 go test ./internal/services/mutation/                 # one package
 go test -run TestAddPlayer_ConcurrentNoLostUpdates ./internal/repo/game/   # one test
 
-go run ./cmd/server -script ./config.json             # run (defaults to ./config.json)
-go run ./example/tictactoe -script ./config.json      # run the tic-tac-toe example
+go run ./cmd/server -script ./config.json             # run (-script is required)
+go run ./example/tictactoe                            # tic-tac-toe example (-script defaults to ./config.json)
+go run ./cmd/server -script ./config.json -h          # every settings flag; both binaries accept them
 air                                                    # hot reload (.air.toml)
 
 # Infrastructure (MongoDB + Redis) — requires a populated .env
@@ -52,7 +53,12 @@ harmless.
 
 ### Boot chain
 
-`cmd/server/main.go` → `boot.Boot(ctx, scriptPath)` → `boot.Serve(i)`.
+`cmd/server/main.go` → `cli.Parse` → `boot.Boot(ctx, scriptPath)` → `boot.Serve(i)`.
+
+`internal/cli` owns the command line for every server binary (the example included): `-script`,
+`-config` (default `server.json` beside the script), and one flag per `env.Vars` field with a `flag`
+tag. Settings resolve JSON config < env vars < flags. Add a setting's flag there, or
+`TestParse_RegistersAFlagForEverySetting` fails.
 
 `Boot` wires a three-layer injector (`internal/injector/`), in strict order:
 
