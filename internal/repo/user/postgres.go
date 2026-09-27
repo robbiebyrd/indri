@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // registers "pgx" driver for database/sql
-
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	"github.com/robbiebyrd/indri/internal/repo/ids"
@@ -38,20 +36,11 @@ type PostgresStore struct {
 
 var _ Storer = (*PostgresStore)(nil)
 
-func NewPostgresStore(ctx context.Context, uri string) (*PostgresStore, error) {
-	if uri == "" {
-		return nil, errors.New("postgres URI is required")
-	}
-	db, err := sql.Open("pgx", uri)
-	if err != nil {
-		return nil, fmt.Errorf("opening postgres connection: %w", err)
-	}
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("pinging postgres: %w", err)
+func NewPostgresStore(ctx context.Context, db *sql.DB) (*PostgresStore, error) {
+	if db == nil {
+		return nil, errors.New("db is required")
 	}
 	if _, err := db.ExecContext(ctx, userSchemaSQL); err != nil {
-		_ = db.Close()
 		return nil, fmt.Errorf("running user schema DDL: %w", err)
 	}
 	return &PostgresStore{ctx: ctx, db: db}, nil

@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	postgresClient "github.com/robbiebyrd/indri/internal/clients/postgres"
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 )
@@ -21,14 +22,16 @@ func postgresSessionURI(t *testing.T) string {
 
 func newPostgresSessionFixture(t *testing.T) *PostgresStore {
 	t.Helper()
-	store, err := NewPostgresStore(context.Background(), postgresSessionURI(t))
+	db, err := postgresClient.Open(context.Background(), postgresSessionURI(t))
+	if err != nil {
+		t.Fatalf("postgres Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := NewPostgresStore(context.Background(), db)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = store.db.Exec("TRUNCATE TABLE sessions")
-		_ = store.db.Close()
-	})
+	t.Cleanup(func() { _, _ = db.Exec("TRUNCATE TABLE sessions") })
 	return store
 }
 

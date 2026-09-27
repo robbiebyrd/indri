@@ -2,6 +2,7 @@ package injector
 
 import (
 	"context"
+	"database/sql"
 
 	mongodbClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -26,6 +27,9 @@ type ReposInjector struct {
 	UserRepo    userRepo.Storer
 	SessionRepo sessionRepo.Storer
 	ScriptRepo  *scriptRepo.Store
+	// SQLDB is the database/sql pool shared by the sqlite and postgres
+	// stores, closed on shutdown; nil for the mongodb and memory backends.
+	SQLDB *sql.DB
 }
 
 type ClientsInjector struct {

@@ -30,7 +30,7 @@ func Serve(i *injector.Injector) error {
 }
 
 // closeResources releases long-lived clients after the serving goroutines have
-// returned, so a shutdown doesn't leak the Mongo connection pool.
+// returned, so a shutdown doesn't leak the Mongo or SQL connection pool.
 func closeResources(i *injector.Injector) {
 	if i.Transport != nil && !i.Transport.IsClosed() {
 		if err := i.Transport.Close(); err != nil {
@@ -41,6 +41,12 @@ func closeResources(i *injector.Injector) {
 	if i.MongoDBClient != nil && i.MongoDBClient.MongoClient != nil {
 		if err := i.MongoDBClient.MongoClient.Disconnect(context.Background()); err != nil {
 			log.Printf("error disconnecting from MongoDB: %v", err)
+		}
+	}
+
+	if i.ReposInjector != nil && i.SQLDB != nil {
+		if err := i.SQLDB.Close(); err != nil {
+			log.Printf("error closing SQL database pool: %v", err)
 		}
 	}
 }

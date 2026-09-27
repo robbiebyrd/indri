@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	postgresClient "github.com/robbiebyrd/indri/internal/clients/postgres"
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	"github.com/robbiebyrd/indri/internal/services/events"
@@ -25,19 +26,21 @@ func postgresURI(t *testing.T) string {
 
 func newPostgresFixture(t *testing.T) *PostgresStore {
 	t.Helper()
+	db, err := postgresClient.Open(context.Background(), postgresURI(t))
+	if err != nil {
+		t.Fatalf("postgres Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
 	store, err := NewPostgresStore(
 		context.Background(),
-		postgresURI(t),
+		db,
 		lock.NewInProcess(),
 		events.NewInProcess(),
 	)
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = store.db.Exec("TRUNCATE TABLE games")
-		_ = store.db.Close()
-	})
+	t.Cleanup(func() { _, _ = db.Exec("TRUNCATE TABLE games") })
 	return store
 }
 
