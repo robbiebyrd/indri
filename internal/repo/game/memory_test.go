@@ -26,15 +26,6 @@ func makeScript() *models.Script {
 	}
 }
 
-func scriptWithTeams() *models.Script {
-	return &models.Script{
-		Teams: map[string]models.Team{
-			"red":  {Name: "Red", PlayerIDs: []string{}},
-			"blue": {Name: "Blue", PlayerIDs: []string{}},
-		},
-	}
-}
-
 func TestNewMemoryStore_ReturnsUsableStore(t *testing.T) {
 	store := newMemoryFixture(t)
 	if store == nil {

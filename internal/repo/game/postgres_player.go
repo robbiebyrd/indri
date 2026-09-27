@@ -1,79 +1,21 @@
 package game
 
-import (
-	"fmt"
-
-	"github.com/robbiebyrd/indri/internal/models"
-	repoErrors "github.com/robbiebyrd/indri/internal/repo"
-)
-
-func (s *PostgresStore) AddPlayer(id string, userId string, displayName string) error {
-	return s.Mutate(id, func(g *models.Game) error {
-		if _, exists := g.Players[userId]; exists {
-			return fmt.Errorf("player %q: %w", userId, repoErrors.ErrDuplicate)
-		}
-		if g.Players == nil {
-			g.Players = map[string]models.Player{}
-		}
-		g.Players[userId] = models.Player{
-			Name:      displayName,
-			Connected: false,
-		}
-		return nil
-	})
+// AssignSlot claims the first empty slot in teamId for userId.
+func (s *PostgresStore) AssignSlot(id string, teamId string, userId string, displayName string) (string, error) {
+	return assignSlot(s, id, teamId, userId, displayName)
 }
 
-func (s *PostgresStore) RemovePlayer(id string, userId string) error {
-	return s.Mutate(id, func(g *models.Game) error {
-		delete(g.Players, userId)
-		return nil
-	})
+// RemovePlayer empties a slot, keeping it in place for reassignment.
+func (s *PostgresStore) RemovePlayer(id string, slotId string) error {
+	return removePlayer(s, id, slotId)
 }
 
-func (s *PostgresStore) HasPlayer(id string, userId string) bool {
-	g, err := s.Get(id)
-	if err != nil {
-		return false
-	}
-	_, has := g.Players[userId]
-	return has
+// ConnectPlayer marks a slot's player as connected.
+func (s *PostgresStore) ConnectPlayer(id string, slotId string) error {
+	return setConnected(s, id, slotId, true)
 }
 
-func (s *PostgresStore) PlayerOnATeam(id string, userId string) bool {
-	g, err := s.Get(id)
-	if err != nil {
-		return false
-	}
-	for _, team := range g.Teams {
-		for _, pid := range team.PlayerIDs {
-			if pid == userId {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (s *PostgresStore) ConnectPlayer(id string, userId string) error {
-	return s.Mutate(id, func(g *models.Game) error {
-		p, ok := g.Players[userId]
-		if !ok {
-			return fmt.Errorf("player %q: %w", userId, repoErrors.ErrNotFound)
-		}
-		p.Connected = true
-		g.Players[userId] = p
-		return nil
-	})
-}
-
-func (s *PostgresStore) DisconnectPlayer(id string, userId string) error {
-	return s.Mutate(id, func(g *models.Game) error {
-		p, ok := g.Players[userId]
-		if !ok {
-			return fmt.Errorf("player %q: %w", userId, repoErrors.ErrNotFound)
-		}
-		p.Connected = false
-		g.Players[userId] = p
-		return nil
-	})
+// DisconnectPlayer marks a slot's player as disconnected.
+func (s *PostgresStore) DisconnectPlayer(id string, slotId string) error {
+	return setConnected(s, id, slotId, false)
 }

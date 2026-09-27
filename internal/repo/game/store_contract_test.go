@@ -10,7 +10,8 @@ import (
 )
 
 // Player behavior every game store must share. Each test runs against every
-// backend available here: memory and SQLite always, MongoDB when reachable.
+// backend available here: memory and SQLite always, MongoDB when reachable,
+// PostgreSQL when INDRI_TEST_POSTGRES_URI is set.
 
 func eachStore(t *testing.T, test func(t *testing.T, store Storer)) {
 	t.Helper()
@@ -18,6 +19,7 @@ func eachStore(t *testing.T, test func(t *testing.T, store Storer)) {
 	t.Run("memory", func(t *testing.T) { test(t, newMemoryFixture(t)) })
 	t.Run("sqlite", func(t *testing.T) { test(t, newSQLiteFixture(t)) })
 	t.Run("mongo", func(t *testing.T) { test(t, newTestStore(t)) })
+	t.Run("postgres", func(t *testing.T) { test(t, newPostgresFixture(t)) })
 }
 
 // twoSlotGame creates a game whose "red" team has two slots.

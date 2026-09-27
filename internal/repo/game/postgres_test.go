@@ -181,66 +181,20 @@ func TestPostgresStore_Mutate_UnknownID(t *testing.T) {
 	}
 }
 
-func TestPostgresStore_AddPlayer_ThenHasPlayer(t *testing.T) {
-	store := newPostgresFixture(t)
-	g, _ := store.New("ABCD", makeScript(), false)
-	if err := store.AddPlayer(g.ID, "user-1", "Alice"); err != nil {
-		t.Fatalf("AddPlayer: %v", err)
-	}
-	if !store.HasPlayer(g.ID, "user-1") {
-		t.Error("HasPlayer(user-1) = false")
-	}
-	if store.HasPlayer(g.ID, "user-x") {
-		t.Error("HasPlayer(user-x) = true")
-	}
-	got, _ := store.Get(g.ID)
-	if got.Players["user-1"].Name != "Alice" {
-		t.Errorf("Name = %q; want Alice", got.Players["user-1"].Name)
-	}
-}
-
-func TestPostgresStore_RemovePlayer(t *testing.T) {
-	store := newPostgresFixture(t)
-	g, _ := store.New("ABCD", makeScript(), false)
-	_ = store.AddPlayer(g.ID, "user-1", "Alice")
-	if err := store.RemovePlayer(g.ID, "user-1"); err != nil {
-		t.Fatalf("RemovePlayer: %v", err)
-	}
-	if store.HasPlayer(g.ID, "user-1") {
-		t.Error("HasPlayer(user-1) = true after remove")
-	}
-}
-
-func TestPostgresStore_ConnectDisconnectPlayer(t *testing.T) {
-	store := newPostgresFixture(t)
-	g, _ := store.New("ABCD", makeScript(), false)
-	_ = store.AddPlayer(g.ID, "user-1", "Alice")
-	if err := store.ConnectPlayer(g.ID, "user-1"); err != nil {
-		t.Fatalf("ConnectPlayer: %v", err)
-	}
-	got, _ := store.Get(g.ID)
-	if !got.Players["user-1"].Connected {
-		t.Errorf("Connected = false after ConnectPlayer")
-	}
-	if err := store.DisconnectPlayer(g.ID, "user-1"); err != nil {
-		t.Fatalf("DisconnectPlayer: %v", err)
-	}
-	got, _ = store.Get(g.ID)
-	if got.Players["user-1"].Connected {
-		t.Errorf("Connected = true after DisconnectPlayer")
-	}
-}
-
-// TestPostgresStore_ConcurrentUpdateFieldAndAddPlayer_NoLostUpdates proves
-// that Update/UpdateField/DeleteField and Mutate-based writers (AddPlayer)
+// TestPostgresStore_ConcurrentUpdateFieldAndAssignSlot_NoLostUpdates proves
+// that Update/UpdateField/DeleteField and Mutate-based writers (AssignSlot)
 // share the same version-fenced, lock-serialized write path: every one of
 // the N*2 concurrent writes must land, with no lost updates, and the final
 // version must equal exactly 1 (creation) + the number of committed writes.
-func TestPostgresStore_ConcurrentUpdateFieldAndAddPlayer_NoLostUpdates(t *testing.T) {
-	store := newPostgresFixture(t)
-	g, _ := store.New("ABCD", makeScript(), false)
-
+func TestPostgresStore_ConcurrentUpdateFieldAndAssignSlot_NoLostUpdates(t *testing.T) {
 	const n = 20
+
+	store := newPostgresFixture(t)
+	g, _ := store.New("ABCD", &models.Script{
+		Config: models.Config{MaxPlayersPerTeam: n},
+		Teams:  map[string]models.Team{"red": {Name: "Red"}},
+	}, false)
+
 	var wg sync.WaitGroup
 	errCh := make(chan error, n*2)
 
@@ -257,8 +211,8 @@ func TestPostgresStore_ConcurrentUpdateFieldAndAddPlayer_NoLostUpdates(t *testin
 		go func() {
 			defer wg.Done()
 			userID := fmt.Sprintf("user-%d", i)
-			if err := store.AddPlayer(g.ID, userID, fmt.Sprintf("Player %d", i)); err != nil {
-				errCh <- fmt.Errorf("AddPlayer(%d): %w", i, err)
+			if _, err := store.AssignSlot(g.ID, "red", userID, fmt.Sprintf("Player %d", i)); err != nil {
+				errCh <- fmt.Errorf("AssignSlot(%d): %w", i, err)
 			}
 		}()
 	}
@@ -284,8 +238,14 @@ func TestPostgresStore_ConcurrentUpdateFieldAndAddPlayer_NoLostUpdates(t *testin
 			t.Errorf("data.%s = %v; want %v", key, fv, want)
 		}
 
-		userID := fmt.Sprintf("user-%d", i)
-		if _, ok := got.Players[userID]; !ok {
+	}
+
+	assigned := map[string]bool{}
+	for _, p := range got.Players {
+		assigned[p.UserID] = true
+	}
+	for i := 0; i < n; i++ {
+		if userID := fmt.Sprintf("user-%d", i); !assigned[userID] {
 			t.Errorf("player %s missing", userID)
 		}
 	}
@@ -293,75 +253,5 @@ func TestPostgresStore_ConcurrentUpdateFieldAndAddPlayer_NoLostUpdates(t *testin
 	wantVersion := int64(1 + 2*n)
 	if got.Version != wantVersion {
 		t.Errorf("Version=%d; want %d (lost update if lower)", got.Version, wantVersion)
-	}
-}
-
-func TestPostgresStore_AddPlayerToTeam_ThenHasPlayerOnTeam(t *testing.T) {
-	store := newPostgresFixture(t)
-	g, _ := store.New("ABCD", scriptWithTeams(), false)
-	_ = store.AddPlayer(g.ID, "user-1", "Alice")
-	if err := store.AddPlayerToTeam(g.ID, "red", "user-1"); err != nil {
-		t.Fatalf("AddPlayerToTeam: %v", err)
-	}
-	if !store.HasPlayerOnTeam(g.ID, "red", "user-1") {
-		t.Fatal("HasPlayerOnTeam(red, user-1) = false")
-	}
-}
-
-func TestPostgresStore_ChangePlayerTeam(t *testing.T) {
-	store := newPostgresFixture(t)
-	g, _ := store.New("ABCD", scriptWithTeams(), false)
-	_ = store.AddPlayer(g.ID, "user-1", "Alice")
-	_ = store.AddPlayerToTeam(g.ID, "red", "user-1")
-	if err := store.ChangePlayerTeam(g.ID, "blue", "user-1"); err != nil {
-		t.Fatalf("ChangePlayerTeam: %v", err)
-	}
-	teamID, err := store.PlayerOnWhichTeam(g.ID, "user-1")
-	if err != nil {
-		t.Fatalf("PlayerOnWhichTeam: %v", err)
-	}
-	if teamID == nil || *teamID != "blue" {
-		t.Errorf("team: want blue, got %v", teamID)
-	}
-}
-
-func TestPostgresStore_RemovePlayerFromTeam(t *testing.T) {
-	store := newPostgresFixture(t)
-	g, _ := store.New("ABCD", scriptWithTeams(), false)
-	_ = store.AddPlayer(g.ID, "user-1", "Alice")
-	_ = store.AddPlayerToTeam(g.ID, "red", "user-1")
-	if err := store.RemovePlayerFromTeam(g.ID, "user-1"); err != nil {
-		t.Fatalf("RemovePlayerFromTeam: %v", err)
-	}
-	if store.HasPlayerOnTeam(g.ID, "red", "user-1") {
-		t.Errorf("still on team after remove")
-	}
-}
-
-func TestPostgresStore_SetPlayerAsHost_ThenPlayerIsHost(t *testing.T) {
-	store := newPostgresFixture(t)
-	g, _ := store.New("ABCD", makeScript(), false)
-	_ = store.AddPlayer(g.ID, "user-1", "Alice")
-	if store.HasHost(g.ID) {
-		t.Fatal("HasHost = true before SetPlayerAsHost")
-	}
-	if err := store.SetPlayerAsHost(g.ID, "user-1"); err != nil {
-		t.Fatalf("SetPlayerAsHost: %v", err)
-	}
-	if !store.HasHost(g.ID) || !store.PlayerIsHost(g.ID, "user-1") {
-		t.Error("SetPlayerAsHost did not take effect")
-	}
-}
-
-func TestPostgresStore_UnsetHost(t *testing.T) {
-	store := newPostgresFixture(t)
-	g, _ := store.New("ABCD", makeScript(), false)
-	_ = store.AddPlayer(g.ID, "user-1", "Alice")
-	_ = store.SetPlayerAsHost(g.ID, "user-1")
-	if err := store.UnsetHost(g.ID); err != nil {
-		t.Fatalf("UnsetHost: %v", err)
-	}
-	if store.HasHost(g.ID) {
-		t.Error("HasHost = true after UnsetHost")
 	}
 }

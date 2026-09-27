@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers "pgx" driver for database/sql
 
@@ -244,65 +245,6 @@ func (s *PostgresStore) saveWithVersion(g *models.Game, expectedVersion int64) (
 	return n == 1, nil
 }
 
-// publishFieldUpdate emits a partial-update event, mirroring MemoryStore.
-func (s *PostgresStore) publishFieldUpdate(id string, updated map[string]interface{}, removed []string) {
-	if s.publisher == nil {
-		return
-	}
-	updated, removed = events.SanitizeDelta(updated, removed)
-	ev := events.ChangeEvent{
-		ID:            id,
-		OperationType: events.OpUpdate,
-		Timestamp:     time.Now(),
-		Collection:    collectionName,
-		UpdatedFields: updated,
-		RemovedFields: removed,
-	}
-	if !ev.HasChanges() {
-		return
-	}
-	_ = s.publisher.Publish(s.ctx, ev)
-}
-
-// publishDiff computes and publishes the delta between a pre-mutation JSON
-// snapshot and the updated game.
-func (s *PostgresStore) publishDiff(id string, before map[string]interface{}, after *models.Game) {
-	if s.publisher == nil {
-		return
-	}
-	afterMap, err := events.ToMap(after)
-	if err != nil {
-		return
-	}
-	updated, removed := events.Diff(before, afterMap)
-	s.publishFieldUpdate(id, updated, removed)
-}
-
-// mutateFenced runs a version-fenced read-modify-write via mutation.Run,
-// under the same per-game lock key as Mutate, but does not publish a change
-// event itself — callers publish using whatever delta shape matches their
-// semantics (a full diff, or a single field) once the write has committed.
-// saveWithVersion already bumps Version and UpdatedAt on commit, so apply
-// must not touch either.
-func (s *PostgresStore) mutateFenced(id string, apply func(g *models.Game) error) error {
-	return mutation.Run(
-		s.ctx,
-		s.locks,
-		"game:"+id,
-		func() (*models.Game, int64, error) {
-			g, err := s.Get(id)
-			if err != nil {
-				return nil, 0, err
-			}
-			return g, g.Version, nil
-		},
-		apply,
-		func(g *models.Game, expectedVersion int64) (bool, error) {
-			return s.saveWithVersion(g, expectedVersion)
-		},
-	)
-}
-
 // Update delegates to Mutate so the field-copy from UpdateGame runs under
 // the same lock + version fence as every other writer, and the resulting
 // delta is published as a full diff exactly as Mutate already does.
@@ -332,41 +274,11 @@ func (s *PostgresStore) Update(id string, upd *models.UpdateGame) error {
 }
 
 func (s *PostgresStore) UpdateField(id string, key string, value interface{}) error {
-	err := s.mutateFenced(id, func(g *models.Game) error {
-		m, err := events.ToMap(g)
-		if err != nil {
-			return fmt.Errorf("snapshot: %w", err)
-		}
-		applyDottedPath(m, key, value, false)
-		if err := fromMap(m, g); err != nil {
-			return fmt.Errorf("rehydrate: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("saving field update: %w", err)
-	}
-	s.publishFieldUpdate(id, map[string]interface{}{key: value}, nil)
-	return nil
+	return updateField(s, id, key, value)
 }
 
 func (s *PostgresStore) DeleteField(id string, key string) error {
-	err := s.mutateFenced(id, func(g *models.Game) error {
-		m, err := events.ToMap(g)
-		if err != nil {
-			return fmt.Errorf("snapshot: %w", err)
-		}
-		applyDottedPath(m, key, nil, true)
-		if err := fromMap(m, g); err != nil {
-			return fmt.Errorf("rehydrate: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("saving field delete: %w", err)
-	}
-	s.publishFieldUpdate(id, nil, []string{key})
-	return nil
+	return deleteField(s, id, key)
 }
 
 // Mutate uses mutation.Run for the retry-on-conflict CAS loop. The version
@@ -398,7 +310,7 @@ func (s *PostgresStore) Mutate(id string, apply func(g *models.Game) error) erro
 				return false, err
 			}
 			if committed {
-				s.publishDiff(id, before, g)
+				s.changes.diff(id, before, g)
 			}
 			return committed, nil
 		},
