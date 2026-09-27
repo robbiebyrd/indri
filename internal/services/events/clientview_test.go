@@ -5,6 +5,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+
+	"github.com/robbiebyrd/indri/internal/models"
 )
 
 func TestClientView_StripsPrivateDataEverywhereAndTheLayout(t *testing.T) {
@@ -93,4 +97,29 @@ func resolveLikeTheClient(path []interface{}, schema interface{}) string {
 	}
 
 	return strings.Join(parts, ".")
+}
+
+// Stores decode nested documents differently (MongoDB yields bson.D); a
+// game's JSON form is the same on every backend, so Layout reads it there.
+func TestLayout_ReadsTheLayoutFromAGamesJSONForm(t *testing.T) {
+	for name, layout := range map[string]interface{}{
+		"map":    map[string]interface{}{"grid": map[string]interface{}{"cols": 3}},
+		"bson.D": bson.D{{Key: "grid", Value: bson.D{{Key: "cols", Value: 3}}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			doc, err := ToMap(&models.Game{PublicData: map[string]interface{}{"layout": layout}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			want := map[string]interface{}{"grid": map[string]interface{}{"cols": 3.0}}
+			if got := Layout(doc); !reflect.DeepEqual(got, want) {
+				t.Fatalf("Layout = %#v, want %#v", got, want)
+			}
+		})
+	}
+
+	if got := Layout(map[string]interface{}{"data": map[string]interface{}{}}); got != nil {
+		t.Fatalf("a game without a layout gave %#v, want nil", got)
+	}
 }

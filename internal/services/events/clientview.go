@@ -14,3 +14,12 @@ func ClientView(doc map[string]interface{}) map[string]interface{} {
 
 	return view
 }
+
+// Layout returns the layout (data.layout) of a game document in its JSON map
+// form (see ToMap), or nil. Reading the JSON form gives the same map on every
+// store, whatever type the store decoded the layout into.
+func Layout(doc map[string]interface{}) map[string]interface{} {
+	data, _ := doc["data"].(map[string]interface{})
+	layout, _ := data["layout"].(map[string]interface{})
+	return layout
+}

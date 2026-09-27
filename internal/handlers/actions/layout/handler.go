@@ -5,6 +5,7 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
 	"github.com/robbiebyrd/indri/internal/transport"
 	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
@@ -52,7 +53,13 @@ func applyLayoutOp(g *models.Game, op *Op) error {
 		g.PublicData = map[string]interface{}{}
 	}
 
-	layout, _ := g.PublicData["layout"].(map[string]interface{})
+	// Read the layout from the game's JSON form: stores decode it into
+	// different types (MongoDB: bson.D), and an edit must build on it.
+	doc, err := events.ToMap(g)
+	if err != nil {
+		return fmt.Errorf("reading layout: %w", err)
+	}
+	layout := events.Layout(doc)
 	if layout == nil {
 		layout = map[string]interface{}{}
 	}

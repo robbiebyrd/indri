@@ -11,6 +11,8 @@ import (
 	"errors"
 	"testing"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
+
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
@@ -492,5 +494,28 @@ func TestApplyLayoutOp_InvalidLayout_ReturnsError(t *testing.T) {
 	err := applyLayoutOp(g, op)
 	if err == nil {
 		t.Error("expected error for invalid grid dims, got nil")
+	}
+}
+
+// MongoDB decodes the stored layout as bson.D; an edit must build on it, not
+// start from an empty layout and drop the existing scenes.
+func TestApplyLayoutOp_SetGrid_KeepsALayoutStoredAsBSON(t *testing.T) {
+	g := baseGame()
+	g.PublicData["layout"] = bson.D{
+		{Key: "grid", Value: bson.D{{Key: "cols", Value: 10}, {Key: "rows", Value: 10}}},
+		{Key: "scenes", Value: bson.D{{Key: "scene1", Value: bson.D{}}}},
+	}
+
+	op := &Op{Op: "setGrid", Grid: map[string]interface{}{"cols": float64(12), "rows": float64(12)}}
+	if err := applyLayoutOp(g, op); err != nil {
+		t.Fatalf("applyLayoutOp: %v", err)
+	}
+
+	layout := g.PublicData["layout"].(map[string]interface{})
+	if _, kept := layout["scenes"]; !kept {
+		t.Fatalf("existing scenes dropped by the edit: %v", layout)
+	}
+	if layout["grid"].(map[string]interface{})["cols"] != float64(12) {
+		t.Fatalf("grid not updated: %v", layout["grid"])
 	}
 }
