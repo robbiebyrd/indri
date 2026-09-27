@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	postgresClient "github.com/robbiebyrd/indri/internal/clients/postgres"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -119,5 +120,65 @@ func TestSessionPostgresStore_FindFirst_TokenRoundtrips(t *testing.T) {
 	}
 	if got.Token != "tok-1" {
 		t.Fatalf("FindFirst: token did not round-trip, got %q", got.Token)
+	}
+}
+
+// backdatePostgresSession makes a stored session older than sessionMaxAge.
+func backdatePostgresSession(t *testing.T, s *PostgresStore, id string) {
+	t.Helper()
+	res, err := s.db.Exec(
+		`UPDATE sessions SET created_at = $2 WHERE id = $1`,
+		id, time.Now().Add(-sessionMaxAge-time.Hour),
+	)
+	if err != nil {
+		t.Fatalf("backdating session: %v", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		t.Fatalf("backdating session: want 1 row affected, got %d", n)
+	}
+}
+
+func TestSessionPostgresStore_ExpiredSession_IsNotFound(t *testing.T) {
+	s := newPostgresSessionFixture(t)
+	sess, err := s.New(models.CreateSession{Token: "t-1", UserID: "u-1", GameID: "g-1"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	backdatePostgresSession(t, s, sess.ID)
+
+	if _, err := s.Get(sess.ID); !errors.Is(err, repoErrors.ErrNotFound) {
+		t.Errorf("Get: want ErrNotFound, got %v", err)
+	}
+	if _, err := s.GetByToken("t-1"); !errors.Is(err, repoErrors.ErrNotFound) {
+		t.Errorf("GetByToken: want ErrNotFound, got %v", err)
+	}
+	if _, err := s.FindFirst("userId", "u-1"); !errors.Is(err, repoErrors.ErrNotFound) {
+		t.Errorf("FindFirst(userId): want ErrNotFound, got %v", err)
+	}
+	if _, err := s.FindFirst("gameId", "g-1"); !errors.Is(err, repoErrors.ErrNotFound) {
+		t.Errorf("FindFirst(gameId): want ErrNotFound, got %v", err)
+	}
+	if exists, err := s.Exists(sess.ID); err != nil || exists {
+		t.Errorf("Exists: want false, got %v (err %v)", exists, err)
+	}
+}
+
+func TestSessionPostgresStore_New_AfterExpiry_CreatesFreshSession(t *testing.T) {
+	s := newPostgresSessionFixture(t)
+	old, err := s.New(models.CreateSession{Token: "t-old", UserID: "u-1"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	backdatePostgresSession(t, s, old.ID)
+
+	fresh, err := s.New(models.CreateSession{Token: "t-new", UserID: "u-1"})
+	if err != nil {
+		t.Fatalf("New after expiry: %v", err)
+	}
+	if fresh.ID == old.ID || fresh.Token != "t-new" {
+		t.Errorf("want a fresh session with token t-new, got ID %q (old %q) token %q", fresh.ID, old.ID, fresh.Token)
+	}
+	if _, err := s.GetByToken("t-old"); !errors.Is(err, repoErrors.ErrNotFound) {
+		t.Errorf("GetByToken(old token): want ErrNotFound, got %v", err)
 	}
 }
