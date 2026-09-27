@@ -2,6 +2,7 @@ package transport
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -9,9 +10,10 @@ import (
 // connection on transports whose two directions travel separately (SSE).
 const ConnectionIDHeader = "X-Indri-Connection-Id"
 
-// OriginChecker guards against cross-site hijacking: requests with no Origin
-// (native/CLI clients) are allowed; browser Origins must be in the
-// comma-separated allowlist.
+// OriginChecker guards against cross-site hijacking. Allowed: requests with no
+// Origin (CLI and most native clients), same-origin requests (React Native's
+// iOS WebSocket always sends the target's own origin, and no other site can
+// make a browser send it), and Origins in the comma-separated allowlist.
 func OriginChecker(allowedOrigins string) func(*http.Request) bool {
 	allowed := make(map[string]struct{})
 
@@ -27,9 +29,13 @@ func OriginChecker(allowedOrigins string) func(*http.Request) bool {
 			return true
 		}
 
-		_, ok := allowed[origin]
+		if _, ok := allowed[origin]; ok {
+			return true
+		}
 
-		return ok
+		u, err := url.Parse(origin)
+
+		return err == nil && strings.EqualFold(u.Host, r.Host)
 	}
 }
 

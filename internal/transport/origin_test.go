@@ -20,11 +20,16 @@ func TestOriginChecker(t *testing.T) {
 		{"allowlisted origin", "https://a.example", true},
 		{"second allowlisted origin, whitespace trimmed", "https://b.example", true},
 		{"unlisted origin", "https://evil.example", false},
+		// React Native's iOS WebSocket always sends the target's own origin.
+		{"same origin as the server", "http://game.example:5002", true},
+		{"same origin, host case differs", "http://GAME.example:5002", true},
+		{"same host, different port", "http://game.example:8081", false},
+		{"malformed origin", "http://%zz", false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r := httptest.NewRequest(http.MethodGet, "http://game.example:5002/", nil)
 			if tc.origin != "" {
 				r.Header.Set("Origin", tc.origin)
 			}

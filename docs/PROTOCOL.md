@@ -7,9 +7,11 @@ The messages below are the same on every transport; only the framing differs (se
 Every message is a JSON object. Client→server messages **must** carry a string `action` field; the
 router uses it to pick handlers and removes it from the payload before the handler sees it.
 
-Every transport is origin-checked (`internal/transport/origin.go`). Requests with no `Origin` header
-(native apps, CLI tools, server-to-server) are always allowed; browser requests are allowed only if
-their origin appears in `INDRI_ALLOWED_ORIGINS`. An empty allowlist rejects all cross-origin browsers.
+Every transport is origin-checked (`internal/transport/origin.go`). Allowed: requests with no
+`Origin` header (CLI tools, server-to-server, most native clients); same-origin requests, whose
+`Origin` host matches the request's `Host` (React Native's iOS WebSocket always sends the target's
+own origin); and origins listed in `INDRI_ALLOWED_ORIGINS`. An empty allowlist rejects all
+cross-origin browsers.
 The HTTP-based endpoints also answer CORS preflights for allowed origins.
 
 ---
