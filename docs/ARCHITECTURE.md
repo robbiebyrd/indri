@@ -177,6 +177,43 @@ rebuilds from a fresh clone on every reapply, drops deltas older than the keyfra
 that arrive before any keyframe, and refuses to write through `__proto__`/`constructor`/`prototype` in
 server-supplied dot paths.
 
+## Layout authoring
+
+The layout authoring feature lets a game host mutate `game.PublicData["layout"]` at runtime
+through the `layout` WebSocket action. The full op vocabulary, authorization matrix, and
+structural constraints are in `docs/PROTOCOL.md § layout`.
+
+### Server side (`internal/handlers/actions/layout/`)
+
+| File | Role |
+|---|---|
+| `op.go` | Op struct, typed sentinel errors, `DecodeOp`, `opRequired` table, `isMissing` |
+| `validate.go` | `ValidateLayout` — size cap, privateData guard, grid dims, overlap/bounds, sub-grid depth |
+| `handler.go` | Auth chain → `GameRepo.Mutate` → `applyLayoutOp` → `ValidateLayout` |
+
+`ValidateLayout` is called inside `Mutate`'s apply function, so a validation failure rolls
+back atomically with no write and no delta. It mirrors the TypeScript `parseLayout` validator
+in `client/layout/schema/layout.ts` — **both must be changed together** whenever the rules
+change.
+
+Structural limits: `minDim=8`, `maxDim=4096`, `maxDepth=4` (sub-grid), `maxWidgets=300`,
+`maxBytes=256 KiB`.
+
+### Client side (`client/layout/edit/`, `client/components/board/editor/`)
+
+| Module | Role |
+|---|---|
+| `edit/ops.ts` | `Sender` interface; op builder functions for all 7 ops; `moveWidget` runs `canPlace()` before sending |
+| `edit/place.ts` | `firstFree` — row-major first-fit, bounded to 64×64 to avoid O(n³) scan on large grids |
+| `edit/picker-helpers.ts` | Pure parse/format helpers: `parseColor`, `clampNumber`, `parseDate`, `dedupeValues` |
+| `editor/drag-resize.tsx` | `DragResize` (Pan gesture, one op per gesture end, snap-back on reject), `GridOverlay` (suppressed above 4096 cells) |
+| `editor/palette.tsx` | `Palette` (chip list from registry), `RemoveButton` |
+| `editor/config-panel.tsx` | `ConfigPanel` — descriptor → picker via `PICKERS` mapped type; validates against widget schema before emitting |
+| `editor/pickers/*.tsx` | Eight hand-rolled cross-platform pickers; text/number/color/date/uri debounce at 250 ms |
+
+`GestureHandlerRootView` wraps the app root in `client/app/_layout.tsx` (required on every
+platform including web). The edit-mode toggle lives in `client/app/board/index.tsx`.
+
 ## Configuration
 
 `internal/repo/env/env.go`, all variables prefixed `INDRI_`, documented in `.env.example`. Highlights:

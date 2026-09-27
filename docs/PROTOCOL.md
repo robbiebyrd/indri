@@ -141,6 +141,79 @@ target is removed from the game and force-disconnected if currently connected.
 Runs the same path as a disconnect: marks the player disconnected in their game, sends
 `{"disconnected": true}`, and closes the connection. No-ops if the connection was never authenticated.
 
+### `layout`
+
+Host-only. Mutates `game.PublicData["layout"]` (the `data.layout` path on the wire) via a single
+sub-operation. The caller is always authorized from their own connection's session key — never from
+any `userId` in the payload.
+
+Every layout message carries `action: "layout"`, the game `code`, and an `op` field that selects the
+sub-operation. Unknown top-level keys are rejected.
+
+#### Authorization
+
+| Condition | Result |
+|---|---|
+| Connection has no `sessionId` key | reject — "must be logged in to edit a layout" |
+| Session resolves but `UserID` is nil | reject — "calling session has no user id" |
+| `session.GameID` ≠ target game | reject — "caller is not in game" |
+| `g.Players[userId].Host` is false | reject — "caller is not the host" |
+| Host, op fails structural validation | reject with the specific issue; no write |
+| Host, valid op | `Mutate` → `Diff` → publish → broadcast |
+
+#### Op table
+
+| `op` | Additional required fields | Effect |
+|---|---|---|
+| `addWidget` | `sceneId`, `widgetId`, `widget` | Inserts or replaces a widget in the scene |
+| `removeWidget` | `sceneId`, `widgetId` | Deletes the widget; no-op (ErrAbort) if absent |
+| `setPlacement` | `sceneId`, `widgetId`, `placement` | Replaces the widget's placement (move or resize) |
+| `setWidgetConfig` | `sceneId`, `widgetId`, `config` | Merges config keys into the widget's config |
+| `setStyle` | `scope`, `style` (+ `sceneId` and/or `widgetId` per scope) | Sets style on board, scene, or widget |
+| `setGrid` | `grid` | Replaces the root grid `{cols, rows}` |
+| `setScript` | `scope`, `source` (+ `sceneId` and/or `widgetId` per scope) | Sets script source on board, scene, or widget |
+
+`setPlacement` covers both move and resize (same field, different values).
+
+#### Structural constraints enforced by the server
+
+- Grid `cols` and `rows` must be integers in `[8, 4096]`.
+- Placement `w` and `h` must be positive integers; `col` and `row` must be non-negative.
+- Grid-kind placements must not overlap with other grid-kind placements in the same scene.
+- Grid-kind placements must not exceed the grid bounds.
+- Absolute-kind placement values must be percentage strings (`"10%"`), not pixel numbers.
+- Sub-grid nesting depth is capped at 4.
+- Total widget count (across all scenes, including sub-grid children) is capped at 300.
+- Serialized layout size is capped at 256 KiB.
+- The key `privateData` is reserved and rejected anywhere in the layout document.
+
+#### Wire examples
+
+```json
+{ "action": "layout", "code": "MYGAME", "op": "addWidget",
+  "sceneId": "scene1", "widgetId": "title",
+  "widget": {"type": "text", "placement": {"kind": "grid", "col": 0, "row": 0, "w": 4, "h": 2},
+              "config": {"text": "Hello"}} }
+
+{ "action": "layout", "code": "MYGAME", "op": "setPlacement",
+  "sceneId": "scene1", "widgetId": "title",
+  "placement": {"kind": "grid", "col": 2, "row": 1, "w": 4, "h": 2} }
+
+{ "action": "layout", "code": "MYGAME", "op": "setGrid",
+  "grid": {"cols": 12, "rows": 8} }
+
+{ "action": "layout", "code": "MYGAME", "op": "setStyle",
+  "scope": "widget", "sceneId": "scene1", "widgetId": "title",
+  "style": {"backgroundColor": "#003366"} }
+```
+
+#### Security note
+
+The server validates structure but does not sandbox widget config contents. Host-supplied script
+source (`setScript`) and image URIs (`addWidget` with `type: "image"`) are stored and served
+verbatim. Deployers are responsible for URI allow-listing and any XSS mitigations appropriate to
+their environment.
+
 ### Pseudo-actions: `received` and `processed`
 
 `router.Act` runs handlers registered under the literal action `received` before, and `processed` after,

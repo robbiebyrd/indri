@@ -21,9 +21,10 @@ interface Props {
     grid: GridSize
     overrides?: OverrideMap
     onWidgetPress?: (id: string) => void
+    editMode?: boolean
 }
 
-export function SceneView({scene, grid, overrides, onWidgetPress}: Props) {
+export function SceneView({scene, grid, overrides, onWidgetPress, editMode = false}: Props) {
     return (
         <StyledBox style={scene.style} viewStyle={{flex: 1, position: "relative"}}>
             {Object.entries(scene.widgets).map(([id, widget]) => (
@@ -34,7 +35,7 @@ export function SceneView({scene, grid, overrides, onWidgetPress}: Props) {
                     grid={grid}
                     configOverride={overrides?.widgets[id]?.config}
                     styleOverride={overrides?.widgets[id]?.style}
-                    onPress={onWidgetPress}
+                    onPress={editMode ? undefined : onWidgetPress}
                 />
             ))}
         </StyledBox>

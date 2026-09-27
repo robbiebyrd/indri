@@ -230,6 +230,28 @@ is never wired up — an unregistered action is silently unreachable, so the tes
   verify the way CI does:
   `rm -rf node_modules && pnpm install --frozen-lockfile && pnpm run typecheck && pnpm test`.
 
+## Layout authoring
+
+`game.PublicData["layout"]` (JSON path `data.layout`) is the canonical location for all layout data.
+It is written exclusively through the `layout` WebSocket action (`internal/handlers/actions/layout/`).
+
+**`privateData` is a reserved key at any depth inside the layout document.** The server's
+`ValidateLayout` rejects it unconditionally, and the TypeScript `parseLayout` function does the same.
+Do not store anything under that key in a layout.
+
+**The Go validator (`validate.go`) and the TypeScript validator (`client/layout/schema/layout.ts`) are
+a deliberate duplicated pair.** They must be changed together whenever the structural rules change
+(grid bounds, overlap rules, sub-grid depth cap, reserved keys). The Go validator enforces the rules
+for writes; the TS validator enforces them for the client render path. Changing one without the other
+creates a split-brain.
+
+**Residual risk: host-supplied content.** The `setScript` op stores Lua source verbatim; the
+`addWidget` op stores widget configs (including image URIs) verbatim. The server validates structure
+only — it does not sandbox script execution or allow-list URIs. Before deploying to an environment
+where hosts are untrusted:
+- Restrict `setScript` at the authorization layer or audit all script content.
+- Add URI allow-listing for image and video widgets.
+
 ## Known rough edges
 
 Do not treat these as intentional; check before relying on them.
