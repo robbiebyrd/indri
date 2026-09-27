@@ -17,7 +17,7 @@ function fakeServer() {
     const fetch: FetchLike = async (url, init) => {
         calls.push({url, init});
 
-        if (url.endsWith("/sse/stream")) {
+        if (url.split("?")[0].endsWith("/sse/stream")) {
             const body = new ReadableStream<Uint8Array>({start: (c) => { stream = c; }});
             init?.signal?.addEventListener("abort", () => stream.error(new Error("aborted")));
             return {ok: streamStatus === 200, status: streamStatus, body, json: async () => ({})};
@@ -63,6 +63,21 @@ test("calls fetch unbound, so a browser's brand-checked fetch works", async () =
     c.send("{}");
     await tick();
     assert.equal(server.posts().length, 1);
+});
+
+test("a query on the base URL (e.g. ?debug=1) goes on the stream request only", async () => {
+    const server = fakeServer();
+    const c = new SseTransportClient({url: "http://server:5002/?debug=1", fetch: server.fetch});
+    const opening = c.connect();
+    await tick();
+    server.emit("event: connected\ndata: id\n\n");
+    await opening;
+
+    c.send("{}");
+    await tick();
+
+    assert.equal(server.calls[0].url, "http://server:5002/sse/stream?debug=1");
+    assert.equal(server.posts()[0].url, "http://server:5002/sse/send");
 });
 
 test("opens the stream and resolves connect on the connected event", async () => {

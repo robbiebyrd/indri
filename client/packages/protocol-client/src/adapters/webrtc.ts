@@ -1,4 +1,4 @@
-import {BaseTransportClient, resolveFetch, resolveGlobal, toPayload} from "../transport.ts"
+import {BaseTransportClient, resolveFetch, resolveGlobal, splitBaseURL, toPayload} from "../transport.ts"
 import type {FetchLike, Payload} from "../transport.ts"
 
 type SessionDescription = {type: string, sdp: string}
@@ -48,6 +48,7 @@ const GATHER_TIMEOUT_MS = 5000
  */
 export class WebRtcTransportClient extends BaseTransportClient {
     private readonly base: string
+    private readonly query: string
     private readonly fetch: FetchLike
     private readonly PeerConnection: PeerConnectionConstructor
     private readonly iceServers?: {urls: string | string[]}[]
@@ -56,7 +57,9 @@ export class WebRtcTransportClient extends BaseTransportClient {
 
     constructor(config: WebRtcConfig) {
         super()
-        this.base = config.url.replace(/\/+$/, "")
+        const {root, query} = splitBaseURL(config.url)
+        this.base = root
+        this.query = query
         this.iceServers = config.iceServers
         this.fetch = resolveFetch(config.fetch, "Pass a fetch implementation in the config.")
         this.PeerConnection = resolveGlobal(
@@ -98,7 +101,7 @@ export class WebRtcTransportClient extends BaseTransportClient {
                 throw new Error("no local description after gathering")
             }
 
-            const res = await this.fetch(`${this.base}/webrtc/offer`, {
+            const res = await this.fetch(`${this.base}/webrtc/offer${this.query}`, {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({type: offer.type, sdp: offer.sdp}),

@@ -80,6 +80,10 @@ func (t *Transport) stream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c := transport.NewQueuedConn(t.cfg.BufferSize, nil)
+	if transport.DebugRequested(r) {
+		c.Set("debug", true)
+	}
+
 	if err := t.Hub.Add(id, c); err != nil {
 		http.Error(w, "server shutting down", http.StatusServiceUnavailable)
 		return

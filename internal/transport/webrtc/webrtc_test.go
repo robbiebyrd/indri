@@ -91,7 +91,14 @@ func offer(t *testing.T, pc *pion.PeerConnection) (*pion.DataChannel, []byte) {
 func post(t *testing.T, base string, body []byte) *http.Response {
 	t.Helper()
 
-	resp, err := http.Post(base+"/webrtc/offer", "application/json", bytes.NewReader(body))
+	return postQuery(t, base, "", body)
+}
+
+// postQuery posts the offer with query added to its URL.
+func postQuery(t *testing.T, base string, query string, body []byte) *http.Response {
+	t.Helper()
+
+	resp, err := http.Post(base+"/webrtc/offer?"+query, "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +108,7 @@ func post(t *testing.T, base string, body []byte) *http.Response {
 	return resp
 }
 
-func dial(t *testing.T, base string) transporttest.Client {
+func dial(t *testing.T, base string, query string) transporttest.Client {
 	t.Helper()
 
 	pc := newPeer(t)
@@ -121,7 +128,7 @@ func dial(t *testing.T, base string) transporttest.Client {
 		}
 	})
 
-	resp := post(t, base, body)
+	resp := postQuery(t, base, query, body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("offer status %d", resp.StatusCode)
 	}

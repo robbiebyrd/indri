@@ -1,7 +1,7 @@
 import {base64Decode, Utf8StreamDecoder} from "../codec.ts"
 import {SseParser} from "../sse-parser.ts"
 import type {SseEvent} from "../sse-parser.ts"
-import {BaseTransportClient, resolveFetch} from "../transport.ts"
+import {BaseTransportClient, resolveFetch, splitBaseURL} from "../transport.ts"
 import type {FetchLike, Payload} from "../transport.ts"
 
 export type SseConfig = {
@@ -22,6 +22,7 @@ const CONNECTION_ID_HEADER = "X-Indri-Connection-Id"
  */
 export class SseTransportClient extends BaseTransportClient {
     private readonly base: string
+    private readonly query: string
     private readonly fetch: FetchLike
     private abort?: AbortController
     private connectionId = ""
@@ -29,7 +30,9 @@ export class SseTransportClient extends BaseTransportClient {
 
     constructor(config: SseConfig) {
         super()
-        this.base = config.url.replace(/\/+$/, "")
+        const {root, query} = splitBaseURL(config.url)
+        this.base = root
+        this.query = query
         this.fetch = resolveFetch(config.fetch, "Pass a streaming fetch implementation in the config.")
     }
 
@@ -40,7 +43,7 @@ export class SseTransportClient extends BaseTransportClient {
 
     private async stream(signal: AbortSignal) {
         try {
-            const res = await this.fetch(`${this.base}/sse/stream`, {
+            const res = await this.fetch(`${this.base}/sse/stream${this.query}`, {
                 headers: {Accept: "text/event-stream"},
                 signal,
             })

@@ -74,3 +74,10 @@ func Route(mux *http.ServeMux, allowedOrigins, method, path string, h http.Handl
 		}
 	})
 }
+
+// DebugRequested reports whether the request that opens a connection asked
+// for debug mode (?debug=1), in which WriteEncoded sends JSON text instead of
+// MessagePack. Transports must apply it before firing Connect.
+func DebugRequested(r *http.Request) bool {
+	return r != nil && r.URL.Query().Get("debug") == "1"
+}

@@ -45,9 +45,16 @@ type client struct {
 func dial(t *testing.T, base string) *client {
 	t.Helper()
 
+	return dialWith(t, base, "")
+}
+
+// dialWith opens the stream with query added to its URL.
+func dialWith(t *testing.T, base string, query string) *client {
+	t.Helper()
+
 	ctx, cancel := context.WithCancel(context.Background())
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/sse/stream", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/sse/stream?"+query, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +168,7 @@ func (c *client) Close() error {
 func TestConformance(t *testing.T) {
 	transporttest.Run(t, transporttest.Harness{
 		New:  func(*testing.T) transport.Transport { return sse.New(testConfig()) },
-		Dial: func(t *testing.T, base string) transporttest.Client { return dial(t, base) },
+		Dial: func(t *testing.T, base string, query string) transporttest.Client { return dialWith(t, base, query) },
 	})
 }
 

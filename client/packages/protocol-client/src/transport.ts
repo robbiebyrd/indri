@@ -45,6 +45,17 @@ export type FetchLike = (input: string, init?: {
     json(): Promise<any>
 }>
 
+/**
+ * Splits a base URL into its root (no trailing slash) and query string, so a
+ * query such as ?debug=1 can be kept on the request that opens a connection
+ * while paths are appended to the root.
+ */
+export function splitBaseURL(url: string): {root: string, query: string} {
+    const q = url.indexOf("?")
+    const root = (q === -1 ? url : url.slice(0, q)).replace(/\/+$/, "")
+    return {root, query: q === -1 ? "" : url.slice(q)}
+}
+
 /** Returns the injected implementation, else the runtime global, else a clear error. */
 export function resolveGlobal<T>(injected: T | undefined, name: string, hint: string): T {
     const found = injected ?? (globalThis as any)[name]

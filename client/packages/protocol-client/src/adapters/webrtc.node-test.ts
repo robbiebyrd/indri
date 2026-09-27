@@ -138,6 +138,22 @@ async function connected() {
     return {...s, pc, dc: pc.channel!};
 }
 
+test("a query on the base URL (e.g. ?debug=1) goes on the offer", async () => {
+    calls.length = 0;
+    const urls: string[] = [];
+    const c = new WebRtcTransportClient({
+        url: "http://server:5002?debug=1",
+        fetch: async (url) => { urls.push(url); return {ok: false, status: 503, body: null, json: async () => ({})}; },
+        RTCPeerConnection: FakePeerConnection,
+    });
+    const opening = c.connect();
+    await tick();
+    FakePeerConnection.last.finishGathering();
+    await assert.rejects(opening);
+
+    assert.deepEqual(urls, ["http://server:5002/webrtc/offer?debug=1"]);
+});
+
 test("messages arrive as text or bytes, and sends go over the channel", async () => {
     const {c, log, dc} = await connected();
 

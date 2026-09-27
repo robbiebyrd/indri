@@ -41,9 +41,10 @@ type Client interface {
 type Harness struct {
 	// New builds a fresh, unconnected transport.
 	New func(t *testing.T) transport.Transport
-	// Dial opens a client connection to a server whose root URL is baseURL.
+	// Dial opens a client connection to a server whose root URL is baseURL,
+	// adding query (e.g. "debug=1", or "") to the request that opens it.
 	// It returns once the transport would have fired Connect.
-	Dial func(t *testing.T, baseURL string) Client
+	Dial func(t *testing.T, baseURL string, query string) Client
 }
 
 // greeting is written from the Connect handler, the way entrypoints.HandleConnect
@@ -60,6 +61,8 @@ type server struct {
 
 	disconnectsMu sync.Mutex
 	disconnects   map[transport.Conn]int
+	// debugAtConnect records each conn's debug flag at the moment Connect fired.
+	debugAtConnect map[transport.Conn]bool
 	// openAtDisconnect counts Disconnects fired while the conn still reported
 	// open; HandleDisconnect would then write to and re-close a dead conn.
 	openAtDisconnect int
@@ -76,14 +79,20 @@ func start(t *testing.T, h Harness) *server {
 	t.Helper()
 
 	s := &server{
-		t:           h.New(t),
-		messages:    make(chan received, 1024),
-		connects:    make(chan transport.Conn, 64),
-		disconnects: map[transport.Conn]int{},
+		t:              h.New(t),
+		messages:       make(chan received, 1024),
+		connects:       make(chan transport.Conn, 64),
+		disconnects:    map[transport.Conn]int{},
+		debugAtConnect: map[transport.Conn]bool{},
 	}
 
 	s.t.Handle(transport.Handlers{
 		Connect: func(c transport.Conn) {
+			debug, _ := c.Get("debug")
+			s.disconnectsMu.Lock()
+			s.debugAtConnect[c] = debug == true
+			s.disconnectsMu.Unlock()
+
 			if err := c.Write([]byte(greeting)); err != nil {
 				t.Errorf("greeting write: %v", err)
 			}
@@ -137,7 +146,13 @@ func start(t *testing.T, h Harness) *server {
 func (s *server) connect(t *testing.T, h Harness) (Client, transport.Conn) {
 	t.Helper()
 
-	c := h.Dial(t, s.url)
+	return s.connectWith(t, h, "")
+}
+
+func (s *server) connectWith(t *testing.T, h Harness, query string) (Client, transport.Conn) {
+	t.Helper()
+
+	c := h.Dial(t, s.url, query)
 	t.Cleanup(func() { _ = c.Close() })
 
 	var conn transport.Conn
@@ -216,6 +231,25 @@ func Run(t *testing.T, h Harness) {
 	t.Run("connect delivers the Connect-time write", func(t *testing.T) {
 		s := start(t, h)
 		s.connect(t, h)
+	})
+
+	t.Run("?debug=1 marks the connection before Connect", func(t *testing.T) {
+		s := start(t, h)
+
+		_, plain := s.connect(t, h)
+		_, debug := s.connectWith(t, h, "debug=1")
+
+		// Checked as of Connect: the Connect-time write already goes
+		// through WriteEncoded, so a later flag would come too late.
+		s.disconnectsMu.Lock()
+		defer s.disconnectsMu.Unlock()
+
+		if s.debugAtConnect[plain] {
+			t.Fatal("a connection without ?debug=1 was marked debug")
+		}
+		if !s.debugAtConnect[debug] {
+			t.Fatal("?debug=1 was not set by the time Connect fired")
+		}
 	})
 
 	t.Run("text and binary writes arrive intact with their kind", func(t *testing.T) {

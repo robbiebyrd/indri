@@ -319,9 +319,11 @@ inbound message. Nothing is registered on them by default.
 
 ### Transport
 
-Server→client messages are **MessagePack binary** by default. Connect with `?debug=1` to receive JSON
-text instead, which is useful for human-readable inspection. The WebSocket client must set
-`binaryType = "arraybuffer"`.
+Server→client messages are **MessagePack binary** by default, keyed by the same names as the JSON
+forms shown here. Add `?debug=1` to the request that opens the connection to receive JSON text instead,
+which is useful for inspection: the `/ws` or `/graphql` upgrade URL, the `GET /sse/stream` URL, or the
+`POST /webrtc/offer` URL. With the client package, put it on `EXPO_PUBLIC_API_URL`. A WebSocket client
+must set `binaryType = "arraybuffer"`.
 
 ### Layout frame
 
@@ -364,8 +366,8 @@ Fields:
 - `u` — array of `[path, value]` pairs; each `path` is a positional integer array
 - `r` — array of paths to remove; each path is a positional integer array
 
-In debug mode (`?debug=1`), paths are numeric-dotted strings instead of integer arrays: `"2.0.1"` is
-equivalent to `[2, 0, 1]`.
+Debug mode changes only the encoding, not the paths: a debug connection receives the same integer
+arrays, as JSON.
 
 **Positional path encoding:** integers index into the slim keyframe's key schema by sorted alphabetical
 position at each object level; arrays use raw numeric indices. For example, if the slim keyframe root

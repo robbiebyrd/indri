@@ -97,9 +97,10 @@ type operation struct {
 // gorilla write methods; closing uses WriteControl, which gorilla allows
 // concurrently with everything else.
 type socket struct {
-	t    *Transport
-	ws   *websocket.Conn
-	ctrl chan message
+	t     *Transport
+	debug bool
+	ws    *websocket.Conn
+	ctrl  chan message
 
 	attach     chan *transport.QueuedConn
 	stop       chan struct{}
@@ -119,6 +120,7 @@ func (t *Transport) serve(w http.ResponseWriter, r *http.Request) {
 
 	s := &socket{
 		t:          t,
+		debug:      transport.DebugRequested(r),
 		ws:         ws,
 		ctrl:       make(chan message, 16),
 		attach:     make(chan *transport.QueuedConn, 1),
@@ -265,6 +267,10 @@ func (s *socket) openEvents(id string) bool {
 	}
 
 	conn := transport.NewQueuedConn(s.t.cfg.BufferSize, nil)
+	if s.debug {
+		conn.Set("debug", true)
+	}
+
 	if err := s.t.Hub.Add(connID, conn); err != nil {
 		s.closeWith(websocket.CloseGoingAway, "server shutting down")
 		return false

@@ -36,8 +36,8 @@ func (c *client) Close() error { return c.c.Close() }
 func TestConformance(t *testing.T) {
 	transporttest.Run(t, transporttest.Harness{
 		New: func(*testing.T) transport.Transport { return ws.New() },
-		Dial: func(t *testing.T, baseURL string) transporttest.Client {
-			url := "ws" + strings.TrimPrefix(baseURL, "http") + "/ws"
+		Dial: func(t *testing.T, baseURL string, query string) transporttest.Client {
+			url := "ws" + strings.TrimPrefix(baseURL, "http") + "/ws?" + query
 
 			c, _, err := websocket.DefaultDialer.Dial(url, nil)
 			if err != nil {

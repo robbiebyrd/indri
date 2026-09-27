@@ -58,7 +58,7 @@ func New() *Transport {
 func (t *Transport) Handle(h transport.Handlers) {
 	if h.Connect != nil {
 		t.m.HandleConnect(func(s *melody.Session) {
-			if s.Request != nil && s.Request.URL.Query().Get("debug") == "1" {
+			if transport.DebugRequested(s.Request) {
 				s.Set("debug", true)
 			}
 			h.Connect(conn{s})

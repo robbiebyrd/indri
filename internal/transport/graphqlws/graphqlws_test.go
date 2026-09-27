@@ -45,9 +45,16 @@ type client struct {
 func rawDial(t *testing.T, base string, subprotocols ...string) *websocket.Conn {
 	t.Helper()
 
+	return rawDialQuery(t, base, "", subprotocols...)
+}
+
+// rawDialQuery upgrades with query added to the /graphql URL.
+func rawDialQuery(t *testing.T, base string, query string, subprotocols ...string) *websocket.Conn {
+	t.Helper()
+
 	d := websocket.Dialer{Subprotocols: subprotocols}
 
-	ws, _, err := d.Dial("ws"+strings.TrimPrefix(base, "http")+"/graphql", nil)
+	ws, _, err := d.Dial("ws"+strings.TrimPrefix(base, "http")+"/graphql?"+query, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -131,8 +138,8 @@ func sendOp(id string, msg string) map[string]any {
 	}
 }
 
-func dial(t *testing.T, base string) transporttest.Client {
-	ws := rawDial(t, base, "graphql-transport-ws")
+func dial(t *testing.T, base string, query string) transporttest.Client {
+	ws := rawDialQuery(t, base, query, "graphql-transport-ws")
 	handshake(t, ws)
 	subscribeEvents(t, ws, eventsID)
 

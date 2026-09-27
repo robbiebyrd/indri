@@ -148,7 +148,7 @@ func (t *Transport) offer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p, status, err := t.newPeer()
+	p, status, err := t.newPeer(transport.DebugRequested(r))
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
@@ -168,7 +168,7 @@ func (t *Transport) offer(w http.ResponseWriter, r *http.Request) {
 
 // newPeer creates a peer connection if the cap allows, returning an HTTP
 // status with any error.
-func (t *Transport) newPeer() (*peer, int, error) {
+func (t *Transport) newPeer(debug bool) (*peer, int, error) {
 	if t.IsClosed() {
 		return nil, http.StatusServiceUnavailable, errors.New("server shutting down")
 	}
@@ -183,7 +183,7 @@ func (t *Transport) newPeer() (*peer, int, error) {
 		ice = []pion.ICEServer{{URLs: t.cfg.ICEServers}}
 	}
 
-	p := &peer{t: t, id: id}
+	p := &peer{t: t, id: id, debug: debug}
 
 	t.peersMu.Lock()
 	if len(t.peers) >= t.cfg.MaxPeers {
@@ -225,7 +225,9 @@ func (t *Transport) release(p *peer) {
 type peer struct {
 	t  *Transport
 	id string
-	pc *pion.PeerConnection
+	// debug marks the connection for JSON text (?debug=1 on the offer).
+	debug bool
+	pc    *pion.PeerConnection
 
 	mu     sync.Mutex
 	conn   *transport.QueuedConn
@@ -276,6 +278,9 @@ func (p *peer) attach(dc *pion.DataChannel) {
 	}
 
 	conn := transport.NewQueuedConn(p.t.cfg.BufferSize, nil)
+	if p.debug {
+		conn.Set("debug", true)
+	}
 	p.conn = conn
 	p.mu.Unlock()
 
