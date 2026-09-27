@@ -8,11 +8,11 @@ import (
 )
 
 type Service struct {
-	sessionRepo *sessionRepo.Store
+	sessionRepo sessionRepo.Storer
 }
 
 // NewService creates a new repository for accessing user data.
-func NewService(sr *sessionRepo.Store) *Service {
+func NewService(sr sessionRepo.Storer) *Service {
 	return &Service{
 		sessionRepo: sr,
 	}
@@ -76,7 +76,7 @@ func (us *Service) FindID(key, value string) (*string, error) {
 		return nil, err
 	}
 
-	id := s.ID.Hex()
+	id := s.ID
 
 	return &id, nil
 }

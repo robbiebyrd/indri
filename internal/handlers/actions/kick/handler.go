@@ -58,7 +58,7 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	gameId := g.ID.Hex()
+	gameId := g.ID
 
 	if callerSession.GameID == nil || *callerSession.GameID != gameId {
 		return fmt.Errorf("caller %v is not in game %v", *callerSession.UserID, *gameCode)
@@ -78,7 +78,7 @@ func (h *Handler) Handle(
 		return fmt.Errorf("target %v is not in game %v", targetUserId, *gameCode)
 	}
 
-	targetSessionId := targetSession.ID.Hex()
+	targetSessionId := targetSession.ID
 
 	if err = h.i.GameService.RemovePlayer(gameId, targetUserId); err != nil {
 		log.Printf("could not remove player %v from game %v: %v\n", targetUserId, gameId, err)

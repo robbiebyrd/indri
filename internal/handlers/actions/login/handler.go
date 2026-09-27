@@ -54,7 +54,7 @@ func (h *Handler) Handle(
 	// The server-side targeting key uses the non-secret session ObjectID so
 	// broadcasts can find this connection. The client only ever receives the
 	// secret token, which it echoes back on reconnect.
-	ss.SetKey("sessionId", session.ID.Hex())
+	ss.SetKey("sessionId", session.ID)
 
 	user, err := h.i.UserService.Get(*session.UserID)
 	if err != nil {

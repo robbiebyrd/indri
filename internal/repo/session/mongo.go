@@ -13,6 +13,7 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
 )
 
@@ -23,14 +24,14 @@ var collectionName = "session"
 // that is never explicitly logged out expires and its token stops working.
 const sessionMaxAge = 7 * 24 * time.Hour
 
-type Store struct {
+type MongoStore struct {
 	ctx        *context.Context
 	collection *mongox.Collection[models.Session]
 	client     *mongodb.Client
 }
 
-// NewStore creates a new repository for accessing user data.
-func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
+// NewMongoStore creates a new repository for accessing session data.
+func NewMongoStore(ctx context.Context, client *mongodb.Client) (*MongoStore, error) {
 	sessionColl := mongox.NewCollection[models.Session](client.Database, collectionName)
 
 	indexModels := []mongo.IndexModel{
@@ -68,15 +69,15 @@ func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
 		return nil, err
 	}
 
-	return &Store{
+	return &MongoStore{
 		ctx:        &ctx,
 		client:     client,
 		collection: sessionColl,
 	}, nil
 }
 
-// New creates a new user, given an ID.
-func (s *Store) New(createSession models.CreateSession) (*models.Session, error) {
+// New returns an existing session for the user if one exists, or creates a new one.
+func (s *MongoStore) New(createSession models.CreateSession) (*models.Session, error) {
 	if createSession.UserID == "" {
 		return nil, fmt.Errorf("session must have a user id")
 	}
@@ -93,28 +94,23 @@ func (s *Store) New(createSession models.CreateSession) (*models.Session, error)
 	}
 }
 
-// Find retrieves user data records for a specific key/value.
-func (s *Store) Find(key string, value string) ([]*models.Session, error) {
+// Find retrieves session records for a specific key/value.
+func (s *MongoStore) Find(key string, value string) ([]*models.Session, error) {
 	return s.collection.Finder().Filter(query.Eq(key, value)).Find(*s.ctx)
 }
 
-// FindFirst retrieves the first user data record, given a key/value.
-func (s *Store) FindFirst(key string, value string) (*models.Session, error) {
+// FindFirst retrieves the first session record, given a key/value.
+func (s *MongoStore) FindFirst(key string, value string) (*models.Session, error) {
 	return s.collection.Finder().Filter(query.Eq(key, value)).FindOne(*s.ctx)
 }
 
-// Get retrieves user data for a specific user ID.
-func (s *Store) Get(id string) (*models.Session, error) {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.collection.Finder().Filter(query.Id(objectId)).FindOne(*s.ctx)
+// Get retrieves session data for a specific session ID.
+func (s *MongoStore) Get(id string) (*models.Session, error) {
+	return s.collection.Finder().Filter(bson.D{{Key: "_id", Value: id}}).FindOne(*s.ctx)
 }
 
 // GetByToken retrieves a session by its unguessable bearer token.
-func (s *Store) GetByToken(token string) (*models.Session, error) {
+func (s *MongoStore) GetByToken(token string) (*models.Session, error) {
 	if token == "" {
 		return nil, fmt.Errorf("token is empty")
 	}
@@ -125,25 +121,14 @@ func (s *Store) GetByToken(token string) (*models.Session, error) {
 // Delete removes a session, invalidating its bearer token so it can no longer
 // be used to reconnect. It is idempotent: deleting an already-gone session is
 // not an error.
-func (s *Store) Delete(id string) error {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
-
-	_, err = s.collection.Collection().DeleteOne(*s.ctx, bson.D{{Key: "_id", Value: objectId}})
-
+func (s *MongoStore) Delete(id string) error {
+	_, err := s.collection.Collection().DeleteOne(*s.ctx, bson.D{{Key: "_id", Value: id}})
 	return err
 }
 
-// Exists checks to see if a user with the given ID already exists.
-func (s *Store) Exists(id string) (bool, error) {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return false, err
-	}
-
-	count, err := s.collection.Finder().Filter(query.Id(objectId)).Count(*s.ctx)
+// Exists checks to see if a session with the given ID already exists.
+func (s *MongoStore) Exists(id string) (bool, error) {
+	count, err := s.collection.Finder().Filter(bson.D{{Key: "_id", Value: id}}).Count(*s.ctx)
 	if err != nil {
 		return false, err
 	}
@@ -151,25 +136,18 @@ func (s *Store) Exists(id string) (bool, error) {
 	return count > 0, nil
 }
 
-// Update saves user data to the repository.
-func (s *Store) Update(sessionId string, session *models.UpdateSession) error {
+// Update saves session data to the repository.
+func (s *MongoStore) Update(sessionId string, session *models.UpdateSession) error {
 	session.UpdatedAt = time.Now()
-	objectId, err := bson.ObjectIDFromHex(sessionId)
-	if err != nil {
-		return err
-	}
 
 	doc, err := repoUtils.CreateBSONDoc(session)
 	if err != nil {
 		return err
 	}
 
-	// Create the update document, specifying the fields to update. `nil` fields are not updated,
-	// as they are dropped in the conversion. We specify a filter for the requested user ID, so only
-	// one document should ever be updated.
 	result, err := s.collection.Collection().UpdateOne(
 		*s.ctx,
-		bson.D{{Key: "_id", Value: objectId}},
+		bson.D{{Key: "_id", Value: sessionId}},
 		bson.D{{Key: "$set", Value: doc}},
 	)
 	if err != nil {
@@ -183,16 +161,28 @@ func (s *Store) Update(sessionId string, session *models.UpdateSession) error {
 	return nil
 }
 
-func (s *Store) createNewSession(session models.CreateSession) (*models.Session, error) {
-	session.CreatedAt = time.Now()
+func (s *MongoStore) createNewSession(session models.CreateSession) (*models.Session, error) {
+	now := time.Now()
+	newSession := &models.Session{
+		ID:        ids.New(),
+		Token:     session.Token,
+		UserID:    &session.UserID,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if session.GameID != "" {
+		newSession.GameID = &session.GameID
+	}
+	if session.TeamID != "" {
+		newSession.TeamID = &session.TeamID
+	}
 
-	doc, err := repoUtils.CreateBSONDoc(session)
+	doc, err := repoUtils.CreateBSONDoc(newSession)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := s.collection.Collection().InsertOne(*s.ctx, &doc)
-	if err != nil {
+	if _, err := s.collection.Collection().InsertOne(*s.ctx, &doc); err != nil {
 		// Lost a race with a concurrent login for the same user (the unique
 		// userId index rejected the insert). Return the winner's session
 		// rather than a raw duplicate-key error — one session per user.
@@ -203,15 +193,13 @@ func (s *Store) createNewSession(session models.CreateSession) (*models.Session,
 		return nil, err
 	}
 
-	insertedId := result.InsertedID.(bson.ObjectID).Hex()
-
-	return s.Get(insertedId)
+	return s.Get(newSession.ID)
 }
 
-func (s *Store) isSessionInGameAndTeam(gameId, teamId, sessionGameId, sessionTeamId string) bool {
+func (s *MongoStore) isSessionInGameAndTeam(gameId, teamId, sessionGameId, sessionTeamId string) bool {
 	return gameId == sessionGameId || teamId == sessionTeamId
 }
 
-func (s *Store) isSessionInGame(gameId, sessionGameId string) bool {
+func (s *MongoStore) isSessionInGame(gameId, sessionGameId string) bool {
 	return gameId == sessionGameId
 }

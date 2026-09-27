@@ -13,7 +13,7 @@ import (
 
 // newTestStore connects to a local MongoDB and skips the test when none is
 // reachable, so CI without a database stays green.
-func newTestStore(t *testing.T) *Store {
+func newTestStore(t *testing.T) *MongoStore {
 	t.Helper()
 
 	uri := os.Getenv("INDRI_TEST_MONGO_URI")
@@ -31,7 +31,7 @@ func newTestStore(t *testing.T) *Store {
 		t.Skipf("skipping: MongoDB not reachable: %v", err)
 	}
 
-	store, err := NewStore(context.Background(), client)
+	store, err := NewMongoStore(context.Background(), client)
 	if err != nil {
 		t.Skipf("skipping: could not create session store: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestDelete_InvalidatesToken(t *testing.T) {
 		t.Fatalf("token should resolve before delete: %v", err)
 	}
 
-	if err := store.Delete(created.ID.Hex()); err != nil {
+	if err := store.Delete(created.ID); err != nil {
 		t.Fatalf("deleting session: %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestDelete_InvalidatesToken(t *testing.T) {
 	}
 
 	// Delete is idempotent.
-	if err := store.Delete(created.ID.Hex()); err != nil {
+	if err := store.Delete(created.ID); err != nil {
 		t.Errorf("second delete should be a no-op, got: %v", err)
 	}
 }

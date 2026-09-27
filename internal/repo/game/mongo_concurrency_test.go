@@ -17,7 +17,7 @@ import (
 // newTestStore connects to a local MongoDB (a single-node replica set is not
 // required for these repo-level tests). It skips the test when no database is
 // reachable, so CI without Mongo stays green.
-func newTestStore(t *testing.T) *Store {
+func newTestStore(t *testing.T) *MongoStore {
 	t.Helper()
 
 	uri := os.Getenv("INDRI_TEST_MONGO_URI")
@@ -35,7 +35,7 @@ func newTestStore(t *testing.T) *Store {
 		t.Skipf("skipping: MongoDB not reachable: %v", err)
 	}
 
-	store, err := NewStore(context.Background(), client, lock.NewInProcess(), events.NewInProcess())
+	store, err := NewMongoStore(context.Background(), client, lock.NewInProcess(), events.NewInProcess())
 	if err != nil {
 		t.Skipf("skipping: could not create game store: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
 		t.Fatalf("creating game: %v", err)
 	}
 
-	gameId := g.ID.Hex()
+	gameId := g.ID
 
 	const players = 25
 

@@ -7,7 +7,7 @@ import (
 )
 
 // HasHost checks to see if the game has a host already.
-func (s *Store) HasHost(id string) bool {
+func (s *MongoStore) HasHost(id string) bool {
 	g, err := s.Get(id)
 	if err != nil {
 		return false
@@ -23,7 +23,7 @@ func (s *Store) HasHost(id string) bool {
 }
 
 // PlayerIsHost checks to see if a player is currently the host of the game.
-func (s *Store) PlayerIsHost(id string, playerId string) bool {
+func (s *MongoStore) PlayerIsHost(id string, playerId string) bool {
 	g, err := s.Get(id)
 	if err != nil {
 		return false
@@ -33,7 +33,7 @@ func (s *Store) PlayerIsHost(id string, playerId string) bool {
 }
 
 // UnsetHost clears the host flag on every player, atomically.
-func (s *Store) UnsetHost(id string) error {
+func (s *MongoStore) UnsetHost(id string) error {
 	return s.Mutate(id, func(g *models.Game) error {
 		for pId, p := range g.Players {
 			if p.Host {
@@ -47,7 +47,7 @@ func (s *Store) UnsetHost(id string) error {
 }
 
 // SetPlayerAsHost makes the given player the sole host of the game, atomically.
-func (s *Store) SetPlayerAsHost(id string, playerId string) error {
+func (s *MongoStore) SetPlayerAsHost(id string, playerId string) error {
 	return s.Mutate(id, func(g *models.Game) error {
 		if _, ok := g.Players[playerId]; !ok {
 			return fmt.Errorf("player with id %v is not in game %v", playerId, id)

@@ -2,12 +2,10 @@ package models
 
 import (
 	"time"
-
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type Session struct {
-	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
+	ID string `bson:"_id,omitempty" json:"id"`
 
 	// Token is the unguessable bearer token used to resume this session.
 	// It is never serialized to clients as part of session state.

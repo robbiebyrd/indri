@@ -16,12 +16,12 @@ import (
 
 type Service struct {
 	t  transport.Transport
-	ur *userRepo.Store
-	sr *sessionRepo.Store
+	ur userRepo.Storer
+	sr sessionRepo.Storer
 }
 
 // NewService creates a new service for broadcasting to connected clients.
-func NewService(ctx context.Context, t transport.Transport, userRepo *userRepo.Store, sessionRepo *sessionRepo.Store) (*Service, error) {
+func NewService(ctx context.Context, t transport.Transport, userRepo userRepo.Storer, sessionRepo sessionRepo.Storer) (*Service, error) {
 	if ctx == nil {
 		return nil, errors.New("context was not passed to the connection service")
 	}
@@ -118,7 +118,7 @@ func (bs *Service) sendToTeam(gameId, teamId string, jsonData []byte) error {
 
 	for _, session := range sessions {
 		if session.TeamID != nil && *session.TeamID == teamId {
-			ids = append(ids, session.ID.Hex())
+			ids = append(ids, session.ID)
 		}
 	}
 
@@ -185,23 +185,23 @@ func (bs *Service) broadcastToSessions(sessionIds []string, jsonData []byte) err
 	})
 }
 
-// sessionIDs returns the hex ids of the given sessions.
+// sessionIDs returns the ids of the given sessions.
 func sessionIDs(sessions []*models.Session) []string {
 	ids := make([]string, len(sessions))
 	for i, session := range sessions {
-		ids[i] = session.ID.Hex()
+		ids[i] = session.ID
 	}
 
 	return ids
 }
 
-// sessionsInGame returns the hex ids of the sessions currently in gameId.
+// sessionsInGame returns the ids of the sessions currently in gameId.
 func sessionsInGame(sessions []*models.Session, gameId string) []string {
 	var ids []string
 
 	for _, session := range sessions {
 		if session.GameID != nil && *session.GameID == gameId {
-			ids = append(ids, session.ID.Hex())
+			ids = append(ids, session.ID)
 		}
 	}
 

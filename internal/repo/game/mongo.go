@@ -14,6 +14,8 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
+	repoErrors "github.com/robbiebyrd/indri/internal/repo"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
@@ -22,7 +24,7 @@ import (
 
 var collectionName = "game"
 
-type Store struct {
+type MongoStore struct {
 	ctx        *context.Context
 	collection *mongox.Collection[models.Game]
 	client     *mongodb.Client
@@ -30,10 +32,10 @@ type Store struct {
 	publisher  events.Publisher
 }
 
-// NewStore creates a new repository for accessing game data. locks provides the
+// NewMongoStore creates a new repository for accessing game data. locks provides the
 // cross-instance serialization used by Mutate; publisher receives the change
 // deltas computed at each write.
-func NewStore(ctx context.Context, client *mongodb.Client, locks lock.Manager, publisher events.Publisher) (*Store, error) {
+func NewMongoStore(ctx context.Context, client *mongodb.Client, locks lock.Manager, publisher events.Publisher) (*MongoStore, error) {
 	gameColl := mongox.NewCollection[models.Game](client.Database, collectionName)
 
 	indexModels := []mongo.IndexModel{
@@ -48,7 +50,7 @@ func NewStore(ctx context.Context, client *mongodb.Client, locks lock.Manager, p
 		return nil, err
 	}
 
-	return &Store{
+	return &MongoStore{
 		ctx:        &ctx,
 		client:     client,
 		collection: gameColl,
@@ -57,79 +59,74 @@ func NewStore(ctx context.Context, client *mongodb.Client, locks lock.Manager, p
 	}, nil
 }
 
-// New creates a new game, given an ID.
-func (s *Store) New(code string, script *models.Script, privateGame bool) (*models.Game, error) {
-	gameDataModel := models.CreateGame{
-		Code:      code,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Private:   privateGame,
+// New creates a new game, given a code.
+func (s *MongoStore) New(code string, script *models.Script, privateGame bool) (*models.Game, error) {
+	now := time.Now()
+	g := &models.Game{
+		ID:          ids.New(),
+		Version:     1,
+		Code:        code,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Private:     privateGame,
+		Teams:       map[string]models.Team{},
+		Players:     map[string]models.Player{},
+		PublicData:  map[string]interface{}{},
+		PrivateData: map[string]interface{}{},
+		PlayerData:  map[string]interface{}{},
 	}
-
 	if script != nil {
-		gameDataModel.Teams = &script.Teams
-		gameDataModel.Stage = &script.Stage
-		gameDataModel.PublicData = script.PublicData
-		gameDataModel.PrivateData = script.PrivateData
-	}
-
-	doc, err := repoUtils.CreateBSONDoc(gameDataModel)
-	if err != nil {
-		return nil, err
-	}
-
-	result, err := s.collection.Collection().InsertOne(*s.ctx, &doc)
-	if err != nil {
-		// The unique code index rejected a concurrent create with the same
-		// code — surface the friendly error, not a raw duplicate-key.
-		if mongo.IsDuplicateKeyError(err) {
-			return nil, fmt.Errorf("game with code %s already exists", code)
+		for k, v := range script.Teams {
+			g.Teams[k] = v
 		}
-
-		return nil, err
+		g.Stage = script.Stage
+		if script.PublicData != nil {
+			g.PublicData = script.PublicData
+		}
+		if script.PrivateData != nil {
+			g.PrivateData = script.PrivateData
+		}
 	}
 
-	// Get the newly inserted ID
-	insertedId := result.InsertedID.(bson.ObjectID).Hex()
-
-	// Get the User and return it
-	return s.Get(insertedId)
+	doc, err := repoUtils.CreateBSONDoc(g)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.collection.Collection().InsertOne(*s.ctx, &doc); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return nil, fmt.Errorf("game with code %s already exists: %w", code, repoErrors.ErrDuplicate)
+		}
+		return nil, err
+	}
+	return s.Get(g.ID)
 }
 
 // Get retrieves game data for a specific game ID.
-func (s *Store) Get(id string) (*models.Game, error) {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.collection.Finder().Filter(query.Id(objectId)).FindOne(*s.ctx)
+func (s *MongoStore) Get(id string) (*models.Game, error) {
+	return s.collection.Finder().Filter(bson.D{{Key: "_id", Value: id}}).FindOne(*s.ctx)
 }
 
 // FindByCode retrieves game data by its game code.
-func (s *Store) FindByCode(gameCode string) (*models.Game, error) {
+func (s *MongoStore) FindByCode(gameCode string) (*models.Game, error) {
 	return s.collection.Finder().Filter(query.Eq("code", gameCode)).FindOne(*s.ctx)
 }
 
 // FindOpen retrieves game data by its game code.
-func (s *Store) FindOpen(limit int) ([]*models.Game, error) {
+func (s *MongoStore) FindOpen(limit int) ([]*models.Game, error) {
 	return s.collection.Finder().Filter(query.Ne("private", true)).Limit(int64(limit)).Find(*s.ctx)
 }
 
-// GetIDHex returns the game code for a given game id.
-func (s *Store) GetIDHex(gameCode string) (*string, error) {
-	retrievedGame, err := s.FindByCode(gameCode)
+// GetIDHex returns the game ID for a given game code. The ID is already a string.
+func (s *MongoStore) GetIDHex(gameCode string) (*string, error) {
+	g, err := s.FindByCode(gameCode)
 	if err != nil {
 		return nil, err
 	}
-
-	gameId := retrievedGame.ID.Hex()
-
-	return &gameId, nil
+	return &g.ID, nil
 }
 
 // Exists checks to see if a game with the given ID already exists.
-func (s *Store) Exists(id string) (bool, error) {
+func (s *MongoStore) Exists(id string) (bool, error) {
 	count, err := s.collection.Finder().Filter(query.Eq("code", id)).Count(*s.ctx)
 	if err != nil {
 		return false, err
@@ -139,7 +136,7 @@ func (s *Store) Exists(id string) (bool, error) {
 }
 
 // Update saves game data to the repository.
-func (s *Store) Update(id string, game *models.UpdateGame) error {
+func (s *MongoStore) Update(id string, game *models.UpdateGame) error {
 	filterDoc, err := s.getBsonDocForID(id)
 	if err != nil {
 		return err
@@ -169,7 +166,7 @@ func (s *Store) Update(id string, game *models.UpdateGame) error {
 }
 
 // UpdateField updates a field in the game.
-func (s *Store) UpdateField(id string, key string, value interface{}) error {
+func (s *MongoStore) UpdateField(id string, key string, value interface{}) error {
 	filterDoc, err := s.getBsonDocForID(id)
 	if err != nil {
 		return err
@@ -200,7 +197,7 @@ func (s *Store) UpdateField(id string, key string, value interface{}) error {
 }
 
 // DeleteField removes a field from a game.
-func (s *Store) DeleteField(id string, key string) error {
+func (s *MongoStore) DeleteField(id string, key string) error {
 	filterDoc, err := s.getBsonDocForID(id)
 	if err != nil {
 		return err
@@ -238,7 +235,7 @@ func (s *Store) DeleteField(id string, key string) error {
 // the game and how to save it conditionally on its version. A different
 // backend (SQLite, ...) reuses the same coordinator by implementing just those
 // two operations.
-func (s *Store) Mutate(id string, apply func(g *models.Game) error) error {
+func (s *MongoStore) Mutate(id string, apply func(g *models.Game) error) error {
 	var before map[string]interface{}
 
 	return mutation.Run(
@@ -277,7 +274,7 @@ func (s *Store) Mutate(id string, apply func(g *models.Game) error) error {
 // publishDiff computes the dotted-path delta between the pre-mutation snapshot
 // and the saved game and publishes it. Errors are logged, not surfaced: the
 // write already committed, so a fan-out hiccup must not fail the mutation.
-func (s *Store) publishDiff(id string, before map[string]interface{}, after *models.Game) {
+func (s *MongoStore) publishDiff(id string, before map[string]interface{}, after *models.Game) {
 	if s.publisher == nil {
 		return
 	}
@@ -294,7 +291,7 @@ func (s *Store) publishDiff(id string, before map[string]interface{}, after *mod
 }
 
 // publish emits a change event for the game, if a publisher is configured.
-func (s *Store) publish(id string, op events.OperationType, updated map[string]interface{}, removed []string) {
+func (s *MongoStore) publish(id string, op events.OperationType, updated map[string]interface{}, removed []string) {
 	if s.publisher == nil {
 		return
 	}
@@ -325,12 +322,7 @@ func (s *Store) publish(id string, op events.OperationType, updated map[string]i
 // equals expectedVersion, bumping the version on success. It reports whether
 // the write committed. Callers publish the resulting delta themselves; see
 // Mutate.
-func (s *Store) saveWithVersion(id string, g *models.Game, expectedVersion int64) (bool, error) {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return false, err
-	}
-
+func (s *MongoStore) saveWithVersion(id string, g *models.Game, expectedVersion int64) (bool, error) {
 	g.UpdatedAt = time.Now()
 	g.Version = expectedVersion + 1
 
@@ -341,7 +333,7 @@ func (s *Store) saveWithVersion(id string, g *models.Game, expectedVersion int64
 
 	result, err := s.collection.Collection().UpdateOne(
 		*s.ctx,
-		bson.D{{Key: "_id", Value: objectId}, {Key: "version", Value: expectedVersion}},
+		bson.D{{Key: "_id", Value: id}, {Key: "version", Value: expectedVersion}},
 		bson.D{{Key: "$set", Value: withoutKey(doc, "_id")}},
 	)
 	if err != nil {
@@ -365,11 +357,6 @@ func withoutKey(doc bson.D, key string) bson.D {
 	return out
 }
 
-func (s *Store) getBsonDocForID(id string) (bson.D, error) {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, err
-	}
-
-	return bson.D{{Key: "_id", Value: objectId}}, nil
+func (s *MongoStore) getBsonDocForID(id string) (bson.D, error) {
+	return bson.D{{Key: "_id", Value: id}}, nil
 }

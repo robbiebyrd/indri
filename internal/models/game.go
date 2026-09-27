@@ -2,12 +2,10 @@ package models
 
 import (
 	"time"
-
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type Game struct {
-	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
+	ID string `bson:"_id,omitempty" json:"id"`
 
 	// Version is bumped on every mutation and used for optimistic-concurrency
 	// checks so concurrent writers cannot silently lose each other's changes.

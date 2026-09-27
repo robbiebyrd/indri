@@ -47,7 +47,7 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	err = ss.Write([]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID.Hex())))
+	err = ss.Write([]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID)))
 	if err != nil {
 		return err
 	}

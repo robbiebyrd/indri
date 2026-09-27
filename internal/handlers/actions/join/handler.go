@@ -59,12 +59,12 @@ func (h *Handler) Handle(
 		displayName = *user.DisplayName
 	}
 
-	err = h.i.GameService.ConnectPlayer(g.ID.Hex(), *teamId, *session.UserID, displayName)
+	err = h.i.GameService.ConnectPlayer(g.ID, *teamId, *session.UserID, displayName)
 	if err != nil {
 		log.Printf("error adding player %v to game %v: %v\n", *session.UserID, *gameCode, err)
 	}
 
-	gameJSONBytes, err := h.i.GameService.GetJSONBytes(g.ID.Hex())
+	gameJSONBytes, err := h.i.GameService.GetJSONBytes(g.ID)
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func (h *Handler) Handle(
 	}
 
 	if err = h.i.SessionService.Update(*sessionId, &models.UpdateSession{
-		GameID:    g.ID.Hex(),
+		GameID:    g.ID,
 		UserID:    *session.UserID,
 		TeamID:    *teamId,
 		UpdatedAt: time.Time{},

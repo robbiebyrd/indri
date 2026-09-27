@@ -48,7 +48,7 @@ func (h *Handler) Handle(
 	// Adopt the resumed session on this connection so subsequent authenticated
 	// actions and broadcasts target it. The broadcast key is the non-secret
 	// session ObjectID, never the token.
-	ss.SetKey("sessionId", session.ID.Hex())
+	ss.SetKey("sessionId", session.ID)
 
 	user, err := h.i.UserService.Get(*session.UserID)
 	if err != nil {

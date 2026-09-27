@@ -15,12 +15,12 @@ import (
 )
 
 type Service struct {
-	gameRepo *gameRepo.Store
+	gameRepo gameRepo.Storer
 	Script   *models.Script
 }
 
 // NewService creates a new repository for accessing game data.
-func NewService(gameRepo *gameRepo.Store, scriptRepo *scriptRepo.Store) (*Service, error) {
+func NewService(gameRepo gameRepo.Storer, scriptRepo *scriptRepo.Store) (*Service, error) {
 	if gameRepo == nil {
 		return nil, errors.New("the game service did not receive a game repo")
 	}

@@ -14,7 +14,7 @@ import (
 )
 
 // HasPlayer determines if a given userId is in a game.
-func (s *Store) HasPlayer(id string, userId string) bool {
+func (s *MongoStore) HasPlayer(id string, userId string) bool {
 	g, err := s.Get(id)
 	if err != nil {
 		return false
@@ -30,7 +30,7 @@ func (s *Store) HasPlayer(id string, userId string) bool {
 }
 
 // PlayerOnATeam determines if a given userId is in a game.
-func (s *Store) PlayerOnATeam(id string, userId string) bool {
+func (s *MongoStore) PlayerOnATeam(id string, userId string) bool {
 	if hasPlayer := s.HasPlayer(id, userId); !hasPlayer {
 		return false
 	}
@@ -50,7 +50,7 @@ func (s *Store) PlayerOnATeam(id string, userId string) bool {
 }
 
 // AddPlayer adds a player to the game.
-func (s *Store) AddPlayer(id string, userId string, displayName string) error {
+func (s *MongoStore) AddPlayer(id string, userId string, displayName string) error {
 	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func (s *Store) AddPlayer(id string, userId string, displayName string) error {
 }
 
 // RemovePlayer removes a player from a game and any team it was on, atomically.
-func (s *Store) RemovePlayer(id string, userId string) error {
+func (s *MongoStore) RemovePlayer(id string, userId string) error {
 	if err := sessionUtils.ValidateGameAndUser(id, userId); err != nil {
 		return err
 	}
@@ -126,20 +126,20 @@ func removePlayerFromTeams(g *models.Game, userId string) bool {
 	return removed
 }
 
-// ConnectPlayer marks the player as offline.
-func (s *Store) ConnectPlayer(id string, userId string) error {
+// ConnectPlayer marks the player as online.
+func (s *MongoStore) ConnectPlayer(id string, userId string) error {
 	return s.markPlayerConnected(id, userId, true)
 }
 
 // DisconnectPlayer marks the player as offline.
-func (s *Store) DisconnectPlayer(id string, userId string) error {
+func (s *MongoStore) DisconnectPlayer(id string, userId string) error {
 	return s.markPlayerConnected(id, userId, false)
 }
 
 // markPlayerConnected sets the player's connected status atomically, only if
 // the player still exists, so a concurrent removal cannot recreate a partial
 // player document. The version bump keeps it coherent with Mutate's CAS.
-func (s *Store) markPlayerConnected(
+func (s *MongoStore) markPlayerConnected(
 	id string,
 	userId string,
 	connected bool,
@@ -148,17 +148,12 @@ func (s *Store) markPlayerConnected(
 		return err
 	}
 
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
-
 	playerKey := "players." + userId
 
 	result, err := s.collection.Collection().UpdateOne(
 		*s.ctx,
 		bson.D{
-			{Key: "_id", Value: objectId},
+			{Key: "_id", Value: id},
 			{Key: playerKey, Value: bson.D{{Key: "$exists", Value: true}}},
 		},
 		bson.D{

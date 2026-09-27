@@ -5,20 +5,18 @@ import (
 	"fmt"
 	"slices"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-
 	"github.com/robbiebyrd/indri/internal/models"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 )
 
 type Service struct {
-	gameRepo    *gameRepo.Store
+	gameRepo    gameRepo.Storer
 	gameService *gameService.Service
 }
 
 // NewService creates a new repository for accessing game data.
-func NewService(gameRepo *gameRepo.Store, gameService *gameService.Service) *Service {
+func NewService(gameRepo gameRepo.Storer, gameService *gameService.Service) *Service {
 	return &Service{
 		gameRepo,
 		gameService,
@@ -62,7 +60,7 @@ func (ss *Service) AddScene(gameId string, sceneId string, scene *models.Scene) 
 
 	path := "stage.scenes." + sceneId
 
-	err = ss.gameRepo.UpdateField(g.ID.Hex(), path, scene)
+	err = ss.gameRepo.UpdateField(g.ID, path, scene)
 	if err != nil {
 		return err
 	}
@@ -99,7 +97,7 @@ func (ss *Service) DeleteScene(gameId string, sceneId string) error {
 
 	path := "stage.scenes." + sceneId
 
-	err = ss.gameRepo.DeleteField(g.ID.Hex(), path)
+	err = ss.gameRepo.DeleteField(g.ID, path)
 	if err != nil {
 		return err
 	}
@@ -118,12 +116,7 @@ func (ss *Service) SetScript(gameId string, id string) error {
 		return err
 	}
 
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
-
-	err = ss.gameRepo.UpdateField(g.ID.Hex(), "stage.scriptId", objectId)
+	err = ss.gameRepo.UpdateField(g.ID, "stage.scriptId", id)
 	if err != nil {
 		return err
 	}
@@ -235,7 +228,7 @@ func (ss *Service) UpdateScene(
 		fullPath += "." + *path
 	}
 
-	err = ss.gameRepo.UpdateField(g.ID.Hex(), fullPath, data)
+	err = ss.gameRepo.UpdateField(g.ID, fullPath, data)
 	if err != nil {
 		return err
 	}
@@ -254,7 +247,7 @@ func (ss *Service) SetCurrentScene(gameId string, sceneId string) error {
 		return fmt.Errorf("scene %s is not a valid scene", sceneId)
 	}
 
-	err = ss.gameRepo.UpdateField(g.ID.Hex(), "stage.currentScene", sceneId)
+	err = ss.gameRepo.UpdateField(g.ID, "stage.currentScene", sceneId)
 	if err != nil {
 		return err
 	}

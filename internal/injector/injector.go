@@ -22,9 +22,9 @@ import (
 
 type ReposInjector struct {
 	EnvVars     *envVars.Vars
-	GameRepo    *gameRepo.Store
-	UserRepo    *userRepo.Store
-	SessionRepo *sessionRepo.Store
+	GameRepo    gameRepo.Storer
+	UserRepo    userRepo.Storer
+	SessionRepo sessionRepo.Storer
 	ScriptRepo  *scriptRepo.Store
 }
 
