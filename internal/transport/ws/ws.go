@@ -26,15 +26,13 @@ type conn struct {
 	s *melody.Session
 }
 
-func (c conn) Get(key string) (any, bool) { return c.s.Get(key) }
-func (c conn) Set(key string, value any)  { c.s.Set(key, value) }
-func (c conn) UnSet(key string)           { c.s.UnSet(key) }
-func (c conn) Write(msg []byte) error     { return c.s.Write(msg) }
-func (c conn) WriteBinary(msg []byte) error {
-	return c.s.WriteBinary(msg)
-}
-func (c conn) Close() error               { return c.s.Close() }
-func (c conn) IsClosed() bool             { return c.s.IsClosed() }
+func (c conn) Get(key string) (any, bool)   { return c.s.Get(key) }
+func (c conn) Set(key string, value any)    { c.s.Set(key, value) }
+func (c conn) UnSet(key string)             { c.s.UnSet(key) }
+func (c conn) Write(msg []byte) error       { return c.s.Write(msg) }
+func (c conn) WriteBinary(msg []byte) error { return c.s.WriteBinary(msg) }
+func (c conn) Close() error                 { return c.s.Close() }
+func (c conn) IsClosed() bool               { return c.s.IsClosed() }
 
 // New builds a WebSocket transport configured from the environment (timeouts,
 // message size, and the CheckOrigin allowlist for CSWSH protection).
