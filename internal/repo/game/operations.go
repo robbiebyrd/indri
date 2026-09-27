@@ -10,6 +10,7 @@ import (
 	goaway "github.com/TwiN/go-away"
 
 	"github.com/robbiebyrd/indri/internal/models"
+	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
@@ -21,6 +22,7 @@ import (
 
 // mutator is the part of a store the shared operations need.
 type mutator interface {
+	Get(id string) (*models.Game, error)
 	Mutate(id string, apply func(g *models.Game) error) error
 }
 
@@ -185,6 +187,32 @@ func setConnected(m mutator, id string, slotId string, connected bool) error {
 	})
 }
 
+// update copies the set fields of upd onto the game. Private is always copied.
+func update(m mutator, id string, upd *models.UpdateGame) error {
+	return m.Mutate(id, func(g *models.Game) error {
+		if upd.Teams != nil {
+			g.Teams = *upd.Teams
+		}
+		if upd.Players != nil {
+			g.Players = *upd.Players
+		}
+		if upd.Stage != nil {
+			g.Stage = *upd.Stage
+		}
+		if upd.PublicData != nil {
+			g.PublicData = upd.PublicData
+		}
+		if upd.PrivateData != nil {
+			g.PrivateData = upd.PrivateData
+		}
+		if upd.PlayerData != nil {
+			g.PlayerData = upd.PlayerData
+		}
+		g.Private = upd.Private
+		return nil
+	})
+}
+
 // updateField sets the value at a dotted JSON path (e.g. "data.board.1").
 func updateField(m mutator, id string, key string, value interface{}) error {
 	return m.Mutate(id, func(g *models.Game) error {
@@ -219,6 +247,51 @@ func editPath(g *models.Game, key string, value interface{}, del bool) error {
 	g.Version, g.DeletedAt = version, deletedAt
 
 	return nil
+}
+
+// hasHost reports whether the game has a host; an unreadable game has none.
+func hasHost(m mutator, id string) bool {
+	g, err := m.Get(id)
+	if err != nil {
+		return false
+	}
+
+	return gameHasHost(g)
+}
+
+// playerIsHost reports whether the player in slot playerId hosts the game.
+func playerIsHost(m mutator, id string, playerId string) bool {
+	g, err := m.Get(id)
+	if err != nil {
+		return false
+	}
+
+	return g.Players[playerId].Host
+}
+
+// setPlayerAsHost makes playerId the game's sole host.
+func setPlayerAsHost(m mutator, id string, playerId string) error {
+	return m.Mutate(id, func(g *models.Game) error {
+		if _, ok := g.Players[playerId]; !ok {
+			return fmt.Errorf("player %q: %w", playerId, repoErrors.ErrNotFound)
+		}
+		for slotId, p := range g.Players {
+			p.Host = slotId == playerId
+			g.Players[slotId] = p
+		}
+		return nil
+	})
+}
+
+// unsetHost clears the host flag on every player.
+func unsetHost(m mutator, id string) error {
+	return m.Mutate(id, func(g *models.Game) error {
+		for slotId, p := range g.Players {
+			p.Host = false
+			g.Players[slotId] = p
+		}
+		return nil
+	})
 }
 
 // gameHasHost reports whether any player in the in-memory game is the host.

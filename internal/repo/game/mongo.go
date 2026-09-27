@@ -112,33 +112,8 @@ func (s *MongoStore) Exists(id string) (bool, error) {
 }
 
 // Update saves game data to the repository.
-func (s *MongoStore) Update(id string, game *models.UpdateGame) error {
-	filterDoc, err := s.getBsonDocForID(id)
-	if err != nil {
-		return err
-	}
-
-	game.UpdatedAt = time.Now()
-
-	doc, err := repoUtils.CreateBSONDoc(game)
-	if err != nil {
-		return err
-	}
-
-	result, err := s.collection.Collection().UpdateOne(
-		context.TODO(),
-		filterDoc,
-		bson.D{{Key: "$set", Value: doc}},
-	)
-	if err != nil {
-		return err
-	}
-
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("error updating game: game with id %v does not exists", id)
-	}
-
-	return nil
+func (s *MongoStore) Update(id string, upd *models.UpdateGame) error {
+	return update(s, id, upd)
 }
 
 // UpdateField sets the value at a dotted JSON path.

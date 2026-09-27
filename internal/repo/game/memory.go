@@ -249,42 +249,7 @@ func fromMap(m map[string]interface{}, dst *models.Game) error {
 }
 
 func (s *MemoryStore) Update(id string, upd *models.UpdateGame) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	g, ok := s.games[id]
-	if !ok {
-		return fmt.Errorf("id %q: %w", id, repoErrors.ErrNotFound)
-	}
-	before, err := events.ToMap(g)
-	if err != nil {
-		return fmt.Errorf("snapshot: %w", err)
-	}
-
-	if upd.Teams != nil {
-		g.Teams = *upd.Teams
-	}
-	if upd.Players != nil {
-		g.Players = *upd.Players
-	}
-	if upd.Stage != nil {
-		g.Stage = *upd.Stage
-	}
-	if upd.PublicData != nil {
-		g.PublicData = upd.PublicData
-	}
-	if upd.PrivateData != nil {
-		g.PrivateData = upd.PrivateData
-	}
-	if upd.PlayerData != nil {
-		g.PlayerData = upd.PlayerData
-	}
-	g.Private = upd.Private
-	g.UpdatedAt = time.Now()
-	g.Version++
-
-	s.changes.diff(id, before, g)
-	return nil
+	return update(s, id, upd)
 }
 
 func (s *MemoryStore) UpdateField(id string, key string, value interface{}) error {

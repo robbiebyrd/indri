@@ -245,32 +245,8 @@ func (s *PostgresStore) saveWithVersion(g *models.Game, expectedVersion int64) (
 	return n == 1, nil
 }
 
-// Update delegates to Mutate so the field-copy from UpdateGame runs under
-// the same lock + version fence as every other writer, and the resulting
-// delta is published as a full diff exactly as Mutate already does.
 func (s *PostgresStore) Update(id string, upd *models.UpdateGame) error {
-	return s.Mutate(id, func(g *models.Game) error {
-		if upd.Teams != nil {
-			g.Teams = *upd.Teams
-		}
-		if upd.Players != nil {
-			g.Players = *upd.Players
-		}
-		if upd.Stage != nil {
-			g.Stage = *upd.Stage
-		}
-		if upd.PublicData != nil {
-			g.PublicData = upd.PublicData
-		}
-		if upd.PrivateData != nil {
-			g.PrivateData = upd.PrivateData
-		}
-		if upd.PlayerData != nil {
-			g.PlayerData = upd.PlayerData
-		}
-		g.Private = upd.Private
-		return nil
-	})
+	return update(s, id, upd)
 }
 
 func (s *PostgresStore) UpdateField(id string, key string, value interface{}) error {

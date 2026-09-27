@@ -1,63 +1,21 @@
 package game
 
-import (
-	"fmt"
-
-	"github.com/robbiebyrd/indri/internal/models"
-)
-
-// HasHost checks to see if the game has a host already.
+// HasHost reports whether the game has a host.
 func (s *MongoStore) HasHost(id string) bool {
-	g, err := s.Get(id)
-	if err != nil {
-		return false
-	}
-
-	for _, p := range g.Players {
-		if p.Host {
-			return true
-		}
-	}
-
-	return false
+	return hasHost(s, id)
 }
 
-// PlayerIsHost checks to see if a player is currently the host of the game.
+// PlayerIsHost reports whether the player hosts the game.
 func (s *MongoStore) PlayerIsHost(id string, playerId string) bool {
-	g, err := s.Get(id)
-	if err != nil {
-		return false
-	}
-
-	return g.Players[playerId].Host
+	return playerIsHost(s, id, playerId)
 }
 
-// UnsetHost clears the host flag on every player, atomically.
-func (s *MongoStore) UnsetHost(id string) error {
-	return s.Mutate(id, func(g *models.Game) error {
-		for pId, p := range g.Players {
-			if p.Host {
-				p.Host = false
-				g.Players[pId] = p
-			}
-		}
-
-		return nil
-	})
-}
-
-// SetPlayerAsHost makes the given player the sole host of the game, atomically.
+// SetPlayerAsHost makes the player the game's sole host.
 func (s *MongoStore) SetPlayerAsHost(id string, playerId string) error {
-	return s.Mutate(id, func(g *models.Game) error {
-		if _, ok := g.Players[playerId]; !ok {
-			return fmt.Errorf("player with id %v is not in game %v", playerId, id)
-		}
+	return setPlayerAsHost(s, id, playerId)
+}
 
-		for pId, p := range g.Players {
-			p.Host = pId == playerId
-			g.Players[pId] = p
-		}
-
-		return nil
-	})
+// UnsetHost clears the host flag on every player.
+func (s *MongoStore) UnsetHost(id string) error {
+	return unsetHost(s, id)
 }

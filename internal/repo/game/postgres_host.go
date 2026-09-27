@@ -1,53 +1,21 @@
 package game
 
-import (
-	"fmt"
-
-	"github.com/robbiebyrd/indri/internal/models"
-	repoErrors "github.com/robbiebyrd/indri/internal/repo"
-)
-
+// HasHost reports whether the game has a host.
 func (s *PostgresStore) HasHost(id string) bool {
-	g, err := s.Get(id)
-	if err != nil {
-		return false
-	}
-	for _, p := range g.Players {
-		if p.Host {
-			return true
-		}
-	}
-	return false
+	return hasHost(s, id)
 }
 
+// PlayerIsHost reports whether the player hosts the game.
 func (s *PostgresStore) PlayerIsHost(id string, playerId string) bool {
-	g, err := s.Get(id)
-	if err != nil {
-		return false
-	}
-	p, ok := g.Players[playerId]
-	return ok && p.Host
+	return playerIsHost(s, id, playerId)
 }
 
+// SetPlayerAsHost makes the player the game's sole host.
 func (s *PostgresStore) SetPlayerAsHost(id string, playerId string) error {
-	return s.Mutate(id, func(g *models.Game) error {
-		if _, ok := g.Players[playerId]; !ok {
-			return fmt.Errorf("player %q: %w", playerId, repoErrors.ErrNotFound)
-		}
-		for uid, p := range g.Players {
-			p.Host = (uid == playerId)
-			g.Players[uid] = p
-		}
-		return nil
-	})
+	return setPlayerAsHost(s, id, playerId)
 }
 
+// UnsetHost clears the host flag on every player.
 func (s *PostgresStore) UnsetHost(id string) error {
-	return s.Mutate(id, func(g *models.Game) error {
-		for uid, p := range g.Players {
-			p.Host = false
-			g.Players[uid] = p
-		}
-		return nil
-	})
+	return unsetHost(s, id)
 }

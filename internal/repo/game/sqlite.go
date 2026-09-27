@@ -256,44 +256,7 @@ func (s *SQLiteStore) loadWithVersion(id string) (*models.Game, int64, error) {
 }
 
 func (s *SQLiteStore) Update(id string, upd *models.UpdateGame) error {
-	g, version, err := s.loadWithVersion(id)
-	if err != nil {
-		return err
-	}
-	before, err := events.ToMap(g)
-	if err != nil {
-		return fmt.Errorf("snapshot: %w", err)
-	}
-
-	if upd.Teams != nil {
-		g.Teams = *upd.Teams
-	}
-	if upd.Players != nil {
-		g.Players = *upd.Players
-	}
-	if upd.Stage != nil {
-		g.Stage = *upd.Stage
-	}
-	if upd.PublicData != nil {
-		g.PublicData = upd.PublicData
-	}
-	if upd.PrivateData != nil {
-		g.PrivateData = upd.PrivateData
-	}
-	if upd.PlayerData != nil {
-		g.PlayerData = upd.PlayerData
-	}
-	g.Private = upd.Private
-
-	committed, err := s.saveWithVersion(g, version)
-	if err != nil {
-		return err
-	}
-	if !committed {
-		return fmt.Errorf("id %q: %w", id, repoErrors.ErrConflict)
-	}
-	s.changes.diff(id, before, g)
-	return nil
+	return update(s, id, upd)
 }
 
 func (s *SQLiteStore) UpdateField(id string, key string, value interface{}) error {

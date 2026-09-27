@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -139,6 +140,76 @@ func TestStore_FirstPlayerIsHostAndHostCanMove(t *testing.T) {
 		}
 		if store.HasHost(g.ID) {
 			t.Fatal("game still has a host after UnsetHost")
+		}
+	})
+}
+
+// TestStore_ConcurrentWritesAreNotLost proves every write path (Update,
+// UpdateField, and Mutate-based writers like AssignSlot) shares one
+// lock-serialized, version-fenced write: all 3n concurrent writes land, none
+// is rejected, and the version counts every one of them.
+func TestStore_ConcurrentWritesAreNotLost(t *testing.T) {
+	const n = 20
+
+	eachStore(t, func(t *testing.T, store Storer) {
+		g, err := store.New(fmt.Sprintf("contract-%d", time.Now().UnixNano()), &models.Script{
+			Config: models.Config{MaxPlayersPerTeam: n},
+			Teams:  map[string]models.Team{"red": {Name: "Red"}},
+		}, false)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		errs := make(chan error, 3*n)
+
+		for i := 0; i < n; i++ {
+			wg.Add(3)
+			go func() {
+				defer wg.Done()
+				if err := store.UpdateField(g.ID, fmt.Sprintf("data.k%d", i), i); err != nil {
+					errs <- fmt.Errorf("UpdateField(%d): %w", i, err)
+				}
+			}()
+			go func() {
+				defer wg.Done()
+				if _, err := store.AssignSlot(g.ID, "red", fmt.Sprintf("user-%d", i), fmt.Sprintf("Player %d", i)); err != nil {
+					errs <- fmt.Errorf("AssignSlot(%d): %w", i, err)
+				}
+			}()
+			go func() {
+				defer wg.Done()
+				if err := store.Update(g.ID, &models.UpdateGame{}); err != nil {
+					errs <- fmt.Errorf("Update(%d): %w", i, err)
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Error(err)
+		}
+
+		got, err := store.Get(g.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+
+		assigned := map[string]bool{}
+		for _, p := range got.Players {
+			assigned[p.UserID] = true
+		}
+		for i := 0; i < n; i++ {
+			if v := got.PublicData[fmt.Sprintf("k%d", i)]; v != float64(i) {
+				t.Errorf("data.k%d = %v, want %d", i, v, i)
+			}
+			if !assigned[fmt.Sprintf("user-%d", i)] {
+				t.Errorf("user-%d has no slot", i)
+			}
+		}
+
+		if want := int64(1 + 3*n); got.Version != want {
+			t.Errorf("Version = %d, want %d (a write was lost or skipped the fence)", got.Version, want)
 		}
 	})
 }
