@@ -41,10 +41,23 @@ func (e ChangeEvent) HasChanges() bool {
 	return len(e.UpdatedFields) > 0 || len(e.RemovedFields) > 0
 }
 
+// Bus fans messages of one kind out to every server instance. Subscribe yields
+// messages published by any instance, this one included.
+type Bus[T any] interface {
+	Publish(ctx context.Context, message T) error
+	Subscribe(ctx context.Context) (<-chan T, error)
+}
+
 // Publisher fans change events out to every server instance. Publish is called
-// at each write; Subscribe yields events (local and, for Redis, from other
-// instances) for the broadcast loop to deliver to websocket clients.
-type Publisher interface {
-	Publish(ctx context.Context, event ChangeEvent) error
-	Subscribe(ctx context.Context) (<-chan ChangeEvent, error)
+// at each write; Subscribe yields events for the broadcast loop to deliver to
+// each instance's clients.
+type Publisher = Bus[ChangeEvent]
+
+// Delivery is a message for specific sessions' connections, wherever in the
+// cluster they are connected. Close disconnects them instead of sending
+// Payload.
+type Delivery struct {
+	SessionIDs []string `json:"sessionIds"`
+	Payload    any      `json:"payload,omitempty"`
+	Close      bool     `json:"close,omitempty"`
 }

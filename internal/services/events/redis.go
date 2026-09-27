@@ -9,37 +9,53 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const redisChannel = "indri:changes"
+const (
+	changesChannel    = "indri:changes"
+	deliveriesChannel = "indri:deliveries"
+)
 
-// Redis is a multi-instance Publisher backed by Redis Pub/Sub. Every instance
-// subscribes to one channel; a write on any instance is published once and
-// delivered to all instances, which then fan out to their local websocket
-// connections.
-type Redis struct {
-	client *redis.Client
+// Redis is a multi-instance Bus backed by Redis Pub/Sub. Every instance
+// subscribes to one channel; a message published on any instance is delivered
+// to all instances, which then act on it locally.
+type Redis[T any] struct {
+	client  *redis.Client
+	channel string
 }
 
-func NewRedis(client *redis.Client) *Redis {
-	return &Redis{client: client}
+// NewRedis is the change-event bus.
+func NewRedis(client *redis.Client) *Redis[ChangeEvent] {
+	return &Redis[ChangeEvent]{client: client, channel: changesChannel}
 }
 
-func (p *Redis) Publish(ctx context.Context, event ChangeEvent) error {
-	payload, err := json.Marshal(event)
+// NewRedisDeliveries is the bus for messages addressed to sessions.
+func NewRedisDeliveries(client *redis.Client) *Redis[Delivery] {
+	return &Redis[Delivery]{client: client, channel: deliveriesChannel}
+}
+
+func (p *Redis[T]) Publish(ctx context.Context, message T) error {
+	payload, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf("marshaling change event: %w", err)
+		return fmt.Errorf("marshaling %s message: %w", p.channel, err)
 	}
 
-	if err := p.client.Publish(ctx, redisChannel, payload).Err(); err != nil {
-		return fmt.Errorf("publishing change event: %w", err)
+	if err := p.client.Publish(ctx, p.channel, payload).Err(); err != nil {
+		return fmt.Errorf("publishing to %s: %w", p.channel, err)
 	}
 
 	return nil
 }
 
-func (p *Redis) Subscribe(ctx context.Context) (<-chan ChangeEvent, error) {
-	sub := p.client.Subscribe(ctx, redisChannel)
+func (p *Redis[T]) Subscribe(ctx context.Context) (<-chan T, error) {
+	sub := p.client.Subscribe(ctx, p.channel)
 
-	out := make(chan ChangeEvent, 256)
+	// Wait for the subscription to be confirmed, so nothing published after
+	// Subscribe returns can be missed.
+	if _, err := sub.Receive(ctx); err != nil {
+		_ = sub.Close()
+		return nil, fmt.Errorf("subscribing to %s: %w", p.channel, err)
+	}
+
+	out := make(chan T, 256)
 
 	go func() {
 		defer close(out)
@@ -49,20 +65,20 @@ func (p *Redis) Subscribe(ctx context.Context) (<-chan ChangeEvent, error) {
 			msg, err := sub.ReceiveMessage(ctx)
 			if err != nil {
 				if ctx.Err() == nil {
-					log.Printf("change event subscription error: %v", err)
+					log.Printf("%s subscription error: %v", p.channel, err)
 				}
 
 				return
 			}
 
-			var event ChangeEvent
-			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
-				log.Printf("could not decode change event: %v", err)
+			var message T
+			if err := json.Unmarshal([]byte(msg.Payload), &message); err != nil {
+				log.Printf("could not decode %s message: %v", p.channel, err)
 				continue
 			}
 
 			select {
-			case out <- event:
+			case out <- message:
 			case <-ctx.Done():
 				return
 			}

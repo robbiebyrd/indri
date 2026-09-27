@@ -6,7 +6,6 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/transport"
 
-	"github.com/robbiebyrd/indri/internal/entrypoints"
 	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/services/connection"
@@ -90,10 +89,10 @@ func (h *Handler) Handle(
 		log.Printf("could not remove player %v from game %v: %v\n", targetSlotId, gameId, err)
 	}
 
-	// Force-disconnect the target if they are currently connected. A target
-	// who is offline has still been removed from the game above.
-	if userConnection, err := cs.Get(&targetSessionId); err == nil {
-		entrypoints.HandleDisconnect(userConnection, h.i.Transport, h.i.GameService, h.i.SessionService)
+	// Disconnect the target on whichever instance holds their connection. A
+	// target who is offline has still been removed from the game above.
+	if err = h.i.BroadcastService.CloseSessions(targetSessionId); err != nil {
+		log.Printf("could not disconnect kicked session %v: %v\n", targetSessionId, err)
 	}
 
 	return nil

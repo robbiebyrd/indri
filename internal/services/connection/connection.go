@@ -1,8 +1,8 @@
 package connection
 
 import (
-	"errors"
 	"fmt"
+	"log"
 
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/transport"
@@ -17,6 +17,25 @@ type Service struct {
 // lookups) with typed helpers for reading/writing per-connection session state.
 func NewService(c transport.Conn, t transport.Transport) *Service {
 	return &Service{c, t}
+}
+
+// disconnectedNotice is written to a connection the server is closing.
+const disconnectedNotice = `{"disconnected": true}`
+
+// Close tells the client it is being disconnected, then closes c. It does
+// nothing to a connection that is already closed.
+func Close(c transport.Conn) {
+	if c.IsClosed() {
+		return
+	}
+
+	if err := c.Write([]byte(disconnectedNotice)); err != nil {
+		log.Printf("error writing disconnected: %v", err)
+	}
+
+	if err := c.Close(); err != nil {
+		log.Printf("error closing connection: %v", err)
+	}
 }
 
 // Write accepts a string and writes bytes to the connection.
@@ -60,30 +79,4 @@ func (ss *Service) SetKey(key string, data string) {
 
 func (ss *Service) UnsetKey(key string) {
 	ss.c.UnSet(key)
-}
-
-// Get returns the connection whose "sessionId" key matches sessionId, if it is
-// currently connected.
-func (ss *Service) Get(sessionId *string) (transport.Conn, error) {
-	if sessionId != nil {
-		return ss.getConnectionForPlayer(*sessionId)
-	}
-
-	return nil, errors.New("invalid sessionId")
-}
-
-func (ss *Service) getConnectionForPlayer(sessionId string) (transport.Conn, error) {
-	conns, err := ss.t.Conns()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, c := range conns {
-		checkSessionId, err := NewService(c, ss.t).GetKeyAsString("sessionId")
-		if err == nil && *checkSessionId == sessionId {
-			return c, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no sessions were found for sessionId %v", sessionId)
 }

@@ -40,6 +40,9 @@ type ClientsInjector struct {
 	Transport     transport.Transport
 	LockManager   lock.Manager
 	Publisher     events.Publisher
+	// Deliveries relays messages for sessions to every instance. It is nil
+	// with a single instance, where they are written directly.
+	Deliveries events.Bus[events.Delivery]
 }
 
 type ServicesInjector struct {

@@ -15,6 +15,7 @@ func Serve(i *injector.Injector) error {
 
 	g.Go(func() error { return entrypoints.Serve(ctx, i) })
 	g.Go(func() error { return monitorGameChanges(ctx, i) })
+	g.Go(func() error { return i.BroadcastService.RelayDeliveries(ctx, nil) })
 
 	err := g.Wait()
 

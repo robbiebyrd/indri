@@ -38,7 +38,9 @@ func monitorGameChanges(ctx context.Context, i *injector.Injector) error {
 				continue
 			}
 
-			if err := i.BroadcastService.Broadcast(&gameID, nil, payload); err != nil {
+			// Every instance receives each change, so each writes only to its
+			// own connections.
+			if err := i.BroadcastService.BroadcastLocal(&gameID, payload); err != nil {
 				log.Printf("Error broadcasting change event: %v\n", err)
 			}
 		}

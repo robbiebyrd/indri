@@ -39,16 +39,8 @@ func HandleDisconnect(
 	}
 
 	// When the transport drives the disconnect it has already closed the
-	// connection, so only notify/close when we still own an open one (e.g. a kick).
-	if !s.IsClosed() {
-		if err = cs.Write([]byte(`{"disconnected": true}`)); err != nil {
-			log.Printf("error writing disconnected: %v\n", err)
-		}
-
-		if err = s.Close(); err != nil {
-			log.Printf("error closing session: %v\n", err)
-		}
-	}
+	// connection, so this only notifies and closes one we still own (logout).
+	connection.Close(s)
 
 	session, err := ss.Get(*sessionId)
 	if err != nil {

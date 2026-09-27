@@ -41,13 +41,14 @@ func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, clientTr
 		clientTransport = built
 	}
 
-	// In redis (multi-instance) mode both the lock manager and the change-event
-	// bus share one Redis connection; otherwise both are in-process.
+	// In redis (multi-instance) mode the lock manager, the change-event bus, and
+	// the delivery relay share one Redis connection; otherwise the first two are
+	// in-process and there is no relay.
 	multiInstance := envVars.GetEnv().LockBackend == "redis"
 
 	var sharedRedis *redis.Client
 
-	if multiInstance && (lockManager == nil || publisher == nil) {
+	if multiInstance {
 		client, err := redisClient.New(ctx)
 		if err != nil {
 			return nil, err
@@ -72,10 +73,16 @@ func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, clientTr
 		}
 	}
 
+	var deliveries events.Bus[events.Delivery]
+	if multiInstance {
+		deliveries = events.NewRedisDeliveries(sharedRedis)
+	}
+
 	return &ClientsInjector{
 		MongoDBClient: mongodbClient,
 		Transport:     clientTransport,
 		LockManager:   lockManager,
 		Publisher:     publisher,
+		Deliveries:    deliveries,
 	}, nil
 }
