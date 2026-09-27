@@ -21,8 +21,10 @@ export class GameStateParser<T> {
     private currentState?: T = undefined
     private schema?: Record<string, unknown> = undefined
 
+    // The schema is copied: positions must stay those of the server's keyframe
+    // even if the caller later adds keys (such as the layout) to that object.
     setSchema(schema: Record<string, unknown>): void {
-        this.schema = schema
+        this.schema = deepClone(schema)
     }
 
     set(data: T, timestamp: Date): void {
@@ -146,6 +148,12 @@ export class GameStateParser<T> {
         }
 
         const lastPart = parts[parts.length - 1];
+        // The server removes only an array's trailing indices, so removing one
+        // truncates the array there rather than leaving a hole.
+        if (Array.isArray(current) && /^\d+$/.test(lastPart)) {
+            current.length = Math.min(current.length, Number(lastPart));
+            return obj;
+        }
         if (!UNSAFE_KEYS.has(lastPart) && typeof current === 'object' && current !== null && lastPart in current) {
             delete current[lastPart];
         }
