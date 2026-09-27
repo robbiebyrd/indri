@@ -19,8 +19,12 @@ export interface TransportClient {
     onError(cb: (error: unknown) => void): void
 }
 
-/** The subset of the WebSocket API the adapters use, so it can be injected. */
-export interface WebSocketLike {
+/**
+ * A bidirectional, session-scoped message channel with the WebSocket event
+ * shape (onopen/onmessage/onerror/onclose, send, close). WebSocket is one
+ * implementation; any channel with this shape can be injected.
+ */
+export interface ChannelLike {
     binaryType: string
     readyState: number
     send(data: string | ArrayBufferLike | ArrayBufferView): void
@@ -31,7 +35,8 @@ export interface WebSocketLike {
     onclose: ((ev: {code?: number, reason?: string}) => void) | null
 }
 
-export type WebSocketConstructor = new (url: string, protocols?: string | string[]) => WebSocketLike
+/** Opens a ChannelLike to url, optionally negotiating subprotocols. */
+export type ChannelConstructor = new (url: string, protocols?: string | string[]) => ChannelLike
 
 export type FetchLike = (input: string, init?: {
     method?: string
@@ -75,8 +80,8 @@ export function resolveFetch(injected: FetchLike | undefined, hint: string): Fet
     return (input, init) => fetch(input, init)
 }
 
-/** Detaches every handler before closing, so a close we initiate fires nothing. */
-export function closeSocket(ws: WebSocketLike | undefined) {
+/** Detaches every handler before closing a channel, so a close we initiate fires nothing. */
+export function closeChannel(ws: ChannelLike | undefined) {
     if (!ws) {
         return
     }

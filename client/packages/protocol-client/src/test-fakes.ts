@@ -1,8 +1,8 @@
 // Test doubles for the runtime APIs the adapters take by injection.
 
-import type {WebSocketLike} from "./transport.ts"
+import type {ChannelLike} from "./transport.ts"
 
-export class FakeWebSocket implements WebSocketLike {
+export class FakeWebSocket implements ChannelLike {
     static instances: FakeWebSocket[] = []
 
     binaryType = "blob"

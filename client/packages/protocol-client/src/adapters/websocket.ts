@@ -1,18 +1,18 @@
-import {BaseTransportClient, closeSocket, resolveGlobal, toPayload} from "../transport.ts"
-import type {Payload, WebSocketConstructor, WebSocketLike} from "../transport.ts"
+import {BaseTransportClient, closeChannel, resolveGlobal, toPayload} from "../transport.ts"
+import type {Payload, ChannelConstructor, ChannelLike} from "../transport.ts"
 
 export type WebSocketConfig = {
     /** Full URL of the server's WebSocket endpoint, e.g. ws://localhost:5002/ws. */
     url: string
     /** WebSocket implementation; defaults to the global. */
-    WebSocket?: WebSocketConstructor
+    WebSocket?: ChannelConstructor
 }
 
 /** Plain WebSocket: text frames are text, binary frames are binary. */
 export class WebSocketTransportClient extends BaseTransportClient {
     private readonly url: string
-    private readonly WS: WebSocketConstructor
-    private ws?: WebSocketLike
+    private readonly WS: ChannelConstructor
+    private ws?: ChannelLike
 
     constructor(config: WebSocketConfig) {
         super()
@@ -36,7 +36,7 @@ export class WebSocketTransportClient extends BaseTransportClient {
     }
 
     protected teardown() {
-        closeSocket(this.ws)
+        closeChannel(this.ws)
         this.ws = undefined
     }
 }

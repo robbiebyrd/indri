@@ -1,12 +1,12 @@
 import {base64Decode, base64Encode} from "../codec.ts"
-import {BaseTransportClient, closeSocket, resolveGlobal} from "../transport.ts"
-import type {Payload, WebSocketConstructor, WebSocketLike} from "../transport.ts"
+import {BaseTransportClient, closeChannel, resolveGlobal} from "../transport.ts"
+import type {Payload, ChannelConstructor, ChannelLike} from "../transport.ts"
 
 export type GraphQLWsConfig = {
     /** Full URL of the server's GraphQL endpoint, e.g. ws://localhost:5002/graphql. */
     url: string
     /** WebSocket implementation; defaults to the global. */
-    WebSocket?: WebSocketConstructor
+    WebSocket?: ChannelConstructor
 }
 
 const SUBPROTOCOL = "graphql-transport-ws"
@@ -21,8 +21,8 @@ const SEND_QUERY = "mutation Send($message: String, $b64: String) { send(message
  */
 export class GraphQLWsTransportClient extends BaseTransportClient {
     private readonly url: string
-    private readonly WS: WebSocketConstructor
-    private ws?: WebSocketLike
+    private readonly WS: ChannelConstructor
+    private ws?: ChannelLike
     private sends = 0
 
     constructor(config: GraphQLWsConfig) {
@@ -103,7 +103,7 @@ export class GraphQLWsTransportClient extends BaseTransportClient {
     }
 
     protected teardown() {
-        closeSocket(this.ws)
+        closeChannel(this.ws)
         this.ws = undefined
     }
 }

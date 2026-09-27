@@ -1,6 +1,6 @@
 export {createTransportClient, TRANSPORT_KINDS} from "./factory.ts"
 export type {TransportClientConfig, TransportKind} from "./factory.ts"
-export type {FetchLike, Payload, TransportClient, WebSocketConstructor} from "./transport.ts"
+export type {FetchLike, Payload, TransportClient, ChannelConstructor} from "./transport.ts"
 export {WebSocketTransportClient} from "./adapters/websocket.ts"
 export type {WebSocketConfig} from "./adapters/websocket.ts"
 export {SseTransportClient} from "./adapters/sse.ts"

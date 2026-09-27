@@ -3,7 +3,7 @@ import {SseTransportClient} from "./adapters/sse.ts"
 import {WebRtcTransportClient} from "./adapters/webrtc.ts"
 import type {PeerConnectionConstructor} from "./adapters/webrtc.ts"
 import {WebSocketTransportClient} from "./adapters/websocket.ts"
-import type {FetchLike, TransportClient, WebSocketConstructor} from "./transport.ts"
+import type {FetchLike, TransportClient, ChannelConstructor} from "./transport.ts"
 
 /** The same names the server accepts in INDRI_TRANSPORTS. */
 export const TRANSPORT_KINDS = ["ws", "sse", "graphqlws", "webrtc"] as const
@@ -17,7 +17,7 @@ export type TransportClientConfig = {
      * server's base HTTP URL for sse and webrtc (http://host:port).
      */
     url: string
-    WebSocket?: WebSocketConstructor
+    WebSocket?: ChannelConstructor
     fetch?: FetchLike
     RTCPeerConnection?: PeerConnectionConstructor
     iceServers?: {urls: string | string[]}[]
