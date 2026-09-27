@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 approved_at: "2026-09-27"
 ---
 # Pluggable client transports
@@ -60,16 +60,39 @@ Findings worth keeping:
   under `-race`. The tests keep the client peer on loopback IPv4, which brings setup to milliseconds.
   The production `OpenTimeout` is 15s to leave headroom.
 
-## Client (`client/packages/protocol-client`)
+## Client (`client/packages/protocol-client`, done)
 
 - `TransportClient` interface (`connect/send/close/onOpen/onMessage/onClose/onError`), carrying
-  `string | Uint8Array`.
+  `string | Uint8Array`. A shared base class owns the lifecycle: messages that arrive while
+  `connect()` is still resolving are delivered, not dropped, and a `close()` from our side never
+  fires `onClose`.
 - Adapters for `ws`, `sse`, `graphqlws`, and `webrtc`. `fetch`, `WebSocket`, and `RTCPeerConnection`
   are injected so the package has no Expo/RN dependency: RN's global `fetch` can't stream, and native
-  WebRTC needs `react-native-webrtc` in a dev client.
+  WebRTC needs `react-native-webrtc` in a dev client. Base64 and UTF-8 stream decoding are
+  implemented in the package because Hermes doesn't reliably provide `atob`/`TextDecoder`.
 - `MessageHandler` takes a `TransportClient` instead of a URL, and its public API is unchanged.
-  `app/index.tsx` picks the transport from `EXPO_PUBLIC_TRANSPORT` (default `ws`).
-  `EXPO_PUBLIC_HTTP_URL` is the base URL for `sse`/`webrtc`.
+  `app/index.tsx` picks the transport from `EXPO_PUBLIC_TRANSPORT` (default `ws`), and
+  `EXPO_PUBLIC_API_URL` is that transport's endpoint (`ws://…/ws`, `ws://…/graphql`, or an `http://`
+  base for `sse`/`webrtc`). One variable, not the separate HTTP URL first planned. On native the
+  app passes `expo/fetch`.
+- The lockfile change is only the workspace link, applied by hand. pnpm 10 strips `libc:` fields
+  and pnpm 11.28 adds `supports-color` peer suffixes throughout, so neither reproduces the committed
+  lockfile. `pnpm@11 install --frozen-lockfile`, which is what CI runs, accepts it.
+
+## Verification
+
+- Go: `go test -race ./...`; every transport passes `transporttest`.
+- Client: typecheck, 236 node tests, and lint (0 errors). The CI steps also passed in a clean copy
+  with pnpm 11 and `--frozen-lockfile`; `expo export --platform web` builds.
+- Live, against one server running all four transports on a scratch MongoDB database: a Node script
+  using the package ran register → login → inquire over `ws`, `sse`, and `graphqlws` concurrently.
+  In the browser (Expo web, Chromium), login → game list → create game → keyframe passed on each
+  of the four transports. The root `config.json` has no board layout, so moves were not exercised.
+- The browser caught two bugs the unit tests couldn't:
+  - Adapters called `fetch` as a method, which browsers reject ("Illegal invocation"). Fixed with
+    `resolveFetch`, and the fakes now enforce the same check.
+  - A pre-existing crash: the Join screen with zero games (`"games": null`).
+- Native React Native was not verified for any transport.
 
 ## Out of scope
 
