@@ -3,8 +3,7 @@ package restart
 import (
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-
+	"github.com/robbiebyrd/indri/example/tictactoe/server/board"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/connection"
@@ -73,12 +72,12 @@ func (h *TicTacToeRestartHandler) Handle(
 
 func boardDimensions(sceneData map[string]interface{}) (rows, cols int) {
 	rows, cols = 3, 3
-	board, ok := sceneData["board"].(bson.A)
-	if !ok || len(board) == 0 {
+	grid, ok := board.List(sceneData["board"])
+	if !ok || len(grid) == 0 {
 		return
 	}
-	rows = len(board)
-	if row, ok := board[0].(bson.A); ok {
+	rows = len(grid)
+	if row, ok := board.List(grid[0]); ok {
 		cols = len(row)
 	}
 	return

@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/robbiebyrd/indri/example/tictactoe/server/board"
 	"github.com/robbiebyrd/indri/internal/transport"
-	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -91,11 +91,26 @@ func (h *TicTacToeMoveHandler) Handle(
 
 		var boardData [][]string
 
-		for _, item := range updateSceneData["board"].(bson.A) {
+		storedRows, ok := board.List(updateSceneData["board"])
+		if !ok {
+			return fmt.Errorf("board is not a list")
+		}
+
+		for _, item := range storedRows {
+			cells, ok := board.List(item)
+			if !ok {
+				return fmt.Errorf("board row is not a list")
+			}
+
 			var innerRow []string
 
-			for _, item2 := range item.(bson.A) {
-				innerRow = append(innerRow, item2.(string))
+			for _, cell := range cells {
+				mark, ok := cell.(string)
+				if !ok {
+					return fmt.Errorf("board cell is not a string")
+				}
+
+				innerRow = append(innerRow, mark)
 			}
 
 			boardData = append(boardData, innerRow)
