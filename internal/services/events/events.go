@@ -17,6 +17,8 @@ const (
 	OpUpdate OpCode = 1
 	OpInsert OpCode = 2
 	OpDelete OpCode = 3
+	// OpLayout marks a layout frame on the wire. On the change bus it reports
+	// that a write edited the game's layout, so the broadcaster sends the new one.
 	OpLayout OpCode = 4
 	// OpKeyframe is server-internal: it asks the broadcaster to send the game's
 	// clients a fresh keyframe, because a write changed the document's shape and a
