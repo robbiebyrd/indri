@@ -1,8 +1,6 @@
 package game
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -191,8 +189,9 @@ func (gs *Service) Sanitize(game *models.Game) *models.Game {
 	return game
 }
 
-// slimKeyframe returns a sanitized, layout-stripped copy of the game wrapped with a schema-version hash.
-func (gs *Service) slimKeyframe(g *models.Game) (events.KeyframeWrapper, error) {
+// slimKeyframe returns a sanitized, layout-stripped copy of the game. Its schema
+// version is the layout hash, which stays the same for the life of the game.
+func (gs *Service) slimKeyframe(g *models.Game, layoutHash string) (events.KeyframeWrapper, error) {
 	raw, err := json.Marshal(g)
 	if err != nil {
 		return events.KeyframeWrapper{}, err
@@ -205,10 +204,7 @@ func (gs *Service) slimKeyframe(g *models.Game) (events.KeyframeWrapper, error) 
 	if slim.PublicData != nil {
 		delete(slim.PublicData, "layout")
 	}
-	svRaw, _ := json.Marshal(slim)
-	svHash := sha256.Sum256(svRaw)
-	sv := hex.EncodeToString(svHash[:8])
-	return events.KeyframeWrapper{SV: sv, Game: slim}, nil
+	return events.KeyframeWrapper{SV: layoutHash, Game: slim}, nil
 }
 
 // WriteKeyframe sends a LayoutFrame followed by a slim keyframe to a single connection.
@@ -217,7 +213,7 @@ func (gs *Service) WriteKeyframe(conn transport.Conn, g *models.Game, layoutHash
 	if err := transport.WriteEncoded(conn, layoutFrame); err != nil {
 		return err
 	}
-	wrapper, err := gs.slimKeyframe(g)
+	wrapper, err := gs.slimKeyframe(g, layoutHash)
 	if err != nil {
 		return err
 	}
@@ -225,8 +221,8 @@ func (gs *Service) WriteKeyframe(conn transport.Conn, g *models.Game, layoutHash
 }
 
 // WriteSlimKeyframe sends a slim keyframe without a layout frame — used for refresh.
-func (gs *Service) WriteSlimKeyframe(conn transport.Conn, g *models.Game) error {
-	wrapper, err := gs.slimKeyframe(g)
+func (gs *Service) WriteSlimKeyframe(conn transport.Conn, g *models.Game, layoutHash string) error {
+	wrapper, err := gs.slimKeyframe(g, layoutHash)
 	if err != nil {
 		return err
 	}
