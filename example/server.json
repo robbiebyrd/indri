@@ -3,6 +3,7 @@
   "listenPort": 5002,
   "allowedOrigins": "",
   "lockBackend": "inprocess",
+  "dbBackend": "mongodb",
   "mongoUri": "mongodb+srv://test:test@localhost/",
   "mongoDatabase": "indri",
   "mongoAuthDatabase": "admin",

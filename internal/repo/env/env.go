@@ -21,6 +21,7 @@ type Vars struct {
 	RedisPassword         string `default:""          envconfig:"REDIS_PASSWORD"        json:"redisPassword"        flag:"redis-password"`
 	RedisDatabase         int    `default:"0"         envconfig:"REDIS_DATABASE"        json:"redisDatabase"        flag:"redis-database"`
 	LockBackend           string `default:"inprocess" envconfig:"LOCK_BACKEND"          json:"lockBackend"          flag:"lock-backend"`
+	DBBackend             string `default:"mongodb"   envconfig:"DB_BACKEND"           json:"dbBackend"            flag:"db-backend"`
 	MongoURI              string `default:"localhost" envconfig:"MONGO_URI"             json:"mongoUri"             flag:"mongo-uri"`
 	MongoDatabase         string `default:"indri"     envconfig:"MONGO_DATABASE"        json:"mongoDatabase"        flag:"mongo-database"`
 	MongoAuthDatabase     string `default:"admin"     envconfig:"MONGO_AUTH_DATABASE"   json:"mongoAuthDatabase"    flag:"mongo-auth-database"`
