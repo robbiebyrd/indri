@@ -2,6 +2,7 @@ package injector
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -12,7 +13,6 @@ import (
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 	"github.com/robbiebyrd/indri/internal/transport"
-	"github.com/robbiebyrd/indri/internal/transport/ws"
 )
 
 var globalClientsInjector *ClientsInjector
@@ -32,7 +32,12 @@ func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, clientTr
 	}
 
 	if clientTransport == nil {
-		clientTransport = ws.New()
+		built, err := newTransport(envVars.GetEnv())
+		if err != nil {
+			return nil, fmt.Errorf("building transports: %w", err)
+		}
+
+		clientTransport = built
 	}
 
 	// In redis (multi-instance) mode both the lock manager and the change-event

@@ -29,6 +29,12 @@ type Vars struct {
 	WSPongTimeoutSeconds  int    `default:"60"        envconfig:"WS_PONG_TIMEOUT"       json:"wsPongTimeout"        flag:"ws-pong-timeout"`
 	WSMaxMessageSizeBytes int    `default:"32768"     envconfig:"WS_MAX_MESSAGE_SIZE"   json:"wsMaxMessageSize"     flag:"ws-max-message-size"`
 	WSMessageBufferSize   int    `default:"1024"      envconfig:"WS_MESSAGE_BUFFER_SIZE" json:"wsMessageBufferSize" flag:"ws-message-buffer-size"`
+	Transports            string `default:"ws"        envconfig:"TRANSPORTS"            json:"transports"           flag:"transports"`
+	WebRTCICEServers      string `default:""          envconfig:"WEBRTC_ICE_SERVERS"    json:"webrtcIceServers"     flag:"webrtc-ice-servers"`
+	WebRTCMaxPeers        int    `default:"256"       envconfig:"WEBRTC_MAX_PEERS"      json:"webrtcMaxPeers"       flag:"webrtc-max-peers"`
+	WebRTCNAT1To1IPs      string `default:""          envconfig:"WEBRTC_NAT_1TO1_IPS"   json:"webrtcNat1To1Ips"     flag:"webrtc-nat-1to1-ips"`
+	WebRTCUDPPortMin      int    `default:"0"         envconfig:"WEBRTC_UDP_PORT_MIN"   json:"webrtcUdpPortMin"     flag:"webrtc-udp-port-min"`
+	WebRTCUDPPortMax      int    `default:"0"         envconfig:"WEBRTC_UDP_PORT_MAX"   json:"webrtcUdpPortMax"     flag:"webrtc-udp-port-max"`
 }
 
 var globalClient *Vars
