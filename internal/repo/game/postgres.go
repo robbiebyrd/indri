@@ -10,11 +10,13 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers "pgx" driver for database/sql
+
 	"github.com/robbiebyrd/indri/internal/models"
 	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
+	"github.com/robbiebyrd/indri/internal/services/mutation"
 )
 
 const postgresSchemaSQL = `
@@ -238,4 +240,199 @@ func (s *PostgresStore) FindOpen(limit int) ([]*models.Game, error) {
 		out = append(out, g)
 	}
 	return out, rows.Err()
+}
+
+// saveGame writes the full game back to the database, updating the scalar
+// index columns (id, code, version, private) alongside the JSONB blob.
+func (s *PostgresStore) saveGame(g *models.Game) error {
+	data, err := marshalGame(g)
+	if err != nil {
+		return fmt.Errorf("marshaling game: %w", err)
+	}
+	_, err = s.db.ExecContext(s.ctx,
+		`UPDATE games SET code = $2, version = $3, private = $4, data = $5 WHERE id = $1`,
+		g.ID, g.Code, g.Version, g.Private, data,
+	)
+	return err
+}
+
+// saveWithVersion is the version-fenced write used by Mutate. It returns
+// (true, nil) on a successful commit, (false, nil) when another writer
+// already incremented the version (triggers a retry in mutation.Run), or
+// (false, err) on a real database error.
+func (s *PostgresStore) saveWithVersion(g *models.Game, expectedVersion int64) (bool, error) {
+	g.Version = expectedVersion + 1
+	g.UpdatedAt = time.Now()
+	data, err := marshalGame(g)
+	if err != nil {
+		return false, fmt.Errorf("marshaling game: %w", err)
+	}
+	result, err := s.db.ExecContext(s.ctx,
+		`UPDATE games SET code = $3, version = $4, private = $5, data = $6
+		 WHERE id = $1 AND version = $2`,
+		g.ID, expectedVersion, g.Code, g.Version, g.Private, data,
+	)
+	if err != nil {
+		return false, fmt.Errorf("saving game with version fence: %w", err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+// publishFieldUpdate emits a partial-update event, mirroring MemoryStore.
+func (s *PostgresStore) publishFieldUpdate(id string, updated map[string]interface{}, removed []string) {
+	if s.publisher == nil {
+		return
+	}
+	updated, removed = events.SanitizeDelta(updated, removed)
+	ev := events.ChangeEvent{
+		ID:            id,
+		OperationType: events.OpUpdate,
+		Timestamp:     time.Now(),
+		Collection:    collectionName,
+		UpdatedFields: updated,
+		RemovedFields: removed,
+	}
+	if !ev.HasChanges() {
+		return
+	}
+	_ = s.publisher.Publish(s.ctx, ev)
+}
+
+// publishDiff computes and publishes the delta between a pre-mutation JSON
+// snapshot and the updated game.
+func (s *PostgresStore) publishDiff(id string, before map[string]interface{}, after *models.Game) {
+	if s.publisher == nil {
+		return
+	}
+	afterMap, err := events.ToMap(after)
+	if err != nil {
+		return
+	}
+	updated, removed := events.Diff(before, afterMap)
+	s.publishFieldUpdate(id, updated, removed)
+}
+
+func (s *PostgresStore) Update(id string, upd *models.UpdateGame) error {
+	g, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	before, err := events.ToMap(g)
+	if err != nil {
+		return fmt.Errorf("snapshot: %w", err)
+	}
+
+	if upd.Teams != nil {
+		g.Teams = *upd.Teams
+	}
+	if upd.Players != nil {
+		g.Players = *upd.Players
+	}
+	if upd.Stage != nil {
+		g.Stage = *upd.Stage
+	}
+	if upd.PublicData != nil {
+		g.PublicData = upd.PublicData
+	}
+	if upd.PrivateData != nil {
+		g.PrivateData = upd.PrivateData
+	}
+	if upd.PlayerData != nil {
+		g.PlayerData = upd.PlayerData
+	}
+	g.Private = upd.Private
+	g.UpdatedAt = time.Now()
+	g.Version++
+
+	if err := s.saveGame(g); err != nil {
+		return fmt.Errorf("saving updated game: %w", err)
+	}
+	s.publishDiff(id, before, g)
+	return nil
+}
+
+func (s *PostgresStore) UpdateField(id string, key string, value interface{}) error {
+	g, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	m, err := events.ToMap(g)
+	if err != nil {
+		return fmt.Errorf("snapshot: %w", err)
+	}
+	applyDottedPath(m, key, value, false)
+	if err := fromMap(m, g); err != nil {
+		return fmt.Errorf("rehydrate: %w", err)
+	}
+	g.UpdatedAt = time.Now()
+	g.Version++
+
+	if err := s.saveGame(g); err != nil {
+		return fmt.Errorf("saving field update: %w", err)
+	}
+	s.publishFieldUpdate(id, map[string]interface{}{key: value}, nil)
+	return nil
+}
+
+func (s *PostgresStore) DeleteField(id string, key string) error {
+	g, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	m, err := events.ToMap(g)
+	if err != nil {
+		return fmt.Errorf("snapshot: %w", err)
+	}
+	applyDottedPath(m, key, nil, true)
+	if err := fromMap(m, g); err != nil {
+		return fmt.Errorf("rehydrate: %w", err)
+	}
+	g.UpdatedAt = time.Now()
+	g.Version++
+
+	if err := s.saveGame(g); err != nil {
+		return fmt.Errorf("saving field delete: %w", err)
+	}
+	s.publishFieldUpdate(id, nil, []string{key})
+	return nil
+}
+
+// Mutate uses mutation.Run for the retry-on-conflict CAS loop. The version
+// fence in saveWithVersion guarantees writes committed under an expired lock
+// cannot overwrite concurrent changes.
+func (s *PostgresStore) Mutate(id string, apply func(g *models.Game) error) error {
+	var before map[string]interface{}
+
+	return mutation.Run(
+		s.ctx,
+		s.locks,
+		"game:"+id,
+		func() (*models.Game, int64, error) {
+			g, err := s.Get(id)
+			if err != nil {
+				return nil, 0, err
+			}
+			beforeMap, err := events.ToMap(g)
+			if err != nil {
+				return nil, 0, err
+			}
+			before = beforeMap
+			return g, g.Version, nil
+		},
+		apply,
+		func(g *models.Game, expectedVersion int64) (bool, error) {
+			committed, err := s.saveWithVersion(g, expectedVersion)
+			if err != nil {
+				return false, err
+			}
+			if committed {
+				s.publishDiff(id, before, g)
+			}
+			return committed, nil
+		},
+	)
 }
