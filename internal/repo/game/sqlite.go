@@ -26,8 +26,7 @@ type SQLiteStore struct {
 	changes changePublisher
 }
 
-// TODO(sqlite): reinstate after all Storer methods land in Task 6.
-// var _ Storer = (*SQLiteStore)(nil)
+var _ Storer = (*SQLiteStore)(nil)
 
 // NewSQLiteStore creates a SQLiteStore using an already-open *sql.DB. The caller
 // is responsible for opening the DB via sqlite.Open, which runs the DDL.
