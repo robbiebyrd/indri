@@ -22,7 +22,8 @@ func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, clientTr
 		return globalClientsInjector, nil
 	}
 
-	if mongodbClient == nil {
+	env := envVars.GetEnv()
+	if mongodbClient == nil && env.DBBackend == "mongodb" {
 		newMongodbClient, err := mongoClient.New(ctx)
 		if err != nil {
 			return nil, err

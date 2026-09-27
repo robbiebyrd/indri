@@ -3,6 +3,7 @@ package injector
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	envVars "github.com/robbiebyrd/indri/internal/repo/env"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
@@ -16,19 +17,31 @@ func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath stri
 		return nil, errors.New("clients were not passed to the repo injector")
 	}
 
-	gr, err := gameRepo.NewMongoStore(ctx, clients.MongoDBClient, clients.LockManager, clients.Publisher)
-	if err != nil {
-		return nil, err
-	}
+	env := envVars.GetEnv()
 
-	ur, err := userRepo.NewMongoStore(ctx, clients.MongoDBClient)
-	if err != nil {
-		return nil, err
-	}
+	var (
+		gr  gameRepo.Storer
+		ur  userRepo.Storer
+		sr  sessionRepo.Storer
+		err error
+	)
 
-	sr, err := sessionRepo.NewMongoStore(ctx, clients.MongoDBClient)
-	if err != nil {
-		return nil, err
+	switch env.DBBackend {
+	case "mongodb":
+		gr, err = gameRepo.NewMongoStore(ctx, clients.MongoDBClient, clients.LockManager, clients.Publisher)
+		if err != nil {
+			return nil, err
+		}
+		ur, err = userRepo.NewMongoStore(ctx, clients.MongoDBClient)
+		if err != nil {
+			return nil, err
+		}
+		sr, err = sessionRepo.NewMongoStore(ctx, clients.MongoDBClient)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unknown database backend %q", env.DBBackend)
 	}
 
 	scr, err := scriptRepo.NewStore(scriptFilePath)
@@ -37,7 +50,7 @@ func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath stri
 	}
 
 	return &ReposInjector{
-		EnvVars:     envVars.GetEnv(),
+		EnvVars:     env,
 		GameRepo:    gr,
 		UserRepo:    ur,
 		SessionRepo: sr,
