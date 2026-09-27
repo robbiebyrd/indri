@@ -310,92 +310,88 @@ func (s *SQLiteStore) loadWithVersion(id string) (*models.Game, int64, error) {
 	return g, version, nil
 }
 
+// mutateFenced runs a version-fenced read-modify-write via mutation.Run,
+// under the same per-game lock key as Mutate, but does not publish a change
+// event itself — callers publish using whatever delta shape matches their
+// semantics (a full diff, or a single field) once the write has committed.
+// saveWithVersion already bumps Version and UpdatedAt on commit, so apply
+// must not touch either.
+func (s *SQLiteStore) mutateFenced(id string, apply func(g *models.Game) error) error {
+	return mutation.Run(
+		s.ctx,
+		s.locks,
+		"game:"+id,
+		func() (*models.Game, int64, error) {
+			return s.loadWithVersion(id)
+		},
+		apply,
+		func(g *models.Game, expectedVersion int64) (bool, error) {
+			return s.saveWithVersion(g, expectedVersion)
+		},
+	)
+}
+
+// Update delegates to Mutate so the field-copy from UpdateGame runs under
+// the same lock + version fence as every other writer, and the resulting
+// delta is published as a full diff exactly as Mutate already does.
 func (s *SQLiteStore) Update(id string, upd *models.UpdateGame) error {
-	g, version, err := s.loadWithVersion(id)
-	if err != nil {
-		return err
-	}
-	before, err := events.ToMap(g)
-	if err != nil {
-		return fmt.Errorf("snapshot: %w", err)
-	}
-
-	if upd.Teams != nil {
-		g.Teams = *upd.Teams
-	}
-	if upd.Players != nil {
-		g.Players = *upd.Players
-	}
-	if upd.Stage != nil {
-		g.Stage = *upd.Stage
-	}
-	if upd.PublicData != nil {
-		g.PublicData = upd.PublicData
-	}
-	if upd.PrivateData != nil {
-		g.PrivateData = upd.PrivateData
-	}
-	if upd.PlayerData != nil {
-		g.PlayerData = upd.PlayerData
-	}
-	g.Private = upd.Private
-
-	committed, err := s.saveWithVersion(g, version)
-	if err != nil {
-		return err
-	}
-	if !committed {
-		return fmt.Errorf("id %q: %w", id, repoErrors.ErrConflict)
-	}
-	s.publishDiff(id, before, g)
-	return nil
+	return s.Mutate(id, func(g *models.Game) error {
+		if upd.Teams != nil {
+			g.Teams = *upd.Teams
+		}
+		if upd.Players != nil {
+			g.Players = *upd.Players
+		}
+		if upd.Stage != nil {
+			g.Stage = *upd.Stage
+		}
+		if upd.PublicData != nil {
+			g.PublicData = upd.PublicData
+		}
+		if upd.PrivateData != nil {
+			g.PrivateData = upd.PrivateData
+		}
+		if upd.PlayerData != nil {
+			g.PlayerData = upd.PlayerData
+		}
+		g.Private = upd.Private
+		return nil
+	})
 }
 
 func (s *SQLiteStore) UpdateField(id string, key string, value interface{}) error {
-	g, version, err := s.loadWithVersion(id)
+	err := s.mutateFenced(id, func(g *models.Game) error {
+		m, err := events.ToMap(g)
+		if err != nil {
+			return fmt.Errorf("snapshot: %w", err)
+		}
+		applyDottedPath(m, key, value, false)
+		if err := fromMap(m, g); err != nil {
+			return fmt.Errorf("rehydrate: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return err
-	}
-	m, err := events.ToMap(g)
-	if err != nil {
-		return fmt.Errorf("snapshot: %w", err)
-	}
-	applyDottedPath(m, key, value, false)
-	if err := fromMap(m, g); err != nil {
-		return fmt.Errorf("rehydrate: %w", err)
-	}
-
-	committed, err := s.saveWithVersion(g, version)
-	if err != nil {
-		return err
-	}
-	if !committed {
-		return fmt.Errorf("id %q: %w", id, repoErrors.ErrConflict)
+		return fmt.Errorf("saving field update: %w", err)
 	}
 	s.publishFieldUpdate(id, map[string]interface{}{key: value}, nil)
 	return nil
 }
 
 func (s *SQLiteStore) DeleteField(id string, key string) error {
-	g, version, err := s.loadWithVersion(id)
+	err := s.mutateFenced(id, func(g *models.Game) error {
+		m, err := events.ToMap(g)
+		if err != nil {
+			return fmt.Errorf("snapshot: %w", err)
+		}
+		applyDottedPath(m, key, nil, true)
+		if err := fromMap(m, g); err != nil {
+			return fmt.Errorf("rehydrate: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return err
-	}
-	m, err := events.ToMap(g)
-	if err != nil {
-		return fmt.Errorf("snapshot: %w", err)
-	}
-	applyDottedPath(m, key, nil, true)
-	if err := fromMap(m, g); err != nil {
-		return fmt.Errorf("rehydrate: %w", err)
-	}
-
-	committed, err := s.saveWithVersion(g, version)
-	if err != nil {
-		return err
-	}
-	if !committed {
-		return fmt.Errorf("id %q: %w", id, repoErrors.ErrConflict)
+		return fmt.Errorf("saving field delete: %w", err)
 	}
 	s.publishFieldUpdate(id, nil, []string{key})
 	return nil
