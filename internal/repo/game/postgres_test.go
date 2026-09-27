@@ -295,3 +295,45 @@ func TestPostgresStore_ConcurrentUpdateFieldAndAddPlayer_NoLostUpdates(t *testin
 		t.Errorf("Version=%d; want %d (lost update if lower)", got.Version, wantVersion)
 	}
 }
+
+func TestPostgresStore_AddPlayerToTeam_ThenHasPlayerOnTeam(t *testing.T) {
+	store := newPostgresFixture(t)
+	g, _ := store.New("ABCD", scriptWithTeams(), false)
+	_ = store.AddPlayer(g.ID, "user-1", "Alice")
+	if err := store.AddPlayerToTeam(g.ID, "red", "user-1"); err != nil {
+		t.Fatalf("AddPlayerToTeam: %v", err)
+	}
+	if !store.HasPlayerOnTeam(g.ID, "red", "user-1") {
+		t.Fatal("HasPlayerOnTeam(red, user-1) = false")
+	}
+}
+
+func TestPostgresStore_ChangePlayerTeam(t *testing.T) {
+	store := newPostgresFixture(t)
+	g, _ := store.New("ABCD", scriptWithTeams(), false)
+	_ = store.AddPlayer(g.ID, "user-1", "Alice")
+	_ = store.AddPlayerToTeam(g.ID, "red", "user-1")
+	if err := store.ChangePlayerTeam(g.ID, "blue", "user-1"); err != nil {
+		t.Fatalf("ChangePlayerTeam: %v", err)
+	}
+	teamID, err := store.PlayerOnWhichTeam(g.ID, "user-1")
+	if err != nil {
+		t.Fatalf("PlayerOnWhichTeam: %v", err)
+	}
+	if teamID == nil || *teamID != "blue" {
+		t.Errorf("team: want blue, got %v", teamID)
+	}
+}
+
+func TestPostgresStore_RemovePlayerFromTeam(t *testing.T) {
+	store := newPostgresFixture(t)
+	g, _ := store.New("ABCD", scriptWithTeams(), false)
+	_ = store.AddPlayer(g.ID, "user-1", "Alice")
+	_ = store.AddPlayerToTeam(g.ID, "red", "user-1")
+	if err := store.RemovePlayerFromTeam(g.ID, "user-1"); err != nil {
+		t.Fatalf("RemovePlayerFromTeam: %v", err)
+	}
+	if store.HasPlayerOnTeam(g.ID, "red", "user-1") {
+		t.Errorf("still on team after remove")
+	}
+}
