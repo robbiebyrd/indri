@@ -178,3 +178,53 @@ func TestPostgresStore_Mutate_UnknownID(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
+
+func TestPostgresStore_AddPlayer_ThenHasPlayer(t *testing.T) {
+	store := newPostgresFixture(t)
+	g, _ := store.New("ABCD", makeScript(), false)
+	if err := store.AddPlayer(g.ID, "user-1", "Alice"); err != nil {
+		t.Fatalf("AddPlayer: %v", err)
+	}
+	if !store.HasPlayer(g.ID, "user-1") {
+		t.Error("HasPlayer(user-1) = false")
+	}
+	if store.HasPlayer(g.ID, "user-x") {
+		t.Error("HasPlayer(user-x) = true")
+	}
+	got, _ := store.Get(g.ID)
+	if got.Players["user-1"].Name != "Alice" {
+		t.Errorf("Name = %q; want Alice", got.Players["user-1"].Name)
+	}
+}
+
+func TestPostgresStore_RemovePlayer(t *testing.T) {
+	store := newPostgresFixture(t)
+	g, _ := store.New("ABCD", makeScript(), false)
+	_ = store.AddPlayer(g.ID, "user-1", "Alice")
+	if err := store.RemovePlayer(g.ID, "user-1"); err != nil {
+		t.Fatalf("RemovePlayer: %v", err)
+	}
+	if store.HasPlayer(g.ID, "user-1") {
+		t.Error("HasPlayer(user-1) = true after remove")
+	}
+}
+
+func TestPostgresStore_ConnectDisconnectPlayer(t *testing.T) {
+	store := newPostgresFixture(t)
+	g, _ := store.New("ABCD", makeScript(), false)
+	_ = store.AddPlayer(g.ID, "user-1", "Alice")
+	if err := store.ConnectPlayer(g.ID, "user-1"); err != nil {
+		t.Fatalf("ConnectPlayer: %v", err)
+	}
+	got, _ := store.Get(g.ID)
+	if !got.Players["user-1"].Connected {
+		t.Errorf("Connected = false after ConnectPlayer")
+	}
+	if err := store.DisconnectPlayer(g.ID, "user-1"); err != nil {
+		t.Fatalf("DisconnectPlayer: %v", err)
+	}
+	got, _ = store.Get(g.ID)
+	if got.Players["user-1"].Connected {
+		t.Errorf("Connected = true after DisconnectPlayer")
+	}
+}
