@@ -87,47 +87,36 @@ func TestPublishDiff_RemovedPathEncoded(t *testing.T) {
 	store := newTestStoreWith(t, pub)
 
 	g := makeTestGame(t, store, "removed-path")
-	gameId := g.ID
 
-	// Add a field via Mutate.
-	if err := store.Mutate(gameId, func(game *models.Game) error {
-		if game.PublicData == nil {
-			game.PublicData = map[string]interface{}{"tempKey": "value"}
-		} else {
-			game.PublicData["tempKey"] = "value"
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("initial mutate: %v", err)
+	if err := store.UpdateField(g.ID, "data.list", []interface{}{"a", "b", "c"}); err != nil {
+		t.Fatalf("setup: %v", err)
 	}
 
 	pub.reset()
 
-	// Remove that field via Mutate — publishDiff must encode the removed path
-	// using the before-state schema (where tempKey existed).
-	if err := store.Mutate(gameId, func(game *models.Game) error {
-		delete(game.PublicData, "tempKey")
-		return nil
-	}); err != nil {
-		t.Fatalf("delete mutate: %v", err)
+	// Shrinking an array removes its tail without changing any object key, so
+	// it stays a positional delta; the removed element exists only in the
+	// before-state, so its path must be encoded from that.
+	if err := store.UpdateField(g.ID, "data.list", []interface{}{"a", "b"}); err != nil {
+		t.Fatalf("shrink: %v", err)
 	}
 
 	ev := pub.last()
-	if ev == nil {
-		t.Fatal("no event published after removal mutation")
+	if ev == nil || ev.OperationType != events.OpUpdate || len(ev.RemovedFields) != 1 {
+		t.Fatalf("event = %+v, want an update removing one element", ev)
 	}
 
-	for _, path := range ev.RemovedFields {
-		encoded, ok := path.([]interface{})
-		if !ok {
-			t.Errorf("removed path should be positional []interface{}, got %T: %v", path, path)
-			continue
+	encoded, ok := ev.RemovedFields[0].([]interface{})
+	if !ok || len(encoded) != 3 {
+		t.Fatalf("removed path = %#v, want [data, list, 2] positionally", ev.RemovedFields[0])
+	}
+	for i, seg := range encoded {
+		if _, isInt := seg.(int); !isInt {
+			t.Errorf("segment %d = %#v, want a positional int", i, seg)
 		}
-		// The last segment must be an int (positional index), not the raw key name.
-		last := encoded[len(encoded)-1]
-		if _, isStr := last.(string); isStr {
-			t.Errorf("last segment of removed path should be positional int, got string %q — publishDiff is using afterMap instead of before for removed paths", last)
-		}
+	}
+	if encoded[2] != 2 {
+		t.Errorf("removed index = %v, want 2", encoded[2])
 	}
 }
 
@@ -140,7 +129,8 @@ func TestUpdateField_EmitsPositionalPath(t *testing.T) {
 	g := makeTestGame(t, store, "updatefield")
 	pub.reset()
 
-	if err := store.UpdateField(g.ID, "private", true); err != nil {
+	// A value change on an existing key keeps the schema, so it is a delta.
+	if err := store.UpdateField(g.ID, "players.p0.name", "Zed"); err != nil {
 		t.Fatalf("UpdateField: %v", err)
 	}
 
@@ -155,9 +145,9 @@ func TestUpdateField_EmitsPositionalPath(t *testing.T) {
 	assertPositionalPath(t, "UpdateField path", ev.UpdatedFields[0][0])
 }
 
-// TestDeleteField_EmitsPositionalPath verifies that DeleteField publishes a
-// positional integer-array removed path, not a raw string.
-func TestDeleteField_EmitsPositionalPath(t *testing.T) {
+// TestDeleteField_RequestsKeyframe: deleting an object key shifts its
+// siblings' positions, so clients get a fresh keyframe instead of a delta.
+func TestDeleteField_RequestsKeyframe(t *testing.T) {
 	pub := &capturePublisher{}
 	store := newTestStoreWith(t, pub)
 
@@ -176,14 +166,9 @@ func TestDeleteField_EmitsPositionalPath(t *testing.T) {
 	}
 
 	ev := pub.last()
-	if ev == nil {
-		t.Fatal("no event published after DeleteField")
+	if ev == nil || ev.OperationType != events.OpKeyframe {
+		t.Fatalf("event = %+v, want a keyframe request", ev)
 	}
-	if len(ev.RemovedFields) == 0 {
-		t.Fatal("expected removed fields, got none")
-	}
-
-	assertPositionalPath(t, "DeleteField removed path", ev.RemovedFields[0])
 }
 
 // TestMarkPlayerConnected_EmitsPositionalPath verifies that ConnectPlayer/

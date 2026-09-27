@@ -18,6 +18,10 @@ const (
 	OpInsert OpCode = 2
 	OpDelete OpCode = 3
 	OpLayout OpCode = 4
+	// OpKeyframe is server-internal: it asks the broadcaster to send the game's
+	// clients a fresh keyframe, because a write changed the document's shape and a
+	// positional delta would no longer decode against their schema.
+	OpKeyframe OpCode = 5
 )
 
 // ChangeEvent is the delta broadcast to clients. UpdatedFields is a slice of

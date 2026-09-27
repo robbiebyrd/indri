@@ -3,6 +3,9 @@ package game
 import (
 	"context"
 	"errors"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/robbiebyrd/indri/internal/models"
@@ -93,4 +96,106 @@ func TestChangePublisher_PublishErrorIsNotFatal(t *testing.T) {
 	if len(pub.events) != 1 {
 		t.Fatalf("published %d events, want 1", len(pub.events))
 	}
+}
+
+// Deltas are encoded against the client's view of the game, so a path
+// decodes to the right key even when private data or the layout (which the
+// client never receives) sort before it.
+func TestChangePublisher_PositionsMatchTheClientView(t *testing.T) {
+	pub := &recordingPublisher{}
+	cp := changePublisher{ctx: context.Background(), publisher: pub}
+
+	before := &models.Game{
+		Code:        "G1",
+		PrivateData: map[string]interface{}{"secret": "x"},
+		PublicData:  map[string]interface{}{"layout": map[string]interface{}{"g": 1}, "turn": "x"},
+		Stage:       models.Stage{CurrentScene: "lobby"},
+	}
+	after := &models.Game{
+		Code:        "G1",
+		PrivateData: map[string]interface{}{"secret": "x"},
+		PublicData:  map[string]interface{}{"layout": map[string]interface{}{"g": 1}, "turn": "o"},
+		Stage:       models.Stage{CurrentScene: "board"},
+	}
+
+	cp.diff("g1", snapshot(t, before), after)
+
+	if len(pub.events) != 1 || pub.events[0].OperationType != events.OpUpdate {
+		t.Fatalf("events = %+v, want one update", pub.events)
+	}
+
+	view := events.ClientView(snapshot(t, after))
+	got := map[string]interface{}{}
+	for _, pair := range pub.events[0].UpdatedFields {
+		got[resolveAgainst(t, pair[0].([]interface{}), view)] = pair[1]
+	}
+
+	want := map[string]interface{}{"stage.currentScene": "board", "data.turn": "o"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("client would apply %v, want %v", got, want)
+	}
+}
+
+// A write that adds or removes a key changes positions the client's schema
+// can't know, so the client gets a fresh keyframe instead of a delta.
+func TestChangePublisher_ShapeChangeRequestsAKeyframe(t *testing.T) {
+	pub := &recordingPublisher{}
+	cp := changePublisher{ctx: context.Background(), publisher: pub}
+
+	before := &models.Game{Code: "G1", PublicData: map[string]interface{}{"b": 1.0}}
+	after := &models.Game{Code: "G1", PublicData: map[string]interface{}{"a": 1.0, "b": 1.0}}
+
+	cp.diff("g1", snapshot(t, before), after)
+
+	if len(pub.events) != 1 {
+		t.Fatalf("published %d events, want 1", len(pub.events))
+	}
+	ev := pub.events[0]
+	if ev.OperationType != events.OpKeyframe || ev.ID != "g1" || ev.HasChanges() {
+		t.Fatalf("event = %+v, want a bare keyframe request for g1", ev)
+	}
+}
+
+// Private data never reaches clients, so changing only it publishes nothing,
+// even when it adds keys.
+func TestChangePublisher_PrivateOnlyChangePublishesNothing(t *testing.T) {
+	pub := &recordingPublisher{}
+	cp := changePublisher{ctx: context.Background(), publisher: pub}
+
+	before := &models.Game{Code: "G1", PrivateData: map[string]interface{}{"a": 1.0}}
+	after := &models.Game{Code: "G1", PrivateData: map[string]interface{}{"a": 2.0, "b": 1.0}}
+
+	cp.diff("g1", snapshot(t, before), after)
+
+	if len(pub.events) != 0 {
+		t.Fatalf("published %+v for a private-only change", pub.events)
+	}
+}
+
+// resolveAgainst decodes a positional path the way the client does
+// (client/services/positional-map.ts).
+func resolveAgainst(t *testing.T, path []interface{}, schema interface{}) string {
+	t.Helper()
+
+	var parts []string
+	current := schema
+
+	for _, seg := range path {
+		obj, ok := current.(map[string]interface{})
+		idx, isInt := seg.(int)
+		if !ok || !isInt {
+			t.Fatalf("path %v is not decodable against the client schema", path)
+		}
+
+		keys := make([]string, 0, len(obj))
+		for k := range obj {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		parts = append(parts, keys[idx])
+		current = obj[keys[idx]]
+	}
+
+	return strings.Join(parts, ".")
 }

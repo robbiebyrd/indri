@@ -1,7 +1,5 @@
 package events
 
-import "github.com/robbiebyrd/indri/internal/models"
-
 // LayoutFrame is sent once per connection before the first keyframe. It carries
 // the static rendering config (Lua scripts, widget definitions) that never
 // changes during a game session.
@@ -11,10 +9,10 @@ type LayoutFrame struct {
 	Data map[string]interface{} `json:"data"`
 }
 
-// KeyframeWrapper wraps a slim game keyframe (data.layout stripped) with a
-// schema version hash. The "sv" field is the discriminator the client uses to
-// identify this message type.
+// KeyframeWrapper carries a keyframe: the client view of the game (see
+// ClientView) with a schema version. The "sv" field is the discriminator the
+// client uses to identify this message type.
 type KeyframeWrapper struct {
-	SV   string       `json:"sv"`
-	Game *models.Game `json:"game"`
+	SV   string                 `json:"sv"`
+	Game map[string]interface{} `json:"game"`
 }

@@ -189,22 +189,27 @@ func (gs *Service) Sanitize(game *models.Game) *models.Game {
 	return game
 }
 
-// slimKeyframe returns a sanitized, layout-stripped copy of the game. Its schema
-// version is the layout hash, which stays the same for the life of the game.
+// slimKeyframe returns the client view of the game (private data and the
+// layout removed). Its schema version is the layout hash, which stays the same
+// for the life of the game.
 func (gs *Service) slimKeyframe(g *models.Game, layoutHash string) (events.KeyframeWrapper, error) {
-	raw, err := json.Marshal(g)
+	doc, err := events.ToMap(g)
 	if err != nil {
 		return events.KeyframeWrapper{}, err
 	}
-	var clone models.Game
-	if err := json.Unmarshal(raw, &clone); err != nil {
+
+	return events.KeyframeWrapper{SV: layoutHash, Game: events.ClientView(doc)}, nil
+}
+
+// Keyframe loads the game and returns its current keyframe, for broadcasting
+// after a write that changed the game's shape.
+func (gs *Service) Keyframe(id string, layoutHash string) (events.KeyframeWrapper, error) {
+	g, err := gs.Get(id)
+	if err != nil {
 		return events.KeyframeWrapper{}, err
 	}
-	slim := gs.Sanitize(&clone)
-	if slim.PublicData != nil {
-		delete(slim.PublicData, "layout")
-	}
-	return events.KeyframeWrapper{SV: layoutHash, Game: slim}, nil
+
+	return gs.slimKeyframe(g, layoutHash)
 }
 
 // WriteKeyframe sends a LayoutFrame followed by a slim keyframe to a single connection.

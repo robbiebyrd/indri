@@ -3,6 +3,7 @@ package game
 import (
 	"context"
 	"log"
+	"reflect"
 	"time"
 
 	"github.com/robbiebyrd/indri/internal/models"
@@ -20,16 +21,26 @@ type changePublisher struct {
 	publisher events.Publisher
 }
 
-// diff publishes the delta between the pre-write snapshot and the saved game,
-// with paths positionally encoded against the game's own key order.
-func (p changePublisher) diff(id string, before map[string]interface{}, after *models.Game) {
+// diff publishes the change between the pre-write snapshot and the saved
+// game, computed on the clients' view of it. Paths are positions in that
+// view's key order, which is only decodable while the client's schema still
+// matches, so a write that adds or removes keys requests a fresh keyframe.
+func (p changePublisher) diff(id string, beforeDoc map[string]interface{}, after *models.Game) {
 	if p.publisher == nil {
 		return
 	}
 
-	afterMap, err := events.ToMap(after)
+	afterDoc, err := events.ToMap(after)
 	if err != nil {
 		log.Printf("could not snapshot game %v for change event: %v", id, err)
+		return
+	}
+
+	before, afterMap := events.ClientView(beforeDoc), events.ClientView(afterDoc)
+	beforePos, afterPos := events.BuildPositionalMap(before), events.BuildPositionalMap(afterMap)
+
+	if !reflect.DeepEqual(beforePos, afterPos) {
+		p.publish(events.ChangeEvent{ID: id, OperationType: events.OpKeyframe, Timestamp: time.Now()})
 		return
 	}
 
@@ -46,7 +57,6 @@ func (p changePublisher) diff(id string, before map[string]interface{}, after *m
 	}
 	sanitized, sanitizedRemoved := events.SanitizeDelta(rawUpdated, rawRemoved)
 
-	afterPos := events.BuildPositionalMap(afterMap)
 	updated := make([][]interface{}, 0, len(sanitized))
 	for _, pair := range sanitized {
 		updated = append(updated, []interface{}{events.EncodePath(pair[0].(string), afterMap, afterPos), pair[1]})
@@ -54,7 +64,6 @@ func (p changePublisher) diff(id string, before map[string]interface{}, after *m
 
 	// A removed key is absent from the after-state, so its position comes
 	// from the before-state schema.
-	beforePos := events.BuildPositionalMap(before)
 	removed := make([]interface{}, 0, len(sanitizedRemoved))
 	for _, r := range sanitizedRemoved {
 		removed = append(removed, events.EncodePath(r.(string), before, beforePos))
@@ -69,11 +78,13 @@ func (p changePublisher) diff(id string, before map[string]interface{}, after *m
 		RemovedFields: removed,
 	}
 
-	if !event.HasChanges() {
-		return
+	if event.HasChanges() {
+		p.publish(event)
 	}
+}
 
+func (p changePublisher) publish(event events.ChangeEvent) {
 	if err := p.publisher.Publish(p.ctx, event); err != nil {
-		log.Printf("could not publish change event for game %v: %v", id, err)
+		log.Printf("could not publish change event for game %v: %v", event.ID, err)
 	}
 }

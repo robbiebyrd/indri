@@ -41,12 +41,12 @@ func payloads() map[string]any {
 			UpdatedFields: [][]interface{}{{[]interface{}{1, 2}, "x"}},
 			RemovedFields: []interface{}{[]interface{}{3}},
 		},
-		"keyframe": events.KeyframeWrapper{SV: "abc", Game: &models.Game{
+		"keyframe": events.KeyframeWrapper{SV: "abc", Game: events.ClientView(mustMap(&models.Game{
 			ID: "g1", Code: "C1", CreatedAt: now, UpdatedAt: now,
 			Players:    map[string]models.Player{"p0": {Name: "Alice", UserID: "u1", Connected: true}},
 			Teams:      map[string]models.Team{"red": {Name: "Red", PlayerIDs: []string{"p0"}}},
 			PublicData: map[string]interface{}{"board": []interface{}{1, 2}},
-		}},
+		}))},
 		"layout frame": events.LayoutFrame{O: events.OpLayout, V: "abc", Data: map[string]interface{}{"grid": 3}},
 	}
 }
@@ -125,4 +125,13 @@ func TestWriteEncoded_DebugConnectionsGetJSONText(t *testing.T) {
 	if !json.Valid(c.text[0]) {
 		t.Fatalf("debug frame is not JSON: %q", c.text[0])
 	}
+}
+
+func mustMap(g *models.Game) map[string]interface{} {
+	m, err := events.ToMap(g)
+	if err != nil {
+		panic(err)
+	}
+
+	return m
 }
