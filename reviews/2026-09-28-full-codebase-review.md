@@ -107,7 +107,7 @@ The full P3 list is in the appendices. The ones worth scheduling, grouped:
   and shutdown, and graphqlws can deadlock after 16 queued control frames (TR-3, borderline P2). Slow clients
   lose frames and stay connected (TR-2 = prior B #10; melody's 10 s write deadline narrows it on ws). WebRTC
   handles a message before the conn is registered (TR-1 = prior A #7). Same-host origin rule allows DNS
-  rebinding (TR-6 = prior A #10, **still needs a decision**). No connection caps or pre-auth idle timeout
+  rebinding (TR-6 = prior A #10, fixed per Boss's decision in 512079a). No connection caps or pre-auth idle timeout
   (TR-9). WebRTC ignores the max message size (TR-7) and has a `peer.pc` data race (TR-10). Kick doesn't
   close a slow ws client (TR-4).
 - **Config** — `INDRI_WS_PING_PERIOD=0` crashes the process on the first connection (TR-11, SB-10). One bad
@@ -158,7 +158,7 @@ The full P3 list is in the appendices. The ones worth scheduling, grouped:
 | A #5 whole-blob session Update | SB-12 | open (P3; latent until F-02) |
 | A #7 WebRTC OnOpen/OnMessage race | TR-1 | open (P3) |
 | A #9 SQLite Find full scan | F-14 | open (P2) |
-| A #10 origin DNS rebinding | TR-6 | open, **needs a decision** |
+| A #10 origin DNS rebinding | TR-6 | fixed per Boss's decision (512079a) |
 | B #5 leave/kick don't clear session | F-02 | open (**P1**) |
 | B #10 slow clients drop frames | TR-2 | open (P3; deferred to session-resume) |
 | SQL pool not closed on constructor failure | SB-18 | open (P4) |
@@ -214,5 +214,6 @@ are marked (SR).
    ARCHITECTURE.md, PROTOCOL.md) must say so. Follow-up (Boss, 2026-09-28): **when a list is set, it is
    the whole policy**: listed origins plus requests with no `Origin` header. The same-host rule, which
    let DNS rebinding through, is dropped, so a React Native iOS client lists its server's own origin.
+   Fixed per Boss's decision in 512079a.
 3. **F-02.** Decided by Boss 2026-09-28: **fix on its own**, ahead of and separate from the session-resume
    build. F-01 and F-05 share its root cause and belong in the same fix.

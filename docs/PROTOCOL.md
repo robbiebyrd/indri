@@ -7,11 +7,12 @@ The messages below are the same on every transport; only the framing differs (se
 Every message is a JSON object. Client→server messages **must** carry a string `action` field; the
 router uses it to pick handlers and removes it from the payload before the handler sees it.
 
-Every transport is origin-checked (`internal/transport/origin.go`). Allowed: requests with no
-`Origin` header (CLI tools, server-to-server, most native clients); same-origin requests, whose
-`Origin` host matches the request's `Host` (React Native's iOS WebSocket always sends the target's
-own origin); and origins listed in `INDRI_ALLOWED_ORIGINS`. An empty allowlist rejects all
-cross-origin browsers.
+Every transport is origin-checked (`internal/transport/origin.go`). With `INDRI_ALLOWED_ORIGINS`
+empty (the default), every origin is accepted. That is safe because connections carry no cookies or
+other ambient credentials: a client authenticates with `login` or a token it holds, so a foreign page
+that opens a connection can't act as a player. With a list set, only its origins are accepted, plus
+requests with no `Origin` header (CLI tools, server-to-server, most native clients). React Native's
+iOS WebSocket sends the server's own origin, so list that origin when you set a list.
 The HTTP-based endpoints also answer CORS preflights for allowed origins.
 
 ---
