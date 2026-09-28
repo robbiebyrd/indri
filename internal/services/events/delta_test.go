@@ -282,6 +282,26 @@ func TestDiff_ArrayIndexed_ElementRemoved(t *testing.T) {
 	}
 }
 
+// An element that changes type is replaced whole at its index, not diffed
+// into or removed.
+func TestDiff_ArrayIndexed_TypeMismatch(t *testing.T) {
+	before := map[string]interface{}{
+		"items": []interface{}{map[string]interface{}{"x": 1}},
+	}
+	after := map[string]interface{}{
+		"items": []interface{}{"scalar"},
+	}
+
+	updated, removed := events.Diff(before, after)
+
+	if len(updated) != 1 || updated["items.0"] != "scalar" {
+		t.Errorf("expected only items.0=scalar on type change, got %v", updated)
+	}
+	if len(removed) != 0 {
+		t.Errorf("unexpected removals: %v", removed)
+	}
+}
+
 func TestDiff_ArrayIndexed_NoChange(t *testing.T) {
 	before := map[string]interface{}{"board": []interface{}{"X", ""}}
 	after := map[string]interface{}{"board": []interface{}{"X", ""}}
