@@ -200,3 +200,40 @@ login screen.
   reconnect (the client's backoff give-up limit), or a resume could find its slot gone.
 - **Host handoff when the host's slot is freed:** the first connected player in slot order, or no host
   until someone claims it?
+
+## Hand-off notes for the resume build
+
+The resume build owns everything in this plan, plus two items the DB-backends session handed over: the
+24-hour idle expiry, and `leave`/`kick` clearing the session's `GameID`/`SlotID`/`TeamID`. The DB
+session stays out of `internal/repo/session/*` until the resume build says it has landed.
+
+**Session stores today** (notes from the DB-backends session):
+- The 7-day cutoff is `sessionCutoff()` in `internal/repo/session/fields.go`, measured from
+  `created_at`. `fields.go` also holds `newSession` and `applyUpdate`, which every store uses; add new
+  fields there rather than per store.
+- Postgres has a `created_at` column with an index, and purges expired rows in `New`.
+- SQLite adds `created_at` (unix nanoseconds) through a transactional migration in
+  `internal/clients/sqlite/client.go` (commit `8c7d56f`); `last_seen_at` can follow the same pattern.
+- The memory store uses `Session.CreatedAt`.
+- `Update` sets only non-empty fields, so clearing the game fields needs a new store operation.
+- The expiry contract test is `TestStore_ExpiredSessionIsGone` in
+  `internal/repo/session/store_contract_test.go`, with a backdating hook per backend. It skips Mongo
+  today, because expiry is checked on read only after this plan.
+
+**Pieces to build on:**
+- `BroadcastService.CloseSessions` closes connections on any instance through `events.Delivery`. Add a
+  `Reason`, and a way to spare the newest connection, for last-connection-wins.
+- The store contract suites (`eachStore`) in `internal/repo/game` (`store_contract_test.go`,
+  `slot_contract_test.go`) and `internal/repo/session`.
+- `internal/handlers/handlertest` runs handler tests against in-memory stores.
+- On the client, `GameStateParser` and the `TransportClient` in `client/packages/protocol-client`,
+  which the reconnecting wrapper builds on.
+
+**Running the integration tests:**
+- Postgres: set `INDRI_TEST_POSTGRES_URI`, for example against a throwaway `postgres:15-alpine`.
+- Redis: set `INDRI_TEST_REDIS_URL=redis://localhost:6379/0`.
+- MongoDB on `:27017` is used automatically.
+- Run with `-p 1` when the packages share one Postgres database.
+
+**Coordination:** the DB-backends session commits directly on `wip/pluggable-transports`. Build on your
+own branch, and tell it before touching files it owns.
