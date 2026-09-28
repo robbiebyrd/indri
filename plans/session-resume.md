@@ -1,6 +1,7 @@
 # Session resume
 
-Status: **proposal — needs Boss's decisions (see end).** Nothing here is built.
+Status: **decided (2026-09-28), not built.** Boss's decisions are recorded at the end. Two follow-up
+values for the abandoned-slot timeout are still open.
 
 Goal: when a client's transport drops (network blip, app backgrounded, SSE wrong-instance `404`,
 server restart), it reconnects and resumes as the same player in the same slot, instead of landing on
@@ -78,15 +79,37 @@ the login screen while its old slot shows as disconnected.
 - **Expiry, uniform across stores (fixes bug 5):**
   - Sessions carry `LastSeenAt`, refreshed on `login`/`reconnect` (and on disconnect, so idle time
     counts from when the player left).
-  - `GetByToken` rejects sessions idle longer than `INDRI_SESSION_MAX_IDLE`. This is enforced in
-    application code with one contract test, not by a Mongo-only TTL.
-  - Mongo's TTL index moves to `lastSeenAt` for cleanup; the SQL stores get a periodic sweep or
-    nothing (decision).
-- **Duplicate live connections (decision).** A resume while the old connection is still open leaves
-  two connections for one session, and both receive broadcasts. Proposed: **last connection wins.** The
-  resume closes older connections with `{"disconnected": true, "reason": "replaced"}`. Across
-  instances this is a "close session connections" event on the bus; see
-  `plans/multi-instance-routing.md`.
+  - `GetByToken` rejects sessions idle longer than `INDRI_SESSION_MAX_IDLE` (**default 24h**, decided).
+    This is enforced in application code on every store, with one contract test, not by a TTL sweep.
+    That also closes today's Mongo gap, where an expired session stays readable until the asynchronous
+    TTL sweep runs.
+  - This replaces the stores' current rule: 7 days from `createdAt`, never refreshed, so it expires
+    active players.
+  - Cleanup: every store deletes expired rows when a session is created, as the Postgres store does
+    today. Mongo's TTL index moves to `lastSeenAt` and stays as a backstop.
+- **Duplicate live connections: last connection wins (decided).** A resume or login while an older
+  connection for the same session is still open closes the older ones with
+  `{"disconnected": true, "reason": "replaced"}`, on whichever instance they're on.
+  - It uses `BroadcastService.CloseSessions`, which already crosses instances. `events.Delivery` gains
+    a `Reason` so the notice can say why.
+  - It must close only the *older* connections, not the new one, which shares the session id. The
+    close delivery therefore carries the new connection's epoch (see "Connection epoch" above), and
+    instances skip connections with that epoch.
+- **Token rotation: none (decided).** A session keeps one token for its life.
+- **Abandoned slots: freed after a timeout (decided).**
+  - Disconnecting records `disconnectedAt` on the slot; connecting clears it.
+  - A slot disconnected longer than `INDRI_SLOT_ABANDON_AFTER` is freed:
+    - lazily, by `assignSlot`, which treats such a slot as empty;
+    - and by a periodic sweep on every instance, so other players see the slot open up even if nobody
+      joins.
+  - The sweep frees slots through `Mutate`, checking inside `apply` that the slot is still
+    disconnected and past the timeout. Several instances can sweep at once safely: the version fence
+    and the re-check make it idempotent. So no cross-instance timer or leader election is needed.
+  - Freeing a slot clears the player's session game fields (the same operation `leave`/`kick` need,
+    bug 2).
+  - If the freed player was the host, the host flag passes to another connected player (rule below).
+  - The sweep walks games with a disconnected player. Each store needs a query for that, or a scan of
+    open games at first. Measure before optimizing.
 
 ### Client
 
@@ -161,12 +184,19 @@ login screen.
    - the other player sees `connected` go false and then true;
    - the rebuilt state equals a fresh keyframe.
 
-## Decisions for Boss
+## Decisions (Boss, 2026-09-28)
 
-1. **Idle expiry duration** (`INDRI_SESSION_MAX_IDLE`). Mongo's 7 days is the only precedent. Also:
-   should the SQL stores sweep expired rows or just reject them?
-2. **Duplicate connections:** last-wins (proposed), or allow several devices/tabs per user at once?
-3. **Token rotation on resume:** proposed **no**. The token is 256-bit and only sent over the
-   transport. Rotation would add a lost-reply race, where the client never sees the new token.
-4. **Abandoned slots:** should a slot that stays disconnected for N minutes be freed automatically? It's
-   out of scope for resume itself, but it's the natural next question.
+1. **Expiry:** 24 hours idle (`INDRI_SESSION_MAX_IDLE`, default `24h`), refreshed by login, reconnect
+   and disconnect. Every store rejects expired sessions on read and deletes them when a session is
+   created.
+2. **Duplicate connections:** last connection wins; older ones are closed with reason `replaced`.
+3. **Token rotation:** none.
+4. **Abandoned slots:** freed after a configurable timeout, lazily by `assignSlot` and by a periodic
+   sweep.
+
+### Still open (abandoned slots)
+
+- **Default for `INDRI_SLOT_ABANDON_AFTER`.** Not chosen yet. It must be longer than a typical
+  reconnect (the client's backoff give-up limit), or a resume could find its slot gone.
+- **Host handoff when the host's slot is freed:** the first connected player in slot order, or no host
+  until someone claims it?
