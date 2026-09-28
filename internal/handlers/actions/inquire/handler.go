@@ -1,7 +1,6 @@
 package inquire
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -32,13 +31,16 @@ type GameInfo struct {
 	Teams []TeamInfo `json:"teams,omitempty"`
 }
 
+type inquiryResponse struct {
+	Games     []GameInfo `json:"games"`
+	Operation string     `json:"op"`
+}
+
 // Handle processes a join game request, and adds a player to a game.
 func (h *Handler) Handle(
 	s transport.Conn,
 	decodedMsg map[string]interface{},
 ) error {
-	var jsonBytes *[]byte
-
 	cs := connection.NewService(s, h.i.Transport)
 
 	_, err := cs.GetKeyAsString("sessionId")
@@ -52,22 +54,20 @@ func (h *Handler) Handle(
 		return errors.New("inquiryType not provided or not a string")
 	}
 
+	var resp *inquiryResponse
+
 	if inquiryType == "game" {
-		jbs, err := h.handleGameInquiry(decodedMsg)
+		resp, err = h.handleGameInquiry(decodedMsg)
 		if err != nil {
 			return err
 		}
-
-		jsonBytes = jbs
 	}
 
-	if jsonBytes == nil {
+	if resp == nil {
 		return nil
 	}
 
-	cs.Write(*jsonBytes)
-
-	return nil
+	return transport.WriteEncoded(s, resp)
 }
 
 func (h *Handler) getGamesList() ([]*models.Game, error) {
@@ -79,7 +79,7 @@ func (h *Handler) getGamesList() ([]*models.Game, error) {
 	return games, nil
 }
 
-func (h *Handler) handleGameInquiry(decodedMsg map[string]interface{}) (*[]byte, error) {
+func (h *Handler) handleGameInquiry(decodedMsg map[string]interface{}) (*inquiryResponse, error) {
 	games, err := h.getGamesList()
 	if err != nil {
 		return nil, err
@@ -112,17 +112,7 @@ func (h *Handler) handleGameInquiry(decodedMsg map[string]interface{}) (*[]byte,
 		return nil, nil
 	}
 
-	type infoStruct struct {
-		Games     []GameInfo `json:"games"`
-		Operation string     `json:"op"`
-	}
-
-	jsonBytes, err := json.Marshal(&infoStruct{gameInfoList, "inquiryResponse"})
-	if err != nil {
-		return nil, err
-	}
-
-	return &jsonBytes, nil
+	return &inquiryResponse{Games: gameInfoList, Operation: "inquiryResponse"}, nil
 }
 
 func (h *Handler) createGameInfoList(games []*models.Game) []GameInfo {

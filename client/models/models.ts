@@ -26,6 +26,7 @@ export declare interface Scene {
 }
 
 export declare interface Player {
+    userId: string
     name: string
     score: number
     connected: boolean
@@ -51,11 +52,23 @@ export declare interface User {
     score: number
 }
 
+// In normal (MessagePack) mode: integer array. In debug (JSON) mode: string.
+export type PathSegment = number[] | string
+
 export declare interface UpdateMessage {
-    id: string
-    ts: string
-    op: string
-    type: string
-    updated: object
-    removed: string[]
+    o: 1 | 2 | 3        // OpCode: 1=update, 2=insert, 3=delete
+    t: Date | string    // Timestamp extension (binary) or RFC3339 string (debug)
+    u?: [PathSegment, unknown][]   // [[path, value], ...]
+    r?: PathSegment[]              // [path, ...]
+}
+
+export declare interface LayoutFrame {
+    o: 4
+    v: string
+    data: Record<string, unknown>
+}
+
+export declare interface SlimKeyframe {
+    sv: string
+    game: Game
 }

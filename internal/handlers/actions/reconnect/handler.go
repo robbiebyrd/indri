@@ -1,15 +1,20 @@
 package reconnect
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 
 	"github.com/robbiebyrd/indri/internal/transport"
 
 	"github.com/robbiebyrd/indri/internal/injector"
+	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/connection"
 )
+
+type authResponse struct {
+	Authenticated bool         `json:"authenticated"`
+	SessionID     string       `json:"sessionId"`
+	User          *models.User `json:"user"`
+}
 
 type Handler struct {
 	i *injector.Injector
@@ -48,26 +53,18 @@ func (h *Handler) Handle(
 	// Adopt the resumed session on this connection so subsequent authenticated
 	// actions and broadcasts target it. The broadcast key is the non-secret
 	// session ObjectID, never the token.
-	ss.SetKey("sessionId", session.ID.Hex())
+	ss.SetKey("sessionId", session.ID)
 
 	user, err := h.i.UserService.Get(*session.UserID)
 	if err != nil {
 		return err
 	}
 
-	jsonUserBytes, err := json.Marshal(h.i.UserService.Sanitize(user))
-	if err != nil {
-		return err
-	}
-
-	authSuccessMessage := bytes.Join([][]byte{
-		[]byte(`{"authenticated": true, "sessionId": "` + token + `", "user": `),
-		jsonUserBytes,
-		[]byte(`}`),
-	}, []byte(""))
-
-	err = ss.Write(authSuccessMessage)
-	if err != nil {
+	if err = transport.WriteEncoded(s, authResponse{
+		Authenticated: true,
+		SessionID:     token,
+		User:          h.i.UserService.Sanitize(user),
+	}); err != nil {
 		return err
 	}
 
@@ -77,13 +74,7 @@ func (h *Handler) Handle(
 			return err
 		}
 
-		jsonGameBytes, err := json.Marshal(h.i.GameService.Sanitize(g))
-		if err != nil {
-			return err
-		}
-
-		err = ss.Write(jsonGameBytes)
-		if err != nil {
+		if err = h.i.GameService.WriteKeyframe(s, g); err != nil {
 			return err
 		}
 	}

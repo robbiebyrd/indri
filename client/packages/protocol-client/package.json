@@ -1,0 +1,8 @@
+{
+  "name": "@indri/protocol-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pluggable client transports for the Indri game server: WebSocket, SSE, GraphQL subscriptions, and WebRTC data channels.",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

@@ -55,10 +55,10 @@ function makeGame(widgetCount: number): Game {
 
 function makeUpdateMessage(ts: number, widgetIdx: number): UpdateMessage {
     return {
-        op: "update",
-        ts: new Date(ts).toISOString(),
-        updated: {[`data.layout.scenes.main.widgets.w${widgetIdx}.config.text`]: `Updated ${widgetIdx}`},
-    } as UpdateMessage
+        o: 1,
+        t: new Date(ts),
+        u: [[`data.layout.scenes.main.widgets.w${widgetIdx}.config.text`, `Updated ${widgetIdx}`]],
+    }
 }
 
 for (const n of [1, 10, 100, 500]) {

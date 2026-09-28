@@ -1,4 +1,5 @@
 import type {UpdateMessage} from "@/models/models";
+import { resolvePath } from "./positional-map.ts"
 
 declare interface Delta {
     timestamp: Date
@@ -18,10 +19,29 @@ export class GameStateParser<T> {
     private cutoff: number = new Date(0).getTime()
     private baseState?: T = undefined
     private currentState?: T = undefined
+    private schema?: Record<string, unknown> = undefined
+    private layout?: unknown = undefined
+
+    // The schema is copied: positions must stay those of the server's keyframe
+    // even if the caller later adds keys (such as the layout) to that object.
+    setSchema(schema: Record<string, unknown>): void {
+        this.schema = deepClone(schema)
+    }
+
+    // The game's layout is sent separately from keyframes and deltas, so it is
+    // kept apart and laid over data.layout each time the state is rebuilt: it
+    // never enters the positional schema, and a new one keeps the game's state.
+    setLayout(layout: unknown): void {
+        this.layout = deepClone(layout)
+        this.reapply()
+    }
 
     set(data: T, timestamp: Date): void {
         this.setCutoff(timestamp)
         this.baseState = deepClone(data)
+        if (!this.schema && data !== null && typeof data === "object" && !Array.isArray(data)) {
+            this.setSchema(data as Record<string, unknown>)
+        }
         this.deleteBefore(timestamp)
         this.reapply()
     }
@@ -31,7 +51,7 @@ export class GameStateParser<T> {
     }
 
     update(data: UpdateMessage): void {
-        const timestamp = new Date(data.ts)
+        const timestamp = new Date(data.t)
         if (timestamp.getTime() < this.cutoff) {
             return
         }
@@ -42,6 +62,23 @@ export class GameStateParser<T> {
 
     current(): T | undefined {
         return this.currentState
+    }
+
+    private toDotPath(rawPath: unknown): string {
+        if (typeof rawPath === "string") {
+            // Debug mode: numeric-dotted string like "0.1.1"
+            if (this.schema && /^\d/.test(rawPath)) {
+                const ints = rawPath.split(".").map(Number)
+                return resolvePath(ints, this.schema)
+            }
+            return rawPath
+        }
+        if (Array.isArray(rawPath) && this.schema) {
+            return resolvePath(rawPath as number[], this.schema)
+        }
+        // reapply() exits early when baseState is undefined (set() not yet called),
+        // so schema is always present when toDotPath runs on number[] paths.
+        return String(rawPath)
     }
 
     private reapply(): void {
@@ -57,16 +94,22 @@ export class GameStateParser<T> {
         let state: T = deepClone(this.baseState)
 
         for (const updateMsg of this.deltas) {
-            if (updateMsg.data.removed && updateMsg.data.removed.length > 0) {
-                for (const key of updateMsg.data.removed) {
-                    state = this.deleteJSONKeyByDotPath(state, key)
+            if (updateMsg.data.r) {
+                for (const rawPath of updateMsg.data.r) {
+                    state = this.deleteJSONKeyByDotPath(state, this.toDotPath(rawPath))
                 }
             }
-            if (updateMsg.data.updated && Object.keys(updateMsg.data.updated).length > 0) {
-                for (const [key, value] of Object.entries(updateMsg.data.updated)) {
-                    state = this.updateJSONKeyByDotPath(state, key, value)
+            if (updateMsg.data.u) {
+                for (const [rawPath, value] of updateMsg.data.u) {
+                    state = this.updateJSONKeyByDotPath(state, this.toDotPath(rawPath), value)
                 }
             }
+        }
+
+        if (this.layout !== undefined && typeof state === "object" && state !== null) {
+            const game = state as Record<string, any>
+            if (typeof game.data !== "object" || game.data === null) game.data = {}
+            game.data.layout = deepClone(this.layout)
         }
 
         this.currentState = state
@@ -120,6 +163,12 @@ export class GameStateParser<T> {
         }
 
         const lastPart = parts[parts.length - 1];
+        // The server removes only an array's trailing indices, so removing one
+        // truncates the array there rather than leaving a hole.
+        if (Array.isArray(current) && /^\d+$/.test(lastPart)) {
+            current.length = Math.min(current.length, Number(lastPart));
+            return obj;
+        }
         if (!UNSAFE_KEYS.has(lastPart) && typeof current === 'object' && current !== null && lastPart in current) {
             delete current[lastPart];
         }

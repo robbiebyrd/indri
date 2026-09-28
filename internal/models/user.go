@@ -2,12 +2,10 @@ package models
 
 import (
 	"time"
-
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type User struct {
-	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
+	ID string `bson:"_id,omitempty" json:"id"`
 
 	CreatedAt   time.Time              `bson:"createdAt"            json:"createdAt"`
 	UpdatedAt   time.Time              `bson:"updatedAt"            json:"updatedAt"`

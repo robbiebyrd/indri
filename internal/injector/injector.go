@@ -2,6 +2,7 @@ package injector
 
 import (
 	"context"
+	"database/sql"
 
 	mongodbClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -22,10 +23,13 @@ import (
 
 type ReposInjector struct {
 	EnvVars     *envVars.Vars
-	GameRepo    *gameRepo.Store
-	UserRepo    *userRepo.Store
-	SessionRepo *sessionRepo.Store
+	GameRepo    gameRepo.Storer
+	UserRepo    userRepo.Storer
+	SessionRepo sessionRepo.Storer
 	ScriptRepo  *scriptRepo.Store
+	// SQLDB is the database/sql pool shared by the sqlite and postgres
+	// stores, closed on shutdown; nil for the mongodb and memory backends.
+	SQLDB *sql.DB
 }
 
 type ClientsInjector struct {
@@ -33,6 +37,9 @@ type ClientsInjector struct {
 	Transport     transport.Transport
 	LockManager   lock.Manager
 	Publisher     events.Publisher
+	// Deliveries relays messages for sessions to every instance. It is nil
+	// with a single instance, where they are written directly.
+	Deliveries events.Bus[events.Delivery]
 }
 
 type ServicesInjector struct {

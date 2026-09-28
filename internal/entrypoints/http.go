@@ -24,8 +24,8 @@ func Serve(ctx context.Context, i *injector.Injector) error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// On shutdown, close the websocket hub first so the hijacked connection
-	// handlers return, then let the HTTP server drain and stop accepting.
+	// On shutdown, close the transport first so hijacked sockets and SSE
+	// streams return, then let the HTTP server drain and stop accepting.
 	go func() {
 		<-ctx.Done()
 

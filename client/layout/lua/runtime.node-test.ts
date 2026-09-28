@@ -62,13 +62,17 @@ test("io, os, require and load are nil inside the runtime", () => {
     }
 })
 
-test("infinite loop is aborted by the instruction budget within 100ms", () => {
+test("infinite loop is aborted by the instruction budget", () => {
     const L = createRuntimeState()
     const start = Date.now()
     const result = runChunk(L, "while true do end", "test")
     const elapsed = Date.now() - start
     assert.equal(result.ok, false, "infinite loop must be aborted")
-    assert.ok(elapsed < 100, `budget must fire within 100ms, took ${elapsed}ms`)
+    assert.match(result.error, /instruction budget exceeded/, "the abort must come from the budget hook")
+    // The budget counts instructions, so time varies with machine load (~20ms
+    // idle, 360ms seen under contention). This only catches a budget raised
+    // far too high.
+    assert.ok(elapsed < 2000, `budget must fire within 2s, took ${elapsed}ms`)
 })
 
 test("no poisoned state after a runtime error", () => {

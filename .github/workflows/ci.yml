@@ -9,6 +9,23 @@ jobs:
   go:
     name: Go build, vet & test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: indri
+          POSTGRES_PASSWORD: indri
+          POSTGRES_DB: indri
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U indri -d indri"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Enables the Postgres integration tests, which skip when this is unset.
+      INDRI_TEST_POSTGRES_URI: postgres://indri:indri@localhost:5432/indri?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -32,7 +49,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 11
+          package_json_file: client/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22

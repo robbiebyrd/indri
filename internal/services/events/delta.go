@@ -3,12 +3,14 @@ package events
 import (
 	"encoding/json"
 	"reflect"
+	"strconv"
 )
 
 // Diff computes the dotted-path change between two documents (previously
-// supplied by MongoDB's updateDescription). Nested objects are walked so paths
-// look like "players.<id>.host"; arrays and scalars are treated as whole
-// values. before/after are the JSON representations of the document.
+// supplied by MongoDB's updateDescription). Nested objects and arrays are
+// walked recursively so paths look like "players.<id>.host" or "board.1.1";
+// scalars are compared whole. before/after are the JSON representations of
+// the document.
 func Diff(before, after map[string]interface{}) (updated map[string]interface{}, removed []string) {
 	updated = make(map[string]interface{})
 	diffInto("", before, after, updated, &removed)
@@ -28,10 +30,14 @@ func diffInto(prefix string, before, after map[string]interface{}, updated map[s
 
 		beforeMap, beforeIsMap := beforeVal.(map[string]interface{})
 		afterMap, afterIsMap := afterVal.(map[string]interface{})
+		beforeSlice, beforeIsSlice := beforeVal.([]interface{})
+		afterSlice, afterIsSlice := afterVal.([]interface{})
 
 		switch {
 		case beforeIsMap && afterIsMap:
 			diffInto(path, beforeMap, afterMap, updated, removed)
+		case beforeIsSlice && afterIsSlice:
+			diffSlice(path, beforeSlice, afterSlice, updated, removed)
 		case !reflect.DeepEqual(beforeVal, afterVal):
 			updated[path] = afterVal
 		}
@@ -44,32 +50,80 @@ func diffInto(prefix string, before, after map[string]interface{}, updated map[s
 	}
 }
 
-const privateDataKey = "privateData"
-
-// SanitizeDelta removes private data from a change delta so a broadcast delta
-// has the same visibility as a sanitized keyframe. Any path that refers to a
-// privateData field is dropped, and privateData is stripped recursively from
-// the values of the remaining updates (e.g. a whole-object update for a newly
-// added player).
-func SanitizeDelta(updated map[string]interface{}, removed []string) (map[string]interface{}, []string) {
-	cleanUpdated := make(map[string]interface{}, len(updated))
-
-	for path, value := range updated {
-		if pathHasSegment(path, privateDataKey) {
-			continue
-		}
-
-		cleanUpdated[path] = stripKey(value, privateDataKey)
+func diffSlice(prefix string, before, after []interface{}, updated map[string]interface{}, removed *[]string) {
+	minLen := len(before)
+	if len(after) < minLen {
+		minLen = len(after)
 	}
 
-	var cleanRemoved []string
+	for i := 0; i < minLen; i++ {
+		path := joinPath(prefix, strconv.Itoa(i))
+		bMap, bIsMap := before[i].(map[string]interface{})
+		aMap, aIsMap := after[i].(map[string]interface{})
+		bSlice, bIsSlice := before[i].([]interface{})
+		aSlice, aIsSlice := after[i].([]interface{})
 
-	for _, path := range removed {
-		if pathHasSegment(path, privateDataKey) {
+		switch {
+		case bIsMap && aIsMap:
+			diffInto(path, bMap, aMap, updated, removed)
+		case bIsSlice && aIsSlice:
+			diffSlice(path, bSlice, aSlice, updated, removed)
+		case !reflect.DeepEqual(before[i], after[i]):
+			updated[path] = after[i]
+		}
+	}
+
+	for i := minLen; i < len(before); i++ {
+		*removed = append(*removed, joinPath(prefix, strconv.Itoa(i)))
+	}
+	for i := minLen; i < len(after); i++ {
+		updated[joinPath(prefix, strconv.Itoa(i))] = after[i]
+	}
+}
+
+const privateDataKey = "privateData"
+
+var metadataKeys = map[string]bool{
+	"updatedAt": true,
+	"createdAt": true,
+	"version":   true,
+}
+
+// SanitizeDelta removes private data and server-only metadata fields from a
+// change delta so a broadcast delta has the same visibility as a sanitized
+// keyframe.
+func SanitizeDelta(updated [][]interface{}, removed []interface{}) ([][]interface{}, []interface{}) {
+	cleanUpdated := make([][]interface{}, 0, len(updated))
+
+	for _, pair := range updated {
+		if len(pair) != 2 {
 			continue
 		}
 
-		cleanRemoved = append(cleanRemoved, path)
+		switch key := pair[0].(type) {
+		case string:
+			if pathHasSegment(key, privateDataKey) || metadataKeys[key] {
+				continue
+			}
+			cleanUpdated = append(cleanUpdated, []interface{}{key, stripKey(pair[1], privateDataKey)})
+		case []interface{}:
+			// Already-encoded path — pre-sanitized by the caller, pass through.
+			cleanUpdated = append(cleanUpdated, pair)
+		}
+	}
+
+	var cleanRemoved []interface{}
+
+	for _, item := range removed {
+		switch path := item.(type) {
+		case string:
+			if !pathHasSegment(path, privateDataKey) && !metadataKeys[path] {
+				cleanRemoved = append(cleanRemoved, path)
+			}
+		case []interface{}:
+			// Already-encoded path — pass through.
+			cleanRemoved = append(cleanRemoved, item)
+		}
 	}
 
 	return cleanUpdated, cleanRemoved

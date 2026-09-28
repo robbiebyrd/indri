@@ -4,10 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Indri is a Go backend for real-time, multiplayer, browser/mobile party games. Clients talk to it over a
-single WebSocket endpoint (`/ws`) using JSON messages routed by an `action` field. Game state lives in
-MongoDB; each write computes its own delta in application code and publishes it on an event bus, which
-broadcasts it to everyone in that game. `client/` is a companion Expo/React Native reference client.
+Indri is a Go backend for real-time, multiplayer, browser/mobile party games. Clients talk to it using
+JSON messages routed by an `action` field, over WebSocket (`/ws`, the default) or any other transport
+enabled in `INDRI_TRANSPORTS` (SSE, GraphQL subscriptions, WebRTC — see `docs/PROTOCOL.md`). Game state lives in
+the database chosen by `INDRI_DB_BACKEND` (MongoDB by default; also memory, SQLite, PostgreSQL); each
+write computes its own delta in application code and publishes it on an event bus, which broadcasts it
+to everyone in that game. `client/` is a companion Expo/React Native reference client.
 
 Indri is a *framework*: the generic actions (register/login/join/create/…) ship in `internal/`, and a
 concrete game adds its own action handlers plus a JSON "script". `example/tictactoe/` is the worked
@@ -24,8 +26,9 @@ go test -race ./...                                   # what CI runs
 go test ./internal/services/mutation/                 # one package
 go test -run TestAddPlayer_ConcurrentNoLostUpdates ./internal/repo/game/   # one test
 
-go run ./cmd/server -script ./config.json             # run (defaults to ./config.json)
-go run ./example/tictactoe -script ./config.json      # run the tic-tac-toe example
+go run ./cmd/server -script ./config.json             # run (-script is required)
+go run ./example/tictactoe                            # tic-tac-toe example (-script defaults to ./config.json)
+go run ./cmd/server -script ./config.json -h          # every settings flag; both binaries accept them
 air                                                    # hot reload (.air.toml)
 
 # Infrastructure (MongoDB + Redis) — requires a populated .env
@@ -36,7 +39,8 @@ pnpm install
 pnpm run typecheck
 pnpm test          # node --experimental-strip-types on services/game-state-parser.node-test.ts
 pnpm run lint
-pnpm run web       # or: start / ios / android
+pnpm run web       # or: start / ios / android (Expo Go)
+npx expo run:ios   # development build: needed for EXPO_PUBLIC_TRANSPORT=webrtc on native; ios/ + android/ are generated, gitignored
 ```
 
 Config is environment-driven with an `INDRI_` prefix (`internal/repo/env/env.go`); `.env.example`
@@ -50,29 +54,46 @@ harmless.
 
 ### Boot chain
 
-`cmd/server/main.go` → `boot.Boot(ctx, scriptPath)` → `boot.Serve(i)`.
+`cmd/server/main.go` → `cli.Parse` → `boot.Boot(ctx, scriptPath)` → `boot.Serve(i)`.
+
+`internal/cli` owns the command line for every server binary (the example included): `-script`,
+`-config` (default `server.json` beside the script), and one flag per `env.Vars` field with a `flag`
+tag. Settings resolve JSON config < env vars < flags. Add a setting's flag there, or
+`TestParse_RegistersAFlagForEverySetting` fails.
 
 `Boot` wires a three-layer injector (`internal/injector/`), in strict order:
 
-1. **clients** (`clients.go`) — MongoDB, the melody WebSocket hub, the lock manager, and the change-event
-   publisher. Clients are process-global singletons; `GetClients` returns a cached `*ClientsInjector` on
+1. **clients** (`clients.go`) — MongoDB (only for the `mongodb` backend), the client transport (built
+   from `INDRI_TRANSPORTS` by `transport.go`), the lock manager, and the change-event publisher. Clients are process-global singletons; `GetClients` returns a cached `*ClientsInjector` on
    every call after the first, and accepts overrides for tests. `INDRI_LOCK_BACKEND=redis` is the
-   *multi-instance switch*: it flips **both** the lock manager and the event bus to Redis, sharing one
-   connection. Otherwise both are in-process.
-2. **repos** (`repos.go`) — game/user/session Mongo stores plus the script store (loaded from the JSON
-   file). Stores create their own indexes in `NewStore`.
+   *multi-instance switch*: it moves the lock manager, the change-event bus, and the delivery relay
+   (`Deliveries`) to Redis, sharing one connection. Otherwise locks and changes are in-process and there
+   is no relay.
+2. **repos** (`repos.go`) — game/user/session stores for `INDRI_DB_BACKEND` (`mongodb` default, `memory`,
+   `sqlite`, `postgres`; see "Database backends" in `docs/ARCHITECTURE.md`) plus the script store (loaded
+   from the JSON file). The SQL backends share one `*sql.DB` (`ReposInjector.SQLDB`), closed on shutdown.
 3. **services** (`services.go`) — business logic over the repos.
 
 `*injector.Injector` embeds all three, so handlers reach anything via one struct (`h.i.GameService`,
-`h.i.GameRepo`, `h.i.MelodyClient`, …). Every handler takes it in `New(i *injector.Injector)`.
+`h.i.GameRepo`, `h.i.Transport`, …). Every handler takes it in `New(i *injector.Injector)`.
 
-`Serve` runs two goroutines under an `errgroup`: the HTTP/WebSocket server and the change-stream
+`Serve` runs two goroutines under an `errgroup`: the HTTP server and the change-stream
 broadcaster. Both shut down on root-context cancellation (SIGINT/SIGTERM), then `closeResources` drains
-the hub and the Mongo pool.
+the transport and the Mongo or SQL pool.
+
+### Transports
+
+Nothing above `internal/transport/` knows the wire protocol: handlers get a `transport.Conn`, services
+broadcast through `transport.Transport`. `ws` (melody — the only melody import), `sse`, `graphqlws`,
+and `webrtc` implement it; `transport.Composite` runs several at once as one. Every transport must
+pass `transporttest.Run`, the shared conformance suite — it pins down what callers depend on (serial
+message delivery per connection, exactly-once `Disconnect` with `IsClosed()` already true, queued
+writes flushed on a server-side close). See `docs/ARCHITECTURE.md` for the invariants and how to add
+one. `Conn.Write` is text; `Conn.WriteBinary` is for opaque bytes such as MessagePack.
 
 ### Inbound: message routing
 
-`melody.HandleMessage` → `router.HandleMessage` (`internal/handlers/router/`):
+`Transport.Handle` → `router.HandleMessage` (`internal/handlers/router/`):
 
 1. `utils.DecodeMessageWithAction` unmarshals to `map[string]interface{}`, pulls out `action`, and
    **deletes `action` from the payload** before handing it on.
@@ -80,7 +101,7 @@ the hub and the Mongo pool.
    handler registered under the literal actions `received` or `processed` therefore runs on *every*
    message — that is the intended pre/post hook mechanism. Nothing registers them by default.
 3. `invokeHandler` wraps each call in a `recover()`, converting a panic into an error so a malformed
-   client message can't kill the process or leak the melody session.
+   client message can't kill the process or leak the connection.
 
 Handlers are a flat, ordered `[]Handler` registry (`register.go`) — multiple handlers may share one
 action, and all matching handlers run. `boot.registerHandlers` installs the built-ins; a game adds its
@@ -91,52 +112,65 @@ own with `router.RegisterHandler(name, action, handler)` **after** `boot.Boot` a
 
 Two different shapes reach the client:
 
-- **Keyframe** — a full, sanitized `models.Game` written directly to the requesting connection (on
-  join/create/refresh/reconnect). `GameService.Sanitize` strips `PrivateData` from the game, stage,
-  scenes, teams, and players before it goes out.
-- **Delta** — an `events.ChangeEvent` (`{id, op, ts, type, updated, removed}`) broadcast to every session
-  in the affected game.
+- **Keyframe** — the game's *client view* (`events.ClientView`: private data removed at every depth,
+  `data.layout` removed because it travels in its own layout frame) with `sv`, the version of the game's
+  layout. Written to the requesting connection on join/create/refresh/reconnect, and broadcast to a whole
+  game when a write changes its shape (below).
+- **Delta** — an `events.ChangeEvent` (`{o, t, u, r}`) broadcast to every session in the affected game.
+  Paths are **positional**: each object key is replaced by its index among its sorted siblings in the
+  client view, so a client decodes them against the keyframe it holds.
 
-Both paths are sanitized, and deliberately in step: `Store.publish` runs every delta through
-`events.SanitizeDelta`, which drops any dotted path containing a `privateData` segment and recursively
-strips `privateData` out of whole-object update values (e.g. a newly added player). If you change what
-`GameService.Sanitize` hides, change `SanitizeDelta` to match or the two disagree.
+Keyframes and deltas share one definition of what the client holds: both are built from
+`events.ClientView`. Change what clients may see there, and nowhere else.
 
 The delta path is **application-computed, not database-driven** (`internal/services/events`; there is no
 MongoDB change stream):
 
 ```
-store write ──► events.Diff(before, after) ──► Publisher.Publish
-                                                     │
-                       in-process channel ───────────┤
-                       or Redis Pub/Sub  ────────────┘
-                                                     ▼
-                              boot.monitorGameChanges (Subscribe)
-                                                     ▼
-                              BroadcastService.Broadcast(gameID, …)
+Store.Mutate commit ──► changePublisher.diff (repo/game/changes.go) ──► Publisher.Publish
+                          ClientView(before/after), Diff,                 │
+                          positional encode                               │
+                                         in-process channel ──────────────┤
+                                         or Redis Pub/Sub  ───────────────┘
+                                                                          ▼
+                                         boot.monitorGameChanges (Subscribe)
+                                                                          ▼
+                                         BroadcastService.BroadcastLocal(gameID, …)
 ```
 
-`events.Diff` walks the **JSON** representation of before/after (`events.ToMap`), so paths look like
-`players.<id>.host` and use json tag names, matching what the client already holds. Nested maps are
-walked; arrays and scalars are compared whole with `reflect.DeepEqual`.
+Every instance receives every change event, so the monitor writes only to its own connections
+(`BroadcastLocal`); relaying it again would deliver each delta once per instance.
+
+**Shape changes re-keyframe.** A write that adds or removes an object key in the client view shifts
+positions the client's schema can't know, so instead of a delta `changePublisher` publishes an
+`OpKeyframe` request and the broadcaster sends that game a fresh keyframe. Value changes and array
+growth/shrink stay deltas. Pre-declared player slots and `null` placeholders (e.g. `winningTeam`) exist to
+keep ordinary play shape-stable, so avoid adding and removing keys during a game where a value will do.
 
 The client (`client/services/game-state-parser.ts`) rebuilds state by cloning the last keyframe and
 replaying timestamp-ordered deltas over it, discarding deltas older than the keyframe's cutoff.
 
-**A write that never publishes is invisible to players.** This is now the single most important rule in
-the repo, because nothing in the database enforces it:
+**A write that never publishes is invisible to players.** Every game write now goes through `Mutate`, and
+every store reports each committed `Mutate` to the one shared `changePublisher`, so a new write path gets
+publishing for free as long as it is built on `Mutate`:
 
-- `Store.Mutate` snapshots the game before `apply`, diffs it after a committed save, and publishes
-  automatically. Prefer it.
-- `UpdateField`, `DeleteField`, and `markPlayerConnected` publish explicitly via `s.publish(...)`. Any
-  new write path must do the same.
+- `UpdateField`, `DeleteField`, and connect/disconnect are shared operations over `Mutate`
+  (`repo/game/operations.go`), not per-store partial updates. A write that changes nothing clients can
+  see publishes nothing.
 - Publish failures are logged, never returned — the write already committed, so a fan-out hiccup must
   not fail the mutation.
 
-`BroadcastService` offers game, team, player, and global fan-out. Because `sessionId` is the only
-per-connection key the app sets, every targeted send resolves its recipients through the session store
-first and then filters connections on that one key (`broadcastToSessions`). Do not invent new melody
-session keys to filter on — nothing sets them.
+`BroadcastService` offers game, team, and player fan-out, plus `CloseSessions` (kick). Because
+`sessionId` is the only per-connection key the app sets, every targeted send resolves its recipients
+through the session store first, then filters connections on that one key. Do not invent new connection
+keys to filter on — nothing sets them.
+
+**Sends reach every instance.** A player's connection can be on any instance, so `BroadcastService`
+resolves the sessions once and hands an `events.Delivery` to every instance. With one instance it writes
+directly; in multi-instance mode it publishes on the Redis relay (`indri:deliveries`) and each instance's
+`RelayDeliveries` loop applies it to the connections it holds. Never reach another player through
+`Transport.Conns()` — that only sees this instance. Only a reply on the caller's *own* connection may be
+written directly.
 
 ### Concurrency model
 
@@ -155,11 +189,11 @@ mutation.Run(ctx, lockManager, key, load, apply, save)
   compared in the update filter and incremented on commit, so a lease that expires mid-mutation cannot
   cause a lost update. `mutation.Run` retries up to 10 times, then returns `ErrConflict`.
 - `apply` may return `mutation.ErrAbort` to signal "no change needed" and skip the write.
-- `gameRepo.Store.Mutate` is the concrete binding. **Use `Mutate` for any read-modify-write on a game.**
-  Multi-field edits (add player to team, change team, set host) all go through it; see
-  `internal/repo/game/{player,team,host}.go`.
-- Single-field sets that don't depend on prior state can use `UpdateField`/`DeleteField`, which
-  `$inc` the version so they stay coherent with `Mutate`'s CAS.
+- Each game store (`MongoStore`, `MemoryStore`, `SQLiteStore`, `PostgresStore`) binds `Mutate` to its
+  own load and version-conditional save. **Use `Mutate` for any read-modify-write on a game.** Game
+  logic shared by every store — slot assignment, removal, connect/disconnect, field writes, building a
+  new game from the script — lives once in `internal/repo/game/operations.go` over `Mutate`, and
+  `store_contract_test.go` runs the same player tests against every available backend.
 
 Nothing here is Mongo-specific by design: a different backend only needs to supply `load` and a
 version-conditional `save`.
@@ -170,7 +204,7 @@ There are **two different values both called `sessionId`**, and confusing them i
 
 | Where | Value | Notes |
 |---|---|---|
-| Melody connection key `sessionId` | `session.ID.Hex()` (Mongo ObjectID) | Server-side targeting key for broadcasts. Never sent to clients. |
+| Connection key `sessionId` | `session.ID.Hex()` (Mongo ObjectID) | Server-side targeting key for broadcasts. Never sent to clients. |
 | JSON field `sessionId` on the wire | `session.Token` (256-bit hex) | Unguessable bearer token. Client echoes it back in a `reconnect`. |
 
 `login` and `reconnect` are the only places that call `SetKey`, and the only key they set is `sessionId`.
@@ -182,14 +216,15 @@ creating a second one (unique index on `userId`).
 
 ### Data model
 
-MongoDB collections: `game`, `user`, `session`. Models live in `internal/models/`.
+Collections: `game`, `user`, `session` (tables `games`, `users`, `sessions` on the SQL backends). Models
+live in `internal/models/`.
 
 A **Game** holds `Teams`, `Players`, and a `Stage`. A **Stage** holds ordered **Scenes** plus a
 `currentScene`; a scene is the visual unit the client renders. Games, stages, scenes, teams, and players
 each carry up to three data stores:
 
 - `PublicData` (`data`) — broadcast to everyone in the game.
-- `PrivateData` (`privateData`) — server-only; stripped by `Sanitize`.
+- `PrivateData` (`privateData`) — server-only; removed from everything sent to clients by `events.ClientView`.
 - `PlayerData` (`playerData`) — keyed per player.
 
 A **Script** (`config.json`, `models.Script`) is the template a new game is stamped from: config, initial
@@ -200,8 +235,8 @@ teams, and the initial stage/scenes. It is loaded once at boot from `-script` an
 
 1. Create `example/<game>/server/handlers/<action>/handler.go` with a `Handler` struct holding
    `*injector.Injector`, a `New(i)` constructor, and
-   `Handle(s *melody.Session, decodedMsg map[string]interface{}) error`.
-2. Resolve the caller: `connection.NewService(s, h.i.MelodyClient).GetKeyAsString("sessionId")` →
+   `Handle(s transport.Conn, decodedMsg map[string]interface{}) error`.
+2. Resolve the caller: `connection.NewService(s, h.i.Transport).GetKeyAsString("sessionId")` →
    `h.i.SessionService.Get(...)` → `GetGameIDAndTeamID(...)`.
 3. Validate the move against the current game state, then write through `h.i.GameRepo.Mutate` (or
    `UpdateField` for a single independent field). Do **not** write the response yourself for state
@@ -234,6 +269,9 @@ is never wired up — an unregistered action is silently unreachable, so the tes
 
 `game.PublicData["layout"]` (JSON path `data.layout`) is the canonical location for all layout data.
 It is written exclusively through the `layout` WebSocket action (`internal/handlers/actions/layout/`).
+Each game has its own layout, seeded from the script. Because it is excluded from keyframes and deltas,
+the shared change publisher reports a write that edits it as an `OpLayout` event, and the broadcaster
+sends that game's clients the new layout frame (`GameService.LayoutFrame`).
 
 **`privateData` is a reserved key at any depth inside the layout document.** The server's
 `ValidateLayout` rejects it unconditionally, and the TypeScript `parseLayout` function does the same.

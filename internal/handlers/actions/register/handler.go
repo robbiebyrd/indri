@@ -11,6 +11,11 @@ import (
 	"github.com/robbiebyrd/indri/internal/services/connection"
 )
 
+type registerResponse struct {
+	Registered bool   `json:"registered"`
+	UserID     string `json:"userId"`
+}
+
 type Handler struct {
 	i *injector.Injector
 }
@@ -47,12 +52,7 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	err = ss.Write([]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID.Hex())))
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return transport.WriteEncoded(s, registerResponse{Registered: true, UserID: createdUser.ID})
 }
 
 func remarshal(decodedMsg map[string]interface{}) (*models.CreateUser, error) {

@@ -18,10 +18,11 @@ func newFakeConn() *fakeConn { return &fakeConn{keys: make(map[string]interface{
 
 func (f *fakeConn) Get(key string) (interface{}, bool) { v, ok := f.keys[key]; return v, ok }
 func (f *fakeConn) Set(key string, value interface{})  { f.keys[key] = value }
-func (f *fakeConn) UnSet(key string)            { delete(f.keys, key) }
-func (f *fakeConn) Write(msg []byte) error      { f.written = append(f.written, msg); return nil }
-func (f *fakeConn) Close() error                { f.closed = true; return nil }
-func (f *fakeConn) IsClosed() bool              { return f.closed }
+func (f *fakeConn) UnSet(key string)                   { delete(f.keys, key) }
+func (f *fakeConn) Write(msg []byte) error             { f.written = append(f.written, msg); return nil }
+func (f *fakeConn) WriteBinary(msg []byte) error       { f.written = append(f.written, msg); return nil }
+func (f *fakeConn) Close() error                       { f.closed = true; return nil }
+func (f *fakeConn) IsClosed() bool                     { return f.closed }
 
 func TestRegisterIndriTable_RefreshAllFlag(t *testing.T) {
 	L := lua.NewState()

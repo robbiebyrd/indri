@@ -2,12 +2,10 @@ package models
 
 import (
 	"time"
-
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type Session struct {
-	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
+	ID string `bson:"_id,omitempty" json:"id"`
 
 	// Token is the unguessable bearer token used to resume this session.
 	// It is never serialized to clients as part of session state.
@@ -16,6 +14,7 @@ type Session struct {
 	GameID *string `bson:"gameId,omitempty" json:"gameId,omitempty"`
 	UserID *string `bson:"userId,omitempty" json:"userId,omitempty"`
 	TeamID *string `bson:"teamId,omitempty" json:"teamId,omitempty"`
+	SlotID *string `bson:"slotId,omitempty" json:"slotId,omitempty"`
 
 	CreatedAt time.Time `bson:"createdAt"           json:"createdAt"`
 	UpdatedAt time.Time `bson:"updatedAt"           json:"updatedAt"`
@@ -27,13 +26,14 @@ type CreateSession struct {
 	GameID    string    `bson:"gameId"     json:"gameId"`
 	UserID    string    `bson:"userId"     json:"userId"`
 	TeamID    string    `bson:"teamId"     json:"teamId"`
-	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+	SlotID    string    `bson:"slotId"     json:"slotId"`
+	CreatedAt time.Time `bson:"createdAt"  json:"createdAt"`
 }
 
 type UpdateSession struct {
-	GameID string `bson:"gameId" json:"gameId"`
-	UserID string `bson:"userId" json:"userId"`
-	TeamID string `bson:"teamId" json:"teamId"`
-
+	GameID    string    `bson:"gameId"    json:"gameId"`
+	UserID    string    `bson:"userId"    json:"userId"`
+	TeamID    string    `bson:"teamId"    json:"teamId"`
+	SlotID    string    `bson:"slotId"    json:"slotId"`
 	UpdatedAt time.Time `bson:"updatedAt" json:"updatedAt"`
 }

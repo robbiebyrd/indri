@@ -42,9 +42,13 @@ func (h *Handler) Handle(
 		return err
 	}
 
-	err = h.i.GameService.RemovePlayer(g.ID.Hex(), *session.UserID)
+	if session.SlotID == nil || *session.SlotID == "" || session.UserID == nil {
+		return fmt.Errorf("session has no slot or user id; player cannot leave")
+	}
+
+	err = h.i.GameService.RemovePlayer(g.ID, *session.SlotID, *session.UserID)
 	if err != nil {
-		log.Printf("could not disconnect player %v from game %v: %v\n", *session.UserID, *session.GameID, err)
+		log.Printf("could not disconnect player %v from game %v: %v\n", *session.SlotID, *session.GameID, err)
 	}
 
 	return nil

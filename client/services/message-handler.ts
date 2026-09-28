@@ -7,6 +7,8 @@ import {GameListDispatchMessage} from "@/providers/game-list/game-list-actions";
 import {GameInfo} from "@/providers/game-list/game-list-context";
 import {parseJsonSafely} from "@/services/json";
 import {JsonObject} from "type-fest";
+import {decode} from "@msgpack/msgpack";
+import type {Payload, TransportClient} from "@indri/protocol-client";
 
 type actionHandler = {
     name: string
@@ -16,15 +18,16 @@ type actionHandler = {
 }
 
 export class MessageHandler {
-    private ws?: WebSocket = undefined
+    private readonly transport: TransportClient
     private stateList: GameStateParser<Game> = new GameStateParser<Game>()
+    private layoutVersion?: string
     private readonly setGameState: Dispatch<GameDispatchMessage>
     private readonly setPlayerState: Dispatch<UserDispatchMessage>
     private readonly setGameList: Dispatch<GameListDispatchMessage>
     private parsers: actionHandler[]
 
     constructor(
-        url: string,
+        transport: TransportClient,
         setPlayerState: Dispatch<UserDispatchMessage>,
         setGameState: Dispatch<GameDispatchMessage>,
         setGameList: Dispatch<GameListDispatchMessage>,
@@ -47,6 +50,11 @@ export class MessageHandler {
                 dataKey: "games"
             },
             {
+                name: "indri_layout",
+                action: "layout",
+                parser: (d) => this.handleLayout(d)
+            },
+            {
                 name: "indri_keyframe",
                 action: "keyframe",
                 parser: (d) => this.keyframe(d)
@@ -56,30 +64,42 @@ export class MessageHandler {
                 action: "update",
                 parser: (d) => this.update(d)
             },
+            {
+                name: "indri_disconnect",
+                action: "disconnect",
+                parser: () => { console.warn("server disconnected") }
+            },
             ...parsers
         ]
 
-        this.ws = new WebSocket(url)
+        this.transport = transport
 
-        this.ws.onmessage = (e: MessageEvent) => {
-            this.routeIncomingMessage(e)
-        }
+        this.transport.onMessage((data) => {
+            this.routeIncomingMessage({data})
+        })
 
         //TODO: Handle errors appropriately.
-        this.ws.onerror = (e: Event) => {
+        this.transport.onError((e) => {
             console.log(e)
-        }
+        })
 
         //TODO: Handle reconnects
-        this.ws.onclose = (e: CloseEvent) => {
-            console.log(e.code, e.reason)
-        }
+        this.transport.onClose((reason) => {
+            console.log(reason)
+        })
+
+        this.transport.connect().catch((e) => {
+            console.error("could not connect to the server", e)
+        })
 
         return this
     }
 
-    routeIncomingMessage(message: MessageEvent) {
-        const parsed = parseJsonSafely<JsonObject>(message.data)
+    routeIncomingMessage(message: {data: Payload}) {
+        // Binary frames are MessagePack; text frames are JSON (?debug=1).
+        const parsed: unknown = typeof message.data === "string"
+            ? parseJsonSafely<JsonObject>(message.data)
+            : decode(message.data)
 
         const action = this.messageType(parsed)
         if (!action) {
@@ -88,37 +108,32 @@ export class MessageHandler {
 
         for (const parser of this.parsers.filter(p => p.action === action)) {
             if (parser) {
-                const data = (parser.dataKey && parsed && parsed[parser.dataKey]) ? parsed[parser.dataKey] : parsed
+                // A present key is used even when null (the server sends
+                // "games": null for an empty list); only an absent one falls
+                // back to the whole message.
+                const obj = parsed as Record<string, unknown> | null
+                const data = (parser.dataKey && obj && typeof obj === "object" && parser.dataKey in obj) ? obj[parser.dataKey] : parsed
                 parser.parser(data)
             }
         }
     }
 
-    updateAvailableGames(games: any[]) {
+    updateAvailableGames(games: any[] | null) {
         this.setGameList({
-            payload: games as GameInfo[],
+            payload: (games ?? []) as GameInfo[],
             type: "setAvailableGames"
         } as GameListDispatchMessage)
     }
 
+    // A close from our side never fires onClose, so a teardown can't trigger
+    // close handling (e.g. future reconnect) during unmount.
     close() {
-        if (this.ws) {
-            // Drop handlers before closing so a teardown doesn't fire onclose
-            // logic (e.g. future reconnect) during unmount.
-            this.ws.onmessage = null
-            this.ws.onerror = null
-            this.ws.onclose = null
-            this.ws.close()
-            this.ws = undefined
-        }
+        this.transport.close()
     }
 
+    // Dropped, with a warning, while the connection isn't open.
     send(message: object) {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            console.warn("dropping message sent before the socket was open")
-            return
-        }
-        this.ws.send(JSON.stringify(message))
+        this.transport.send(JSON.stringify(message))
     }
 
     update(parsedMessage?: any) {
@@ -127,20 +142,15 @@ export class MessageHandler {
     }
 
     messageType(parsedMessage: any): string | undefined {
-        if (typeof parsedMessage !== "object" || parsedMessage === null) {
-            return undefined
-        }
-        if ("authenticated" in parsedMessage && parsedMessage["authenticated"] == true) {
-            return "authenticated"
-        } else if ("op" in parsedMessage && parsedMessage["op"] == "update") {
-            return "update"
-        } else if ("op" in parsedMessage && parsedMessage["op"] == "inquiryResponse") {
-            return "inquiryResponse"
-        } else if ("code" in parsedMessage && "id" in parsedMessage) {
-            return "keyframe"
-        } else if ("op" in parsedMessage) {
-            return parsedMessage["op"]
-        }
+        if (typeof parsedMessage !== "object" || parsedMessage === null) return undefined
+        // sv must be checked before authenticated: a slim keyframe could theoretically
+        // carry both fields, and keyframe routing must take priority.
+        if ("sv" in parsedMessage) return "keyframe"
+        if ("o" in parsedMessage && parsedMessage.o === 4) return "layout"
+        if ("o" in parsedMessage && (parsedMessage.o === 1 || parsedMessage.o === 2 || parsedMessage.o === 3)) return "update"
+        if ("authenticated" in parsedMessage && parsedMessage.authenticated === true) return "authenticated"
+        if ("op" in parsedMessage && parsedMessage.op === "inquiryResponse") return "inquiryResponse"
+        if ("disconnected" in parsedMessage) return "disconnect"
         return undefined
     }
 
@@ -162,8 +172,19 @@ export class MessageHandler {
         } as UserDispatchMessage)
     }
 
-    keyframe(gameData: any) {
-        const g = gameData as Game
+    // A layout arrives before a connection's first keyframe and again whenever
+    // the host edits it; either way it replaces the one on screen.
+    handleLayout(msg: any) {
+        if (typeof msg?.v !== "string" || !msg.data || msg.v === this.layoutVersion) return
+        this.layoutVersion = msg.v
+        this.stateList.setLayout(msg.data)
+        this.updateGameState()
+    }
+
+    keyframe(wrapperData: any) {
+        const g = wrapperData.game as Game
+        // The keyframe carries no layout; the parser lays the current one over it.
+        this.stateList.setSchema(g as Record<string, unknown>)
         this.stateList.set(g as JsonObject, new Date(g.updatedAt ?? new Date().toISOString()))
         this.updateGameState()
     }

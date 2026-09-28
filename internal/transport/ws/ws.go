@@ -5,7 +5,6 @@ package ws
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/olahol/melody"
@@ -27,12 +26,13 @@ type conn struct {
 	s *melody.Session
 }
 
-func (c conn) Get(key string) (any, bool) { return c.s.Get(key) }
-func (c conn) Set(key string, value any)  { c.s.Set(key, value) }
-func (c conn) UnSet(key string)           { c.s.UnSet(key) }
-func (c conn) Write(msg []byte) error     { return c.s.Write(msg) }
-func (c conn) Close() error               { return c.s.Close() }
-func (c conn) IsClosed() bool             { return c.s.IsClosed() }
+func (c conn) Get(key string) (any, bool)   { return c.s.Get(key) }
+func (c conn) Set(key string, value any)    { c.s.Set(key, value) }
+func (c conn) UnSet(key string)             { c.s.UnSet(key) }
+func (c conn) Write(msg []byte) error       { return c.s.Write(msg) }
+func (c conn) WriteBinary(msg []byte) error { return c.s.WriteBinary(msg) }
+func (c conn) Close() error                 { return c.s.Close() }
+func (c conn) IsClosed() bool               { return c.s.IsClosed() }
 
 // New builds a WebSocket transport configured from the environment (timeouts,
 // message size, and the CheckOrigin allowlist for CSWSH protection).
@@ -50,14 +50,19 @@ func New() *Transport {
 		MessageBufferSize:         vars.WSMessageBufferSize,
 	}
 
-	m.Upgrader.CheckOrigin = originChecker(vars.AllowedOrigins)
+	m.Upgrader.CheckOrigin = transport.OriginChecker(vars.AllowedOrigins)
 
 	return &Transport{m: m}
 }
 
 func (t *Transport) Handle(h transport.Handlers) {
 	if h.Connect != nil {
-		t.m.HandleConnect(func(s *melody.Session) { h.Connect(conn{s}) })
+		t.m.HandleConnect(func(s *melody.Session) {
+			if transport.DebugRequested(s.Request) {
+				s.Set("debug", true)
+			}
+			h.Connect(conn{s})
+		})
 	}
 
 	if h.Disconnect != nil {
@@ -111,28 +116,4 @@ func (t *Transport) Close() error {
 
 func (t *Transport) IsClosed() bool {
 	return t.m.IsClosed()
-}
-
-// originChecker guards the upgrade against Cross-Site WebSocket Hijacking:
-// requests with no Origin (native/CLI clients) are allowed; browser Origins
-// are allowed only if in the allowlist.
-func originChecker(allowedOrigins string) func(*http.Request) bool {
-	allowed := make(map[string]struct{})
-
-	for _, o := range strings.Split(allowedOrigins, ",") {
-		if o = strings.TrimSpace(o); o != "" {
-			allowed[o] = struct{}{}
-		}
-	}
-
-	return func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true
-		}
-
-		_, ok := allowed[origin]
-
-		return ok
-	}
 }

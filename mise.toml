@@ -1,0 +1,5 @@
+# Local toolchain, pinned to match CI (.github/workflows/ci.yml).
+[tools]
+go = "1.25.0"      # CI reads go.mod's go directive
+node = "22"        # CI: actions/setup-node node-version 22
+pnpm = "11.28.0"   # CI reads client/package.json "packageManager"

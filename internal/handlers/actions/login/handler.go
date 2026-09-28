@@ -1,15 +1,20 @@
 package login
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 
 	"github.com/robbiebyrd/indri/internal/transport"
 
 	"github.com/robbiebyrd/indri/internal/injector"
+	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/connection"
 )
+
+type authResponse struct {
+	Authenticated bool         `json:"authenticated"`
+	SessionID     string       `json:"sessionId"`
+	User          *models.User `json:"user"`
+}
 
 type Handler struct {
 	i *injector.Injector
@@ -54,28 +59,16 @@ func (h *Handler) Handle(
 	// The server-side targeting key uses the non-secret session ObjectID so
 	// broadcasts can find this connection. The client only ever receives the
 	// secret token, which it echoes back on reconnect.
-	ss.SetKey("sessionId", session.ID.Hex())
+	ss.SetKey("sessionId", session.ID)
 
 	user, err := h.i.UserService.Get(*session.UserID)
 	if err != nil {
 		return err
 	}
 
-	jsonUserBytes, err := json.Marshal(h.i.UserService.Sanitize(user))
-	if err != nil {
-		return err
-	}
-
-	authSuccessMessage := bytes.Join([][]byte{
-		[]byte(`{"authenticated": true, "sessionId": "` + session.Token + `", "user": `),
-		jsonUserBytes,
-		[]byte(`}`),
-	}, []byte(""))
-
-	err = ss.Write(authSuccessMessage)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return transport.WriteEncoded(s, authResponse{
+		Authenticated: true,
+		SessionID:     session.Token,
+		User:          h.i.UserService.Sanitize(user),
+	})
 }

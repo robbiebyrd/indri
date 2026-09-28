@@ -1,13 +1,112 @@
-# Indri WebSocket protocol
+# Indri protocol
 
-All traffic flows over a single endpoint: `ws://<host>:<port>/ws` (default `localhost:5002`).
+The messages below are the same on every transport; only the framing differs (see
+[Transports](#transports)). By default the server speaks WebSocket at `ws://<host>:<port>/ws`
+(default `localhost:5002`); `INDRI_TRANSPORTS` can enable others alongside or instead of it.
 
 Every message is a JSON object. Client→server messages **must** carry a string `action` field; the
 router uses it to pick handlers and removes it from the payload before the handler sees it.
 
-The upgrade is origin-checked (`internal/clients/melody/client.go`). Requests with no `Origin` header
-(native apps, CLI tools, server-to-server) are always allowed; browser requests are allowed only if
-their origin appears in `INDRI_ALLOWED_ORIGINS`. An empty allowlist rejects all cross-origin browsers.
+Every transport is origin-checked (`internal/transport/origin.go`). Allowed: requests with no
+`Origin` header (CLI tools, server-to-server, most native clients); same-origin requests, whose
+`Origin` host matches the request's `Host` (React Native's iOS WebSocket always sends the target's
+own origin); and origins listed in `INDRI_ALLOWED_ORIGINS`. An empty allowlist rejects all
+cross-origin browsers.
+The HTTP-based endpoints also answer CORS preflights for allowed origins.
+
+---
+
+## Transports
+
+Server messages are **text** (JSON) or **binary** (opaque bytes, e.g. MessagePack); each transport
+below says how it tells them apart. Client messages are one JSON object each.
+
+### `ws` — WebSocket
+
+`GET /ws` upgrades to a WebSocket. Text frames carry text messages, binary frames binary ones.
+
+### `sse` — Server-Sent Events + POST
+
+```
+GET  /sse/stream     opens the stream (Content-Type: text/event-stream)
+POST /sse/send       body: one client message; header X-Indri-Connection-Id: <id>
+```
+
+The stream's first event names the connection; everything after it is a server message:
+
+```
+event: connected
+data: <connection id: 64 hex chars>
+
+data: {"stage":{"currentScene":"login"}}
+
+event: binary
+data: <base64>
+
+: ping
+```
+
+A message containing newlines spans several `data:` lines, rejoined with `\n` per the SSE spec.
+`: ping` comments arrive every `INDRI_WS_PING_PERIOD` seconds; ignore them.
+
+`POST /sse/send` answers `204` after the message has been handled, so a client that waits for each
+response before sending the next keeps its messages in order. `404` means the connection is unknown or
+closed: reconnect. `413` means the body exceeded `INDRI_WS_MAX_MESSAGE_SIZE`.
+
+**Treat the connection ID like the session token**: anyone holding it can send as that connection.
+
+### `graphqlws` — GraphQL subscriptions
+
+`GET /graphql` upgrades to a WebSocket that must negotiate the `graphql-transport-ws` subprotocol.
+This is GraphQL *framing* only — the server executes no queries and ignores the query text.
+
+```jsonc
+→ {"type": "connection_init"}
+← {"type": "connection_ack"}
+
+// Opens the server→client stream; the connection counts as connected from here.
+→ {"id": "events", "type": "subscribe",
+   "payload": {"operationName": "IndriEvents", "query": "subscription IndriEvents { indriEvents }"}}
+← {"id": "events", "type": "next", "payload": {"data": {"indriEvents": {"text": "{\"stage\":…}"}}}}
+← {"id": "events", "type": "next", "payload": {"data": {"indriEvents": {"b64": "<base64>"}}}}
+
+// Each client message is its own Send operation, completed once handled.
+→ {"id": "s1", "type": "subscribe",
+   "payload": {"operationName": "Send", "query": "mutation Send($message: String!) { send(message: $message) }",
+               "variables": {"message": "{\"action\":\"refresh\"}"}}}
+← {"id": "s1", "type": "complete"}
+```
+
+`ping` is answered with `pong`. A `Send` before `IndriEvents`, or an unknown operation, gets an
+`error` message for that id. Completing `events` disconnects. Protocol violations close the socket:
+`4400` invalid message, `4401` subscribe before `connection_ack`, `4406` subprotocol not offered,
+`4408` no `connection_init` in time, `4409` subscription id already in use, `4429` duplicate
+`connection_init`.
+
+### `webrtc` — data channels
+
+1. Create a peer connection, then an ordered data channel (the default), **then** the offer.
+2. Wait for ICE gathering to complete — signaling is a single exchange, with no trickle ICE.
+3. `POST /webrtc/offer` with the offer as `{"type": "offer", "sdp": "…"}`; the response is the
+   answer in the same shape, candidates included. Apply it.
+
+Once the data channel opens, string messages are text and binary messages are binary, both ways.
+The offer endpoint answers `503` when `INDRI_WEBRTC_MAX_PEERS` is reached, and a peer whose data
+channel hasn't opened within 15s of the answer is dropped.
+
+### Load balancers
+
+Messages for other players reach them on whichever instance they are connected to (with
+`INDRI_LOCK_BACKEND=redis`), so players in one game need not share an instance.
+
+- `ws` and `graphqlws` keep each client on one socket and need no affinity.
+- `sse` splits a client across a stream and separate POSTs, so behind several instances it needs
+  **sticky sessions by client IP** (there are no cookies to pin on). An SSE send that lands on the wrong
+  instance gets `404`, and the client treats the connection as ended (automatic reconnect is not built
+  yet; see `plans/session-resume.md`).
+- `webrtc` needs no stickiness: the offer may reach any instance, and the answer carries that
+  instance's own ICE candidates. Each instance must be reachable at the UDP address it advertises (its
+  own `INDRI_WEBRTC_NAT_1TO1_IPS` and port range) — a load balancer in front of the UDP ports breaks it.
 
 ---
 
@@ -126,11 +225,12 @@ Removes the caller from their game and from any team, atomically.
 ### `kick`
 
 ```json
-{ "action": "kick", "code": "my-room", "userId": "<target user id>" }
+{ "action": "kick", "code": "my-room", "slotId": "<target's slot, e.g. p1>" }
 ```
 
 Host-only. The caller is authorized from their own connection's session — never from the payload. The
-target is removed from the game and force-disconnected if currently connected.
+target is removed from the game and, if connected (to any instance), sent `{"disconnected": true}` and
+disconnected.
 
 ### `logout`
 
@@ -224,38 +324,78 @@ inbound message. Nothing is registered on them by default.
 
 ## Server → client
 
-### Keyframe — full game state
+### Transport
 
-A bare `models.Game` object; recognizable because it has both `id` and `code`. `PrivateData` is stripped
-from the stage, every scene, every team, and every player before sending.
+Server→client messages are **MessagePack binary** by default, keyed by the same names as the JSON
+forms shown here. Add `?debug=1` to the request that opens the connection to receive JSON text instead,
+which is useful for inspection: the `/ws` or `/graphql` upgrade URL, the `GET /sse/stream` URL, or the
+`POST /webrtc/offer` URL. With the client package, put it on `EXPO_PUBLIC_API_URL`. A WebSocket client
+must set `binaryType = "arraybuffer"`.
+
+### Layout frame
+
+Carries the game's layout (its `data.layout`, seeded from the script and changed by the `layout`
+action). Sent immediately before the keyframe on `create`, `join`, and `reconnect` (not on `refresh`),
+and broadcast to the whole game whenever a write edits the layout.
 
 ```json
-{
-  "id": "…", "code": "my-room", "createdAt": "…", "updatedAt": "…",
-  "players": { "<userId>": { "name": "…", "score": 0, "connected": true,
-                             "host": true, "controller": false, "data": {} } },
-  "teams":   { "team1": { "name": "Player 1", "playerIds": ["<userId>"], "data": {"marker": "X"} } },
-  "stage":   { "currentScene": "board", "sceneOrder": ["board"],
-               "scenes": { "board": { "data": { "board": [["","",""],["","",""],["","",""]] } } } },
-  "data": {}
-}
+{ "o": 4, "v": "<16-char hex version>", "data": { "grid": { … }, "scenes": { … } } }
 ```
 
-Sent on `create`, `join`, `refresh`, and after a `reconnect` into an active game.
+- `o: 4` is the layout opcode.
+- `v` is the layout's version: a hash of its content, so it changes exactly when the layout does.
+- `data` is the layout object itself. A client shows the newest layout it has received; a layout frame
+  never changes game state, and deltas still decode against the keyframe.
+
+### Slim keyframe wrapper
+
+Follows the layout frame. `PrivateData` and the `layout` key are stripped from `data` before sending.
+
+```json
+{ "sv": "<same hash as v in layout frame>", "game": { … } }
+```
+
+- `sv` is the version of the game's layout when the keyframe was built (the `v` of its layout frame).
+  Presence of `sv` identifies this message as a keyframe.
+- `game` is a sanitized `models.Game` without `data.layout`. The client builds its positional map from
+  `game` as sent, and shows the layout from the layout frame alongside it.
+
+### Keyframes mid-game
+
+Positional paths decode only against the schema of the keyframe the client holds. When a write adds or
+removes an object key (the game's *shape* changes), the server sends every client in the game a fresh
+keyframe instead of a delta; apply it exactly like the keyframe from `join`. Deleting a key therefore
+always arrives as a keyframe; shrinking an array arrives as a delta with removed paths.
 
 ### Delta — change event
 
 Published by the store at each write and broadcast to every session in the affected game.
 
 ```json
-{ "id": "<game object id>", "op": "update", "ts": "2026-09-09T12:00:00Z", "type": "game",
-  "updated": { "stage.scenes.board.data.board": [["X","",""],["","",""],["","",""]] },
-  "removed": ["stage.scenes.board.data.temp"] }
+{ "o": 1, "t": "2024-01-15T12:00:00Z", "u": [[[2, 0, 1], "X"]], "r": [] }
 ```
 
-Keys in `updated` are dotted paths into the game's **JSON** representation — the same field names the
-keyframe uses. Nested objects are walked (`players.<userId>.host`); arrays and scalars are replaced
-whole. Apply them onto the last keyframe.
+Fields:
+- `o` — opcode: `1` = update, `2` = insert, `3` = delete
+- `t` — timestamp. In binary (MessagePack) mode: a Timestamp extension type, decoded to a `Date` by
+  `@msgpack/msgpack`. In debug (JSON) mode: an RFC3339 string. Both are accepted by `new Date(t)`.
+- `u` — array of `[path, value]` pairs; each `path` is a positional integer array
+- `r` — array of paths to remove; each path is a positional integer array
+
+Debug mode changes only the encoding, not the paths: a debug connection receives the same integer
+arrays, as JSON.
+
+**Positional path encoding:** integers index into the slim keyframe's key schema by sorted alphabetical
+position at each object level; arrays use raw numeric indices. For example, if the slim keyframe root
+has sorted keys `[code, data, players, stage, teams, updatedAt, …]` then `players` is at index `2`. If
+a player object has sorted keys `[connected, controller, data, host, name, score, userId]` then `host`
+is at index `3`. So the string path `players.p0.host` encodes as `[2, <p0 sorted position>, 3]`.
+
+The client rebuilds the positional map from the slim keyframe at join/reconnect time using
+`buildPositionalMap`, then passes the schema to `GameStateParser.setSchema` or lets `set()` auto-initialize it.
+
+**Important invariant:** keys must never be deleted from the game state — only set to `null`. Deleting a
+key shifts all subsequent positional indices and breaks decoding.
 
 Deltas are sanitized on the same terms as keyframes: paths containing a `privateData` segment are
 dropped, and `privateData` is stripped out of whole-object update values. A client never sees private
@@ -291,8 +431,11 @@ Sent before the server closes a connection it still owns (for example, a kick).
 
 The reference client (`client/services/message-handler.ts`) routes by shape, in this order:
 
-1. `authenticated === true` → auth payload
-2. `op === "update"` → delta
-3. `op === "inquiryResponse"` → game list
-4. has both `code` and `id` → keyframe
-5. any other `op` → dispatched by that name (this is how game-specific messages get through)
+1. `"sv" in msg` → slim keyframe wrapper
+2. `msg.o === 4` → layout frame
+3. `msg.o === 1, 2, or 3` → delta update
+4. `authenticated === true` → auth payload
+5. `op === "inquiryResponse"` → game list
+6. `"disconnected" in msg` → disconnect
+
+Note: `sv` is checked before `authenticated` — keyframe priority is by design.

@@ -12,12 +12,12 @@ import (
 )
 
 type Service struct {
-	userRepo    *userRepo.Store
-	sessionRepo *sessionRepo.Store
+	userRepo    userRepo.Storer
+	sessionRepo sessionRepo.Storer
 }
 
 // NewService creates a new repository for accessing user data.
-func NewService(userRepo *userRepo.Store, sessionRepo *sessionRepo.Store) (*Service, error) {
+func NewService(userRepo userRepo.Storer, sessionRepo sessionRepo.Storer) (*Service, error) {
 	if userRepo == nil {
 		return nil, errors.New("userRepo is required")
 	}
@@ -57,7 +57,7 @@ func (us *Service) Authenticate(email *string, password *string) (*models.Sessio
 
 	session, err := us.sessionRepo.New(models.CreateSession{
 		Token:     token,
-		UserID:    storedUser.ID.Hex(),
+		UserID:    storedUser.ID,
 		CreatedAt: time.Time{},
 	})
 	if err != nil {

@@ -164,6 +164,9 @@ func clearEnvVars(t *testing.T) {
 		"INDRI_WS_WRITE_TIMEOUT", "INDRI_WS_PING_PERIOD",
 		"INDRI_WS_PONG_TIMEOUT", "INDRI_WS_MAX_MESSAGE_SIZE",
 		"INDRI_WS_MESSAGE_BUFFER_SIZE",
+		"INDRI_TRANSPORTS", "INDRI_WEBRTC_ICE_SERVERS", "INDRI_WEBRTC_MAX_PEERS",
+		"INDRI_WEBRTC_NAT_1TO1_IPS", "INDRI_WEBRTC_UDP_PORT_MIN", "INDRI_WEBRTC_UDP_PORT_MAX",
+		"INDRI_WEBRTC_GATHER_TIMEOUT", "INDRI_WEBRTC_OPEN_TIMEOUT", "INDRI_GRAPHQL_INIT_TIMEOUT",
 	}
 	saved := make(map[string]string, len(keys))
 	wasSet := make(map[string]bool, len(keys))
@@ -222,6 +225,98 @@ func TestLoad_JSONFallback(t *testing.T) {
 	if got.MongoURI != "mongodb://json-host:27017" {
 		t.Errorf("MongoURI = %q, want %q", got.MongoURI, "mongodb://json-host:27017")
 	}
+}
+
+func TestLoad_TransportSettings(t *testing.T) {
+	t.Run("defaults keep today's WebSocket-only behavior", func(t *testing.T) {
+		globalClient = nil
+		clearEnvVars(t)
+
+		got, err := Load("", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Transports != "ws" {
+			t.Errorf("Transports = %q, want ws", got.Transports)
+		}
+		if got.WebRTCICEServers != "" || got.WebRTCNAT1To1IPs != "" {
+			t.Errorf("ICE servers %q / NAT IPs %q, want none by default", got.WebRTCICEServers, got.WebRTCNAT1To1IPs)
+		}
+		if got.WebRTCMaxPeers != 256 {
+			t.Errorf("WebRTCMaxPeers = %d, want 256", got.WebRTCMaxPeers)
+		}
+		if got.WebRTCGatherTimeoutSeconds != 5 || got.WebRTCOpenTimeoutSeconds != 15 || got.GraphQLInitTimeoutSeconds != 10 {
+			t.Errorf("timeouts gather=%d open=%d graphqlInit=%d, want 5/15/10",
+				got.WebRTCGatherTimeoutSeconds, got.WebRTCOpenTimeoutSeconds, got.GraphQLInitTimeoutSeconds)
+		}
+	})
+
+	t.Run("config file", func(t *testing.T) {
+		globalClient = nil
+		clearEnvVars(t)
+
+		path := writeJSONConfig(t, map[string]any{
+			"transports":          "ws,sse",
+			"webrtcIceServers":    "stun:stun.example:3478",
+			"webrtcMaxPeers":      8,
+			"webrtcNat1To1Ips":    "203.0.113.7",
+			"webrtcUdpPortMin":    50000,
+			"webrtcUdpPortMax":    50100,
+			"webrtcGatherTimeout": 3,
+			"webrtcOpenTimeout":   20,
+			"graphqlInitTimeout":  7,
+		})
+
+		got, err := Load(path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Transports != "ws,sse" || got.WebRTCICEServers != "stun:stun.example:3478" ||
+			got.WebRTCMaxPeers != 8 || got.WebRTCNAT1To1IPs != "203.0.113.7" ||
+			got.WebRTCUDPPortMin != 50000 || got.WebRTCUDPPortMax != 50100 ||
+			got.WebRTCGatherTimeoutSeconds != 3 || got.WebRTCOpenTimeoutSeconds != 20 || got.GraphQLInitTimeoutSeconds != 7 {
+			t.Errorf("config file not applied: %+v", got)
+		}
+	})
+
+	t.Run("environment", func(t *testing.T) {
+		globalClient = nil
+		clearEnvVars(t)
+		t.Setenv("INDRI_TRANSPORTS", "graphqlws,webrtc")
+		t.Setenv("INDRI_WEBRTC_MAX_PEERS", "64")
+		t.Setenv("INDRI_WEBRTC_GATHER_TIMEOUT", "4")
+		t.Setenv("INDRI_WEBRTC_OPEN_TIMEOUT", "30")
+		t.Setenv("INDRI_GRAPHQL_INIT_TIMEOUT", "6")
+
+		got, err := Load("", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Transports != "graphqlws,webrtc" || got.WebRTCMaxPeers != 64 ||
+			got.WebRTCGatherTimeoutSeconds != 4 || got.WebRTCOpenTimeoutSeconds != 30 || got.GraphQLInitTimeoutSeconds != 6 {
+			t.Errorf("environment not applied: %+v", got)
+		}
+	})
+
+	t.Run("command-line flags", func(t *testing.T) {
+		globalClient = nil
+		clearEnvVars(t)
+
+		got, err := Load("", map[string]string{
+			"transports":            "sse",
+			"webrtc-max-peers":      "32",
+			"webrtc-gather-timeout": "2",
+			"webrtc-open-timeout":   "25",
+			"graphql-init-timeout":  "8",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Transports != "sse" || got.WebRTCMaxPeers != 32 ||
+			got.WebRTCGatherTimeoutSeconds != 2 || got.WebRTCOpenTimeoutSeconds != 25 || got.GraphQLInitTimeoutSeconds != 8 {
+			t.Errorf("flags not applied: %+v", got)
+		}
+	})
 }
 
 func TestLoad_EnvOverridesJSON(t *testing.T) {
