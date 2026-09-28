@@ -28,9 +28,9 @@ func (h *Handler) Handle(
 ) error {
 	cs := connection.NewService(s, h.i.Transport)
 
-	gameCode, teamId := utils.ParseGameCodeAndTeamID(decodedMsg)
-	if gameCode == nil {
-		return fmt.Errorf("game code not provided")
+	gameCode, teamId, err := utils.RequireGameCodeAndTeamID(decodedMsg)
+	if err != nil {
+		return err
 	}
 
 	sessionId, err := cs.GetKeyAsString("sessionId")
