@@ -3,12 +3,12 @@ package layout
 import (
 	"fmt"
 
+	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
 	"github.com/robbiebyrd/indri/internal/transport"
-	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
 )
 
 type Handler struct {

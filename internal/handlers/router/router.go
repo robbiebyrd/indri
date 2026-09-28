@@ -1,8 +1,8 @@
 package router
 
 import (
-	"github.com/robbiebyrd/indri/internal/transport"
 	"github.com/robbiebyrd/indri/internal/handlers/utils"
+	"github.com/robbiebyrd/indri/internal/transport"
 	"log"
 )
 

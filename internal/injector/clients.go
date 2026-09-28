@@ -17,7 +17,14 @@ import (
 
 var globalClientsInjector *ClientsInjector
 
-func GetClients(ctx context.Context, mongodbClient *mongoClient.Client, clientTransport transport.Transport, lockManager lock.Manager, publisher events.Publisher) (*ClientsInjector, error) {
+// TODO: Rename GetClients to GetClientsOverride; GetClients should then be a wrapper that calls GetClientsOverride(ctx, nil, nil, nil, nil).
+func GetClients(
+	ctx context.Context,
+	mongodbClient *mongoClient.Client,
+	clientTransport transport.Transport,
+	lockManager lock.Manager,
+	publisher events.Publisher,
+) (*ClientsInjector, error) {
 	if globalClientsInjector != nil {
 		return globalClientsInjector, nil
 	}

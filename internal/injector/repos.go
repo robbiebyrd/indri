@@ -15,7 +15,11 @@ import (
 	userRepo "github.com/robbiebyrd/indri/internal/repo/user"
 )
 
-func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath string) (*ReposInjector, error) {
+func GetRepos(
+	ctx context.Context,
+	clients *ClientsInjector,
+	scriptFilePath string,
+) (*ReposInjector, error) {
 	if clients == nil {
 		return nil, errors.New("clients were not passed to the repo injector")
 	}
@@ -30,9 +34,16 @@ func GetRepos(ctx context.Context, clients *ClientsInjector, scriptFilePath stri
 		err   error
 	)
 
+	// TODO: Instead of calling the individual store constructors directly, consider using a factory pattern or a registry to dynamically select the appropriate store based on the environment variable.
 	switch env.DBBackend {
 	case "mongodb":
-		gr, err = gameRepo.NewMongoStore(ctx, clients.MongoDBClient, clients.LockManager, clients.Publisher)
+		// TODO: Instead of making three calls, the individual store constructors could be consolidated into a single factory function that returns all the necessary stores at once.
+		gr, err = gameRepo.NewMongoStore(
+			ctx,
+			clients.MongoDBClient,
+			clients.LockManager,
+			clients.Publisher,
+		)
 		if err != nil {
 			return nil, err
 		}

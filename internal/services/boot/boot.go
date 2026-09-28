@@ -17,6 +17,7 @@ func Boot(ctx context.Context, scriptFilePath *string) (*injector.Injector, erro
 	}
 
 	if scriptFilePath == nil || *scriptFilePath == "" {
+		// TODO: The absence of a valid script file path should panic and halt the server from starting.
 		s := dir + "/config.json"
 		scriptFilePath = &s
 	}

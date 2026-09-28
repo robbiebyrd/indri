@@ -11,13 +11,17 @@ import (
 	userService "github.com/robbiebyrd/indri/internal/services/user"
 )
 
-func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInjector) (*ServicesInjector, error) {
+func GetServices(
+	ctx context.Context,
+	clients *ClientsInjector,
+	repos *ReposInjector,
+) (*ServicesInjector, error) {
 	if clients == nil {
-		return nil, errors.New("clients were not passed to the repo injector")
+		return nil, errors.New("clients were not passed to the services injector")
 	}
 
 	if repos == nil {
-		return nil, errors.New("clients were not passed to the repo injector")
+		return nil, errors.New("repos were not passed to the services injector")
 	}
 
 	gs, err := gameService.NewService(repos.GameRepo, repos.ScriptRepo)
@@ -25,7 +29,13 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 		return nil, err
 	}
 
-	bs, err := broadcastService.NewService(ctx, clients.Transport, repos.UserRepo, repos.SessionRepo, clients.Deliveries)
+	bs, err := broadcastService.NewService(
+		ctx,
+		clients.Transport,
+		repos.UserRepo,
+		repos.SessionRepo,
+		clients.Deliveries,
+	)
 	if err != nil {
 		return nil, err
 	}

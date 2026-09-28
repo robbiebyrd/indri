@@ -21,7 +21,7 @@ type Op struct {
 
 // MissingFieldError names the required field that was absent in the wire message.
 type MissingFieldError struct {
-	Field string
+	Field  string
 	OpName string
 }
 
