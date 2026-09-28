@@ -125,6 +125,19 @@ func (h *Handler) createGameInfoList(games []*models.Game) []GameInfo {
 	return gameInfoList
 }
 
+// heldSlots counts the team's slots that a player holds. Every slot is
+// pre-declared when the game is created, so len(team.PlayerIDs) is the team's
+// capacity, not its size.
+func heldSlots(game *models.Game, team models.Team) int {
+	held := 0
+	for _, slotID := range team.PlayerIDs {
+		if game.Players[slotID].UserID != "" {
+			held++
+		}
+	}
+	return held
+}
+
 func (h *Handler) createGameInfo(game *models.Game) GameInfo {
 	var teamsList []TeamInfo
 
@@ -135,7 +148,7 @@ func (h *Handler) createGameInfo(game *models.Game) GameInfo {
 	}
 
 	for _, team := range game.Teams {
-		isFull := len(team.PlayerIDs) >= h.i.Script.Config.MaxPlayersPerTeam
+		isFull := heldSlots(game, team) >= h.i.Script.Config.MaxPlayersPerTeam
 		if isFull {
 			availableTeamsCount--
 		}
