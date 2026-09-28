@@ -15,7 +15,6 @@ import (
 	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
-	sessionUtils "github.com/robbiebyrd/indri/internal/utils/session"
 )
 
 // Game operations written once for every store. A store supplies Mutate (a
@@ -170,11 +169,23 @@ func assignSlot(m mutator, id string, teamId string, userId string, displayName 
 	return assignedSlot, err
 }
 
+// requireGameAndSlot rejects an empty game or slot id, naming the one that is
+// missing.
+func requireGameAndSlot(id string, slotId string) error {
+	if id == "" {
+		return fmt.Errorf("game id is required")
+	}
+	if slotId == "" {
+		return fmt.Errorf("slot id is required")
+	}
+	return nil
+}
+
 // removePlayer empties userId's slot without removing the key, preserving the
 // pre-declared schema; the slot is then free for reassignment. It fails if
 // userId no longer holds the slot.
 func removePlayer(m mutator, id string, slotId string, userId string) error {
-	if err := sessionUtils.ValidateGameAndUser(id, slotId); err != nil {
+	if err := requireGameAndSlot(id, slotId); err != nil {
 		return err
 	}
 
@@ -195,7 +206,7 @@ func removePlayer(m mutator, id string, slotId string, userId string) error {
 // than creating a missing slot, and does nothing if userId no longer holds the
 // slot: a stale connection must not change its new holder.
 func setConnected(m mutator, id string, slotId string, userId string, connected bool) error {
-	if err := sessionUtils.ValidateGameAndUser(id, slotId); err != nil {
+	if err := requireGameAndSlot(id, slotId); err != nil {
 		return err
 	}
 

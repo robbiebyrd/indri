@@ -111,6 +111,29 @@ func TestSlotOperations(t *testing.T) {
 	}
 }
 
+// A missing argument must be reported by its own name, so the error points at
+// what the caller actually left out.
+func TestSlotOperations_NameTheMissingArgument(t *testing.T) {
+	store := newMemoryStoreWith(t, events.NewInProcess())
+
+	operations := map[string]func(id, slotId string) error{
+		"RemovePlayer":     func(id, slotId string) error { return store.RemovePlayer(id, slotId, "u1") },
+		"ConnectPlayer":    func(id, slotId string) error { return store.ConnectPlayer(id, slotId, "u1") },
+		"DisconnectPlayer": func(id, slotId string) error { return store.DisconnectPlayer(id, slotId, "u1") },
+	}
+
+	for name, operation := range operations {
+		t.Run(name, func(t *testing.T) {
+			if err := operation("", "p1"); err == nil || err.Error() != "game id is required" {
+				t.Errorf("empty game id: err = %v, want %q", err, "game id is required")
+			}
+			if err := operation("g1", ""); err == nil || err.Error() != "slot id is required" {
+				t.Errorf("empty slot id: err = %v, want %q", err, "slot id is required")
+			}
+		})
+	}
+}
+
 // Every game gets its own copy of the script's data: games created from one
 // script must never share state (the memory store keeps live references, so
 // aliasing made later games start with earlier games' boards).
