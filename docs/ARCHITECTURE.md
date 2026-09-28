@@ -283,7 +283,7 @@ platform including web). The edit-mode toggle lives in `client/app/board/index.t
 | Variable | Default | Note |
 |---|---|---|
 | `INDRI_LISTEN_ADDRESS` / `INDRI_LISTEN_PORT` | `localhost` / `5002` | |
-| `INDRI_ALLOWED_ORIGINS` | `""` | Comma-separated. Empty accepts every origin: connections carry no cookies or other ambient credentials, so a foreign page can't act as a player. A list accepts only its origins, plus clients that send no `Origin`; React Native's iOS WebSocket sends the server's own origin, so list it. |
+| `INDRI_ALLOWED_ORIGINS` | `""` | Comma-separated. Empty accepts every origin: connections carry no cookies or other ambient credentials, so a foreign page can't act as a player, though it can still reach a localhost or private-network server through a visitor's browser. A list accepts only its origins, plus clients that send no `Origin`; React Native's iOS WebSocket sends the server's own origin, so list it. |
 | `INDRI_DB_BACKEND` | `mongodb` | `mongodb`, `memory`, `sqlite` or `postgres`. |
 | `INDRI_SQLITE_PATH` / `INDRI_POSTGRES_URI` | `./indri.db` / `""` | Used by the `sqlite` / `postgres` backends. Pass the Postgres URI by env var, not the `-postgres-uri` flag, since flags are visible in `ps`. |
 | `INDRI_MONGO_URI` / `INDRI_MONGO_DATABASE` | `localhost` / `indri` | A replica set is not required. |

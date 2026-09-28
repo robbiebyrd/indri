@@ -12,9 +12,10 @@ const ConnectionIDHeader = "X-Indri-Connection-Id"
 // OriginChecker decides which browser origins may connect. Without an
 // allowlist, every origin may: connections carry no ambient credentials (no
 // cookies; a client authenticates with login or a token it holds), so a
-// foreign page can't act as a player by opening one. With an allowlist, only
-// its origins may, plus requests with no Origin (CLI and most native
-// clients). The server's own origin gets no pass then, since a DNS-rebinding
+// foreign page can't act as a player by opening one, though it can still reach
+// a localhost or private-network server through a visitor's browser. With an
+// allowlist, only its origins may, plus requests with no Origin (CLI and most
+// native clients). The server's own origin gets no pass then, since a DNS-rebinding
 // page presents exactly that; a React Native iOS client, which sends it,
 // must be listed.
 func OriginChecker(allowedOrigins string) func(*http.Request) bool {

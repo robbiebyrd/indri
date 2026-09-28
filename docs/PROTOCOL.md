@@ -10,7 +10,9 @@ router uses it to pick handlers and removes it from the payload before the handl
 Every transport is origin-checked (`internal/transport/origin.go`). With `INDRI_ALLOWED_ORIGINS`
 empty (the default), every origin is accepted. That is safe because connections carry no cookies or
 other ambient credentials: a client authenticates with `login` or a token it holds, so a foreign page
-that opens a connection can't act as a player. With a list set, only its origins are accepted, plus
+that opens a connection can't act as a player. It can still reach a server on localhost or a private
+network through a visitor's browser, and register users or create games there; set a list if that
+matters. With a list set, only its origins are accepted, plus
 requests with no `Origin` header (CLI tools, server-to-server, most native clients). React Native's
 iOS WebSocket sends the server's own origin, so list that origin when you set a list.
 The HTTP-based endpoints also answer CORS preflights for allowed origins.
