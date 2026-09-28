@@ -2,7 +2,6 @@ package transport
 
 import (
 	"net/http"
-	"net/url"
 	"strings"
 )
 
@@ -10,10 +9,14 @@ import (
 // connection on transports whose two directions travel separately (SSE).
 const ConnectionIDHeader = "X-Indri-Connection-Id"
 
-// OriginChecker guards against cross-site hijacking. Allowed: requests with no
-// Origin (CLI and most native clients), same-origin requests (React Native's
-// iOS WebSocket always sends the target's own origin, and no other site can
-// make a browser send it), and Origins in the comma-separated allowlist.
+// OriginChecker decides which browser origins may connect. Without an
+// allowlist, every origin may: connections carry no ambient credentials (no
+// cookies; a client authenticates with login or a token it holds), so a
+// foreign page can't act as a player by opening one. With an allowlist, only
+// its origins may, plus requests with no Origin (CLI and most native
+// clients). The server's own origin gets no pass then, since a DNS-rebinding
+// page presents exactly that; a React Native iOS client, which sends it,
+// must be listed.
 func OriginChecker(allowedOrigins string) func(*http.Request) bool {
 	allowed := make(map[string]struct{})
 
@@ -25,17 +28,13 @@ func OriginChecker(allowedOrigins string) func(*http.Request) bool {
 
 	return func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
-		if origin == "" {
+		if origin == "" || len(allowed) == 0 {
 			return true
 		}
 
-		if _, ok := allowed[origin]; ok {
-			return true
-		}
+		_, ok := allowed[origin]
 
-		u, err := url.Parse(origin)
-
-		return err == nil && strings.EqualFold(u.Host, r.Host)
+		return ok
 	}
 }
 

@@ -8,7 +8,21 @@ import (
 	"github.com/robbiebyrd/indri/internal/transport"
 )
 
-func TestOriginChecker(t *testing.T) {
+func TestOriginChecker_WithoutAListAcceptsEveryOrigin(t *testing.T) {
+	check := transport.OriginChecker("")
+
+	for _, origin := range []string{"", "https://evil.example", "http://game.example:5002", "http://%zz"} {
+		r := httptest.NewRequest(http.MethodGet, "http://game.example:5002/", nil)
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		if !check(r) {
+			t.Errorf("OriginChecker(\"\") refused %q", origin)
+		}
+	}
+}
+
+func TestOriginChecker_WithAListAcceptsOnlyItAndNativeClients(t *testing.T) {
 	check := transport.OriginChecker(" https://a.example , https://b.example,")
 
 	cases := []struct {
@@ -17,13 +31,13 @@ func TestOriginChecker(t *testing.T) {
 		want   bool
 	}{
 		{"no origin is a native client", "", true},
-		{"allowlisted origin", "https://a.example", true},
-		{"second allowlisted origin, whitespace trimmed", "https://b.example", true},
+		{"listed origin", "https://a.example", true},
+		{"second listed origin, whitespace trimmed", "https://b.example", true},
 		{"unlisted origin", "https://evil.example", false},
-		// React Native's iOS WebSocket always sends the target's own origin.
-		{"same origin as the server", "http://game.example:5002", true},
-		{"same origin, host case differs", "http://GAME.example:5002", true},
-		{"same host, different port", "http://game.example:8081", false},
+		// With a list, the server's own origin gets no pass: a DNS-rebinding
+		// page presents exactly that. A React Native iOS client, which sends
+		// it, must be listed.
+		{"the server's own origin, unlisted", "http://game.example:5002", false},
 		{"malformed origin", "http://%zz", false},
 	}
 
