@@ -1,0 +1,92 @@
+=== BASELINE for POC-00003/main-integration ===
+commit: cff6b5f7fa68f5c6933ad85094279c3092b91cbb
+date:   2026-10-01T14:03:48Z
+go:     go version go1.26.0 darwin/arm64
+
+=== go build ./... ===
+exit=0
+
+=== go vet ./... ===
+exit=0
+
+=== go test -race ./... ===
+?   	github.com/robbiebyrd/indri/cmd/indri-script	[no test files]
+?   	github.com/robbiebyrd/indri/cmd/server	[no test files]
+ok  	github.com/robbiebyrd/indri/example/tictactoe	2.450s
+?   	github.com/robbiebyrd/indri/internal/clients/mongodb	[no test files]
+?   	github.com/robbiebyrd/indri/internal/clients/redis	[no test files]
+?   	github.com/robbiebyrd/indri/internal/entrypoints	[no test files]
+?   	github.com/robbiebyrd/indri/internal/entrypoints/http	[no test files]
+?   	github.com/robbiebyrd/indri/internal/handlers/actions	[no test files]
+?   	github.com/robbiebyrd/indri/internal/handlers/actions/create	[no test files]
+?   	github.com/robbiebyrd/indri/internal/handlers/actions/inquire	[no test files]
+?   	github.com/robbiebyrd/indri/internal/handlers/actions/join	[no test files]
+ok  	github.com/robbiebyrd/indri/internal/handlers/actions/kick	2.474s
+ok  	github.com/robbiebyrd/indri/internal/handlers/actions/layout	2.556s
+?   	github.com/robbiebyrd/indri/internal/handlers/actions/leave	[no test files]
+?   	github.com/robbiebyrd/indri/internal/handlers/actions/login	[no test files]
+?   	github.com/robbiebyrd/indri/internal/handlers/actions/logout	[no test files]
+?   	github.com/robbiebyrd/indri/internal/handlers/actions/reconnect	[no test files]
+?   	github.com/robbiebyrd/indri/internal/handlers/actions/refresh	[no test files]
+?   	github.com/robbiebyrd/indri/internal/handlers/actions/register	[no test files]
+ok  	github.com/robbiebyrd/indri/internal/handlers/actions/script	5.003s
+?   	github.com/robbiebyrd/indri/internal/handlers/messages	[no test files]
+ok  	github.com/robbiebyrd/indri/internal/handlers/router	2.754s
+?   	github.com/robbiebyrd/indri/internal/handlers/utils	[no test files]
+?   	github.com/robbiebyrd/indri/internal/injector	[no test files]
+ok  	github.com/robbiebyrd/indri/internal/models	3.291s
+ok  	github.com/robbiebyrd/indri/internal/repo/env	5.069s
+ok  	github.com/robbiebyrd/indri/internal/repo/game	30.084s
+ok  	github.com/robbiebyrd/indri/internal/repo/schedule	49.426s
+ok  	github.com/robbiebyrd/indri/internal/repo/script	4.052s
+ok  	github.com/robbiebyrd/indri/internal/repo/session	6.809s
+?   	github.com/robbiebyrd/indri/internal/repo/user	[no test files]
+?   	github.com/robbiebyrd/indri/internal/repo/utils	[no test files]
+?   	github.com/robbiebyrd/indri/internal/services/authentication	[no test files]
+ok  	github.com/robbiebyrd/indri/internal/services/boot	5.277s
+?   	github.com/robbiebyrd/indri/internal/services/broadcast	[no test files]
+?   	github.com/robbiebyrd/indri/internal/services/connection	[no test files]
+ok  	github.com/robbiebyrd/indri/internal/services/events	4.961s
+ok  	github.com/robbiebyrd/indri/internal/services/game	5.437s
+ok  	github.com/robbiebyrd/indri/internal/services/lock	3.872s
+ok  	github.com/robbiebyrd/indri/internal/services/lua	4.572s
+ok  	github.com/robbiebyrd/indri/internal/services/lua/lib	3.878s
+ok  	github.com/robbiebyrd/indri/internal/services/mutation	3.819s
+ok  	github.com/robbiebyrd/indri/internal/services/scheduler	3.534s
+ok  	github.com/robbiebyrd/indri/internal/services/scripttest	3.421s
+?   	github.com/robbiebyrd/indri/internal/services/session	[no test files]
+ok  	github.com/robbiebyrd/indri/internal/services/stage	2.141s
+?   	github.com/robbiebyrd/indri/internal/services/user	[no test files]
+?   	github.com/robbiebyrd/indri/internal/services/utils	[no test files]
+ok  	github.com/robbiebyrd/indri/internal/transport	2.259s
+ok  	github.com/robbiebyrd/indri/internal/transport/graphql	2.619s
+?   	github.com/robbiebyrd/indri/internal/transport/graphql/generated	[no test files]
+?   	github.com/robbiebyrd/indri/internal/transport/graphql/model	[no test files]
+?   	github.com/robbiebyrd/indri/internal/transport/graphql/resolvers	[no test files]
+ok  	github.com/robbiebyrd/indri/internal/transport/rest	2.113s
+ok  	github.com/robbiebyrd/indri/internal/transport/sse	3.653s
+ok  	github.com/robbiebyrd/indri/internal/transport/webrtc	3.002s
+ok  	github.com/robbiebyrd/indri/internal/transport/ws	1.952s
+?   	github.com/robbiebyrd/indri/internal/types/errors	[no test files]
+?   	github.com/robbiebyrd/indri/internal/utils/session	[no test files]
+exit=0
+
+=== client (clean install, as CI does) ===
+pnpm install --frozen-lockfile: exit=0
+typecheck_exit=0
+test_exit=0
+ℹ tests 413
+ℹ pass 413
+ℹ fail 0
+ℹ skipped 0
+ℹ todo 0
+
+=== SUMMARY ===
+go build        : PASS
+go vet          : PASS
+go test -race   : PASS (27 packages ok, 0 FAIL, no data races, 32 pkgs have no tests)
+client install  : PASS (frozen lockfile, clean node_modules)
+client typecheck: PASS
+client tests    : PASS (413/413)
+
+No pre-existing failures. Every later integration step is judged against this.
