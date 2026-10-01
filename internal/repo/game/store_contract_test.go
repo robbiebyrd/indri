@@ -7,13 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
+	postgresClient "github.com/robbiebyrd/indri/internal/clients/postgres"
+	sqliteClient "github.com/robbiebyrd/indri/internal/clients/sqlite"
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
@@ -56,6 +60,81 @@ func forEachBackend(t *testing.T, test func(t *testing.T, b backend)) {
 		publisher := &recordingPublisher{}
 		test(t, backend{store: newTestStore(t, publisher), events: publisher})
 	})
+
+	t.Run("sqlite", func(t *testing.T) {
+		publisher := &recordingPublisher{}
+		test(t, backend{store: newTestSQLiteStore(t, publisher), events: publisher})
+	})
+
+	t.Run("postgres", func(t *testing.T) {
+		publisher := &recordingPublisher{}
+		test(t, backend{store: newTestPostgresStore(t, publisher), events: publisher})
+	})
+}
+
+// newTestSQLiteStore builds a store over a private, file-backed database in the
+// test's own temp directory.
+//
+// A file rather than ":memory:" because these tests run in parallel goroutines
+// against one *sql.DB, and the pool is pinned to a single connection — a
+// file-backed database gives the same isolation without serialising every test
+// in the package behind one in-memory handle.
+func newTestSQLiteStore(t *testing.T, publisher events.Publisher) *SQLiteStore {
+	t.Helper()
+
+	db, err := sqliteClient.Open(filepath.Join(t.TempDir(), "game.db"))
+	if err != nil {
+		t.Fatalf("opening the test SQLite database: %v", err)
+	}
+
+	t.Cleanup(func() { _ = db.Close() })
+
+	return NewSQLiteStore(context.Background(), db, lock.NewInProcess(), publisher)
+}
+
+// newTestPostgresStore connects to the database named by
+// INDRI_TEST_POSTGRES_URI, giving each test its own schema so parallel runs and
+// leftover rows from an earlier run cannot collide. It skips when the variable
+// is unset, which is the only skip this backend is allowed.
+func newTestPostgresStore(t *testing.T, publisher events.Publisher) *PostgresStore {
+	t.Helper()
+
+	uri := os.Getenv("INDRI_TEST_POSTGRES_URI")
+	if uri == "" {
+		t.Skip("INDRI_TEST_POSTGRES_URI not set; skipping the PostgreSQL backend")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	db, err := postgresClient.Open(ctx, uri)
+	if err != nil {
+		t.Skipf("skipping: PostgreSQL not reachable: %v", err)
+	}
+
+	t.Cleanup(func() { _ = db.Close() })
+
+	// A schema per test keeps the games table private to it. Dropping it on
+	// cleanup means a failed run leaves nothing behind for the next one.
+	schema := "indri_test_" + strings.ReplaceAll(ids.New(), "-", "")
+	if _, err := db.ExecContext(context.Background(), `CREATE SCHEMA `+schema); err != nil {
+		t.Fatalf("creating the test schema: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DROP SCHEMA `+schema+` CASCADE`)
+	})
+
+	if _, err := db.ExecContext(context.Background(), `SET search_path TO `+schema); err != nil {
+		t.Fatalf("selecting the test schema: %v", err)
+	}
+
+	store, err := NewPostgresStore(context.Background(), db, lock.NewInProcess(), publisher)
+	if err != nil {
+		t.Fatalf("creating the PostgreSQL game store: %v", err)
+	}
+
+	return store
 }
 
 // newTestStore connects to a local MongoDB (a single-node replica set is not

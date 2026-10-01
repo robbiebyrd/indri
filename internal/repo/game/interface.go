@@ -7,11 +7,13 @@ import (
 )
 
 // Storer is the contract a game store must satisfy. The assertions below keep
-// it in step with both backends: change one without the other and the build
+// it in step with every backend: change one without the others and the build
 // fails.
 var (
 	_ Storer = (*Store)(nil)
 	_ Storer = (*MemoryStore)(nil)
+	_ Storer = (*SQLiteStore)(nil)
+	_ Storer = (*PostgresStore)(nil)
 )
 
 type Storer interface {
