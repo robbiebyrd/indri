@@ -100,7 +100,7 @@ func (t *Transport) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn := transport.NewBufferedConn[[]byte](session.ID.Hex(), streamBuffer)
+	conn := transport.NewBufferedConn[[]byte](session.ID, streamBuffer)
 
 	t.AddSink(conn)
 	defer func() {

@@ -6,10 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
 )
 
@@ -72,7 +71,7 @@ func (f *fakeMutator) Mutate(ctx context.Context, id string, apply func(g *model
 // enough of everything else that a test can prove the handler did not touch it.
 func hostedGame() *models.Game {
 	g := gameWithLayout(validLayout())
-	g.ID = bson.NewObjectID()
+	g.ID = ids.New()
 	g.Code = gameCode
 	g.Players = map[string]models.Player{
 		hostID:   {Name: "Host", Host: true},
@@ -86,7 +85,7 @@ func hostedGame() *models.Game {
 }
 
 func sessionFor(userID *string, gameID *string) *models.Session {
-	return &models.Session{ID: bson.NewObjectID(), UserID: userID, GameID: gameID}
+	return &models.Session{ID: ids.New(), UserID: userID, GameID: gameID}
 }
 
 // addWidgetPayload is a valid op that does not collide with the fixture's
@@ -147,7 +146,7 @@ func TestEditLayout_RejectsACallerWithNoIdentity(t *testing.T) {
 func TestEditLayout_RejectsANonHost(t *testing.T) {
 	g := hostedGame()
 	mutator := &fakeMutator{game: g}
-	session := sessionFor(ptr(playerID), ptr(g.ID.Hex()))
+	session := sessionFor(ptr(playerID), ptr(g.ID))
 
 	_, err := editLayout(
 		actions.Request{Session: session, Payload: addWidgetPayload()},
@@ -174,7 +173,7 @@ func TestEditLayout_IgnoresAUserIdInThePayload(t *testing.T) {
 	payload := addWidgetPayload()
 	payload["userId"] = hostID
 
-	session := sessionFor(ptr(playerID), ptr(g.ID.Hex()))
+	session := sessionFor(ptr(playerID), ptr(g.ID))
 
 	_, err := editLayout(
 		actions.Request{Session: session, Payload: payload},
@@ -201,7 +200,7 @@ func TestEditLayout_IgnoresAUserIdInThePayload(t *testing.T) {
 
 func TestEditLayout_RejectsAMessageWithNoGameCode(t *testing.T) {
 	g := hostedGame()
-	session := sessionFor(ptr(hostID), ptr(g.ID.Hex()))
+	session := sessionFor(ptr(hostID), ptr(g.ID))
 
 	payload := addWidgetPayload()
 	delete(payload, "code")
@@ -219,7 +218,7 @@ func TestEditLayout_RejectsAMessageWithNoGameCode(t *testing.T) {
 
 func TestEditLayout_RejectsAnUndecodableOp(t *testing.T) {
 	g := hostedGame()
-	session := sessionFor(ptr(hostID), ptr(g.ID.Hex()))
+	session := sessionFor(ptr(hostID), ptr(g.ID))
 
 	payload := addWidgetPayload()
 	payload["op"] = "dropTable"
@@ -250,7 +249,7 @@ func TestEditLayout_HostEditWritesOnlyTheLayout(t *testing.T) {
 
 	mutator := &fakeMutator{game: g}
 	games := &fakeGames{game: g}
-	session := sessionFor(ptr(hostID), ptr(g.ID.Hex()))
+	session := sessionFor(ptr(hostID), ptr(g.ID))
 
 	result, err := editLayout(
 		actions.Request{Session: session, Payload: addWidgetPayload()},
@@ -271,8 +270,8 @@ func TestEditLayout_HostEditWritesOnlyTheLayout(t *testing.T) {
 		t.Errorf("looked up game %q, want the code from the payload %q", games.code, gameCode)
 	}
 
-	if mutator.id != g.ID.Hex() {
-		t.Errorf("Mutate id = %q, want the resolved game %q", mutator.id, g.ID.Hex())
+	if mutator.id != g.ID {
+		t.Errorf("Mutate id = %q, want the resolved game %q", mutator.id, g.ID)
 	}
 
 	// The published delta is the response; a direct reply would double-report
@@ -298,7 +297,7 @@ func TestEditLayout_HostEditWritesOnlyTheLayout(t *testing.T) {
 func TestEditLayout_ANoOpRemoveAbortsWithoutWriting(t *testing.T) {
 	g := hostedGame()
 	mutator := &fakeMutator{game: g}
-	session := sessionFor(ptr(hostID), ptr(g.ID.Hex()))
+	session := sessionFor(ptr(hostID), ptr(g.ID))
 
 	payload := map[string]interface{}{
 		"code": gameCode, "op": OpRemoveWidget, "sceneId": "board", "widgetId": "absent",
@@ -324,7 +323,7 @@ func TestEditLayout_ANoOpRemoveAbortsWithoutWriting(t *testing.T) {
 func TestEditLayout_RejectsAnOpThatWouldInvalidateTheLayout(t *testing.T) {
 	g := hostedGame()
 	mutator := &fakeMutator{game: g}
-	session := sessionFor(ptr(hostID), ptr(g.ID.Hex()))
+	session := sessionFor(ptr(hostID), ptr(g.ID))
 
 	before := mustJSON(t, g.PublicData)
 
@@ -357,7 +356,7 @@ func TestEditLayout_SetGridOnAGameWithNoLayoutProducesAValidDocument(t *testing.
 	g.PublicData = nil
 
 	mutator := &fakeMutator{game: g}
-	session := sessionFor(ptr(hostID), ptr(g.ID.Hex()))
+	session := sessionFor(ptr(hostID), ptr(g.ID))
 
 	payload := map[string]interface{}{
 		"code": gameCode, "op": OpSetGrid,
@@ -416,7 +415,7 @@ func TestEditLayout_GivesMutateTheRequestContext(t *testing.T) {
 	if _, err := editLayout(
 		actions.Request{
 			Context: ctx,
-			Session: sessionFor(ptr(hostID), ptr(g.ID.Hex())),
+			Session: sessionFor(ptr(hostID), ptr(g.ID)),
 			Payload: addWidgetPayload(),
 		},
 		&fakeGames{game: g},
@@ -439,7 +438,7 @@ func TestEditLayout_SurvivesARequestWithNoContext(t *testing.T) {
 
 	if _, err := editLayout(
 		actions.Request{
-			Session: sessionFor(ptr(hostID), ptr(g.ID.Hex())),
+			Session: sessionFor(ptr(hostID), ptr(g.ID)),
 			Payload: addWidgetPayload(),
 		},
 		&fakeGames{game: g},

@@ -145,7 +145,7 @@ func (ss *Service) AddScene(gameId string, sceneId string, scene *models.Scene) 
 		return fmt.Errorf("scene with id %s already exists", sceneId)
 	}
 
-	err = ss.gameRepo.UpdateField(g.ID.Hex(), scenePath(sceneId), scene)
+	err = ss.gameRepo.UpdateField(g.ID, scenePath(sceneId), scene)
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func (ss *Service) DeleteScene(gameId string, sceneId string) error {
 		return err
 	}
 
-	err = ss.gameRepo.DeleteField(g.ID.Hex(), scenePath(sceneId))
+	err = ss.gameRepo.DeleteField(g.ID, scenePath(sceneId))
 	if err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func (ss *Service) UpdateScene(
 		fullPath += "." + *path
 	}
 
-	err = ss.gameRepo.UpdateField(g.ID.Hex(), fullPath, data)
+	err = ss.gameRepo.UpdateField(g.ID, fullPath, data)
 	if err != nil {
 		return err
 	}
@@ -347,7 +347,7 @@ func (ss *Service) SetCurrentScene(gameId string, sceneId string) error {
 		return fmt.Errorf("scene %s is not a valid scene", sceneId)
 	}
 
-	err = ss.gameRepo.UpdateField(g.ID.Hex(), "stage.currentScene", sceneId)
+	err = ss.gameRepo.UpdateField(g.ID, "stage.currentScene", sceneId)
 	if err != nil {
 		return err
 	}

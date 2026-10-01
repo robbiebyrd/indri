@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 )
@@ -84,10 +85,15 @@ func (m *memoryDocs) insert(_ context.Context, create models.CreateGame) (string
 		}
 	}
 
-	g.ID = bson.NewObjectID()
-	m.games[g.ID.Hex()] = g
+	// The id comes from the document the caller built, so a game has the same
+	// identifier whichever backend stored it. Only fall back to minting one
+	// here if the caller left it empty.
+	if g.ID == "" {
+		g.ID = ids.New()
+	}
+	m.games[g.ID] = g
 
-	return g.ID.Hex(), nil
+	return g.ID, nil
 }
 
 func (m *memoryDocs) load(_ context.Context, id string) (*models.Game, error) {
@@ -124,20 +130,20 @@ func (m *memoryDocs) findOpen(_ context.Context, limit int) ([]*models.Game, err
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	ids := make([]string, 0, len(m.games))
+	openIDs := make([]string, 0, len(m.games))
 
 	for id, stored := range m.games {
 		if !stored.Private {
-			ids = append(ids, id)
+			openIDs = append(openIDs, id)
 		}
 	}
 
 	// Map iteration order is random; sort so a caller sees a stable page.
-	sort.Strings(ids)
+	sort.Strings(openIDs)
 
-	open := make([]*models.Game, 0, len(ids))
+	open := make([]*models.Game, 0, len(openIDs))
 
-	for _, id := range ids {
+	for _, id := range openIDs {
 		if limit > 0 && len(open) == limit {
 			break
 		}

@@ -2,12 +2,13 @@ package models
 
 import (
 	"time"
-
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type Game struct {
-	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
+	// ID is a backend-neutral string, minted by internal/repo/ids, because a
+	// game lives in MongoDB, SQLite or PostgreSQL depending on configuration
+	// and only MongoDB has ObjectIDs. The SQL schemas declare `id TEXT`.
+	ID string `bson:"_id,omitempty" json:"id"`
 
 	// Version is bumped on every mutation and used for optimistic-concurrency
 	// checks so concurrent writers cannot silently lose each other's changes.
@@ -27,6 +28,9 @@ type Game struct {
 }
 
 type CreateGame struct {
+	// ID is minted by the caller (internal/repo/ids) rather than by the
+	// database, so every backend stores the same identifier for the same game.
+	ID          string                 `bson:"_id,omitempty"        json:"id"`
 	Version     int64                  `bson:"version"              json:"-"`
 	CreatedAt   time.Time              `bson:"createdAt"            json:"createdAt"`
 	UpdatedAt   time.Time              `bson:"updatedAt"            json:"updatedAt"`

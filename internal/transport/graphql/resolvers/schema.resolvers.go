@@ -127,7 +127,7 @@ func (r *subscriptionResolver) GameUpdates(ctx context.Context, gameID string) (
 
 	// The push conn is keyed by the session ObjectID, so the existing broadcast
 	// fan-out reaches it exactly like a WebSocket client in the same game.
-	conn := newSubConn(session.ID.Hex())
+	conn := newSubConn(session.ID)
 	r.Sinks.AddSink(conn)
 
 	go func() {

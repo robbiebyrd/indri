@@ -7,11 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/models"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 )
 
@@ -62,7 +61,7 @@ func newGame(t *testing.T) (gameStore, context.CancelFunc, string) {
 		t.Fatalf("creating game %q: %v", gameCode, err)
 	}
 
-	id := g.ID.Hex()
+	id := g.ID
 
 	// The first player to join is the host: that is the store's rule, not the
 	// test's, so the host the handler checks for is a real one. The order
@@ -84,8 +83,8 @@ func newGame(t *testing.T) (gameStore, context.CancelFunc, string) {
 // given game.
 func sessionsIn(gameId string) directory {
 	return directory{
-		hostID:   {ID: bson.NewObjectID(), UserID: ref(hostID), GameID: ref(gameId)},
-		targetID: {ID: bson.NewObjectID(), UserID: ref(targetID), GameID: ref(gameId)},
+		hostID:   {ID: ids.New(), UserID: ref(hostID), GameID: ref(gameId)},
+		targetID: {ID: ids.New(), UserID: ref(targetID), GameID: ref(gameId)},
 	}
 }
 
@@ -113,7 +112,7 @@ func TestHandle_DisconnectsTheTargetItRemoved(t *testing.T) {
 		t.Fatalf("handle(host kicks target) = %v, want no error", err)
 	}
 
-	want := []string{sessions[targetID].ID.Hex()}
+	want := []string{sessions[targetID].ID}
 	if len(result.DisconnectIDs) != 1 || result.DisconnectIDs[0] != want[0] {
 		t.Errorf("DisconnectIDs = %v, want %v", result.DisconnectIDs, want)
 	}
@@ -188,7 +187,7 @@ func TestHandle_RejectsACallerWhoIsNotTheHost(t *testing.T) {
 func TestHandle_RejectsATargetInAnotherGame(t *testing.T) {
 	store, _, gameId := newGame(t)
 	sessions := sessionsIn(gameId)
-	sessions[targetID].GameID = ref(bson.NewObjectID().Hex())
+	sessions[targetID].GameID = ref(ids.New())
 
 	result, err := handle(kickRequest(sessions[hostID]), store, sessions)
 	if err == nil {

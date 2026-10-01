@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
@@ -104,7 +105,7 @@ func (s *core) GetIDHex(gameCode string) (*string, error) {
 		return nil, err
 	}
 
-	gameId := retrievedGame.ID.Hex()
+	gameId := retrievedGame.ID
 
 	return &gameId, nil
 }
@@ -268,6 +269,10 @@ func newGameDoc(code string, script *models.Script, privateGame bool) models.Cre
 	now := time.Now()
 
 	doc := models.CreateGame{
+		// Minted here rather than by the database so that every backend —
+		// MongoDB, in-memory, and the SQL stores — records the same id for the
+		// same game. Only MongoDB can generate one of its own.
+		ID:        ids.New(),
 		Code:      code,
 		CreatedAt: now,
 		UpdatedAt: now,

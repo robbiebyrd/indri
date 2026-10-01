@@ -151,7 +151,7 @@ func newGame(t *testing.T, store Storer, script *models.Script) *models.Game {
 // host election inside the mutation stays single-valued while it happens.
 func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID.Hex()
+		gameId := newGame(t, b.store, &models.Script{}).ID
 
 		const players = 25
 
@@ -208,7 +208,7 @@ func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
 // part of the contract, not a side effect.
 func TestMutate_PublishesTheCommittedDelta(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID.Hex()
+		gameId := newGame(t, b.store, &models.Script{}).ID
 
 		if err := b.store.AddPlayer(gameId, "alice", "Alice"); err != nil {
 			t.Fatalf("adding the first player: %v", err)
@@ -256,7 +256,7 @@ func TestMutate_PublishesTheCommittedDelta(t *testing.T) {
 // would replay empty deltas and the fence would drift.
 func TestMutate_AbortWritesNothingAndPublishesNothing(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID.Hex()
+		gameId := newGame(t, b.store, &models.Script{}).ID
 
 		before, err := b.store.Get(gameId)
 		if err != nil {
@@ -297,7 +297,7 @@ func TestMutate_AbortWritesNothingAndPublishesNothing(t *testing.T) {
 // surface as an error to the caller and leave no trace in the game.
 func TestMutate_ApplyErrorIsReturnedAndNothingIsWritten(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID.Hex()
+		gameId := newGame(t, b.store, &models.Script{}).ID
 
 		before, err := b.store.Get(gameId)
 		if err != nil {
@@ -338,7 +338,7 @@ func TestMutate_ApplyErrorIsReturnedAndNothingIsWritten(t *testing.T) {
 // the public half and nothing else.
 func TestMutate_PrivateDataNeverReachesTheDelta(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID.Hex()
+		gameId := newGame(t, b.store, &models.Script{}).ID
 
 		b.events.drain()
 
@@ -376,7 +376,7 @@ func TestMutate_PrivateDataNeverReachesTheDelta(t *testing.T) {
 // inside one fenced mutation.
 func TestSetPlayerAsHost_LeavesExactlyOneHost(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID.Hex()
+		gameId := newGame(t, b.store, &models.Script{}).ID
 
 		for _, name := range []string{"alice", "bob", "carol"} {
 			if err := b.store.AddPlayer(gameId, name, name); err != nil {
@@ -416,7 +416,7 @@ func TestSetPlayerAsHost_LeavesExactlyOneHost(t *testing.T) {
 // racing a kick cannot resurrect a partial player document.
 func TestConnectPlayer_RefusesAPlayerWhoHasLeft(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID.Hex()
+		gameId := newGame(t, b.store, &models.Script{}).ID
 
 		if err := b.store.AddPlayer(gameId, "alice", "Alice"); err != nil {
 			t.Fatalf("adding player: %v", err)
@@ -460,7 +460,7 @@ func TestConnectPlayer_RefusesAPlayerWhoHasLeft(t *testing.T) {
 func TestUpdateField_PublishesTheFieldItWrote(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
 		script := &models.Script{PublicData: map[string]interface{}{"round": 1}}
-		gameId := newGame(t, b.store, script).ID.Hex()
+		gameId := newGame(t, b.store, script).ID
 
 		before, err := b.store.Get(gameId)
 		if err != nil {
@@ -508,7 +508,7 @@ func TestUpdateField_PublishesAStructWithoutItsPrivateData(t *testing.T) {
 	)
 
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID.Hex()
+		gameId := newGame(t, b.store, &models.Script{}).ID
 
 		b.events.drain()
 

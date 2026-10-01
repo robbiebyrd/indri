@@ -32,7 +32,7 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		return actions.Result{}, err
 	}
 
-	if err = h.i.GameService.RemovePlayer(g.ID.Hex(), *session.UserID); err != nil {
+	if err = h.i.GameService.RemovePlayer(g.ID, *session.UserID); err != nil {
 		log.Printf("could not disconnect player %v from game %v: %v\n", *session.UserID, *session.GameID, err)
 	}
 

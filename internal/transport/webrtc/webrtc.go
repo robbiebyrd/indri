@@ -349,7 +349,7 @@ func (t *Transport) authenticate(r *http.Request) string {
 		return ""
 	}
 
-	return session.ID.Hex()
+	return session.ID
 }
 
 // bearerToken reads the session token from the Authorization header.

@@ -49,19 +49,19 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		displayName = *user.DisplayName
 	}
 
-	if err = h.i.GameService.ConnectPlayer(g.ID.Hex(), *teamId, *session.UserID, displayName); err != nil {
+	if err = h.i.GameService.ConnectPlayer(g.ID, *teamId, *session.UserID, displayName); err != nil {
 		log.Printf("error adding player %v to game %v: %v\n", *session.UserID, *gameCode, err)
 	}
 
-	gameJSONBytes, err := h.i.GameService.GetJSONBytes(g.ID.Hex())
+	gameJSONBytes, err := h.i.GameService.GetJSONBytes(g.ID)
 	if err != nil {
 		return actions.Result{}, err
 	}
 
 	result := actions.Result{Responses: [][]byte{*gameJSONBytes}}
 
-	if err = h.i.SessionService.Update(session.ID.Hex(), &models.UpdateSession{
-		GameID:    g.ID.Hex(),
+	if err = h.i.SessionService.Update(session.ID, &models.UpdateSession{
+		GameID:    g.ID,
 		UserID:    *session.UserID,
 		TeamID:    *teamId,
 		UpdatedAt: time.Time{},

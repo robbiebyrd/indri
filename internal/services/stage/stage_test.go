@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	gameService "github.com/robbiebyrd/indri/internal/services/game"
 )
 
@@ -60,7 +61,7 @@ var scriptScene = models.Scene{
 
 func newService(store *recordingStore) *Service {
 	store.game = &models.Game{
-		ID: bson.NewObjectID(),
+		ID: ids.New(),
 		Stage: models.Stage{
 			Scenes: map[string]models.Scene{sceneId: {}},
 		},

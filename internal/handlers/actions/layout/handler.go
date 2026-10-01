@@ -72,7 +72,7 @@ func editLayout(req actions.Request, games gameLookup, mutator gameMutator) (act
 		return actions.Result{}, err
 	}
 
-	gameId := g.ID.Hex()
+	gameId := g.ID
 
 	if callerSession.GameID == nil || *callerSession.GameID != gameId {
 		return actions.Result{}, fmt.Errorf("caller %v is not in game %v", *callerSession.UserID, *gameCode)

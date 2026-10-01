@@ -2,12 +2,12 @@ package models
 
 import (
 	"time"
-
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type User struct {
-	ID bson.ObjectID `bson:"_id,omitempty" json:"id" mongox:"autoID"`
+	// ID is a backend-neutral string minted by internal/repo/ids; see
+	// models.Game.ID for why it is not a Mongo ObjectID.
+	ID string `bson:"_id,omitempty" json:"id"`
 
 	CreatedAt   time.Time              `bson:"createdAt"            json:"createdAt"`
 	UpdatedAt   time.Time              `bson:"updatedAt"            json:"updatedAt"`
@@ -22,6 +22,8 @@ type User struct {
 }
 
 type CreateUser struct {
+	// ID is minted by the caller (internal/repo/ids); see models.Game.ID.
+	ID          string    `bson:"_id,omitempty" json:"id"`
 	CreatedAt   time.Time `bson:"createdAt"   json:"createdAt"`
 	UpdatedAt   time.Time `bson:"updatedAt"   json:"updatedAt"`
 	Email       string    `bson:"email"       json:"email"`

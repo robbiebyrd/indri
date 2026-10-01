@@ -57,7 +57,7 @@ func (us *Service) Authenticate(email *string, password *string) (*models.Sessio
 
 	session, err := us.sessionRepo.New(models.CreateSession{
 		Token:     token,
-		UserID:    storedUser.ID.Hex(),
+		UserID:    storedUser.ID,
 		CreatedAt: time.Time{},
 	})
 	if err != nil {

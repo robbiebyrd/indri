@@ -65,7 +65,7 @@ func handle(req actions.Request, games games, sessions sessions) (actions.Result
 		return actions.Result{}, err
 	}
 
-	gameId := g.ID.Hex()
+	gameId := g.ID
 
 	if callerSession.GameID == nil || *callerSession.GameID != gameId {
 		return actions.Result{}, fmt.Errorf("caller %v is not in game %v", *callerSession.UserID, *gameCode)
@@ -94,5 +94,5 @@ func handle(req actions.Request, games games, sessions sessions) (actions.Result
 	// The removal committed, so the target is no longer a player of the game.
 	// The transport force-disconnects them if they are currently connected; an
 	// offline target simply has no connection to close.
-	return actions.Result{DisconnectIDs: []string{targetSession.ID.Hex()}}, nil
+	return actions.Result{DisconnectIDs: []string{targetSession.ID}}, nil
 }

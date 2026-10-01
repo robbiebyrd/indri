@@ -209,7 +209,7 @@ func (r *Runner) runCase(ctx context.Context, state *models.Script, c Case) []st
 		return []string{fmt.Sprintf("the harness could not create the fixture game: %v", err)}
 	}
 
-	id := g.ID.Hex()
+	id := g.ID
 
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()

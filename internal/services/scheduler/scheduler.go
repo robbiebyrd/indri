@@ -201,6 +201,8 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) int {
 // entry left leased is invisible until its lease expires and is then simply
 // tried again. Saying nothing is the one outcome that hides a bug.
 func (s *Scheduler) fire(ctx context.Context, entry *schedule.Entry) {
+	// schedule.Entry keeps a Mongo ObjectID of its own; only the game, user and
+	// session models moved to string ids.
 	id := entry.ID.Hex()
 
 	if !slices.Contains(s.dispatchable, entry.Action) {

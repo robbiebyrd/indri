@@ -51,7 +51,7 @@ func newSceneGame(t *testing.T) (*game.MemoryStore, *capturingPublisher, string)
 		t.Fatalf("creating a game: %v", err)
 	}
 
-	return store, publisher, g.ID.Hex()
+	return store, publisher, g.ID
 }
 
 // sceneScript is a "move" action whose mutate callback is body, plus a

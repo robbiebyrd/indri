@@ -71,7 +71,7 @@ func newScriptFixture(t *testing.T, src string, actionNames ...string) *scriptFi
 		engine:  engine,
 		games:   games,
 		entries: entries,
-		gameID:  g.ID.Hex(),
+		gameID:  g.ID,
 	}
 
 	// The stand-in for router.Dispatch: it runs the script action the way

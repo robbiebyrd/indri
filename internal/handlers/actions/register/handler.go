@@ -36,7 +36,7 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 	}
 
 	return actions.Result{
-		Responses: [][]byte{[]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID.Hex()))},
+		Responses: [][]byte{[]byte(fmt.Sprintf(`{"registered": true, "userId": "%s"}`, createdUser.ID))},
 	}, nil
 }
 

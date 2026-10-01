@@ -17,11 +17,11 @@ import (
 	"time"
 
 	coderws "github.com/coder/websocket"
-	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/transport"
 	"github.com/robbiebyrd/indri/internal/transport/graphql/generated"
 	"github.com/robbiebyrd/indri/internal/transport/graphql/resolvers"
@@ -445,7 +445,7 @@ const keyframe = `{"id":"65f1b2c3d4e5f60718293a4b","code":"ABCD","version":7,` +
 // fakeSessions resolves exactly one token, standing in for the session store.
 type fakeSessions struct {
 	token string
-	id    bson.ObjectID
+	id    string
 }
 
 func (f fakeSessions) GetByToken(token string) (*models.Session, error) {
@@ -573,7 +573,7 @@ func TestMutation_RefreshReturnsTheSameKeyframeAsTheRestRoute(t *testing.T) {
 
 	router.RegisterHandler("test_refresh", "refresh", staticHandler{keyframe})
 
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 
 	overGraphQL := refreshField(t, postGraphQL(t, sessions, "good-token", "mutation { refresh }"))
 	overREST := postREST(t, sessions, "good-token", "refresh")
@@ -602,7 +602,7 @@ func TestMutation_RefreshReturnsTheSameKeyframeAsTheRestRoute(t *testing.T) {
 // the only thing that can answer it — and an unauthenticated caller must reach
 // the action with no session at all rather than with somebody else's.
 func TestMutation_RefreshResolvesTheCallerFromTheBearerTokenAlone(t *testing.T) {
-	id := bson.NewObjectID()
+	id := ids.New()
 	sessions := fakeSessions{token: "good-token", id: id}
 
 	cases := map[string]struct {
@@ -632,7 +632,7 @@ func TestMutation_RefreshResolvesTheCallerFromTheBearerTokenAlone(t *testing.T) 
 			if !tc.wantAuthorative {
 				if session != nil {
 					t.Errorf("the action was handed session %v, want none — %s authenticates nobody",
-						session.ID.Hex(), name)
+						session.ID, name)
 				}
 
 				return
@@ -643,7 +643,7 @@ func TestMutation_RefreshResolvesTheCallerFromTheBearerTokenAlone(t *testing.T) 
 			}
 
 			if session.ID != id {
-				t.Errorf("the action was handed session %v, want %v", session.ID.Hex(), id.Hex())
+				t.Errorf("the action was handed session %v, want %v", session.ID, id)
 			}
 		})
 	}

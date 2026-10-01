@@ -249,7 +249,7 @@ func moveAs(t *testing.T, f fixture, session *models.Session, payload map[string
 		t.Fatalf("creating the fixture game: %v", err)
 	}
 
-	id := g.ID.Hex()
+	id := g.ID
 
 	if session != nil {
 		session.GameID = &id

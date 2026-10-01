@@ -13,18 +13,17 @@ import (
 	"sync"
 	"testing"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/handlers/router"
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/transport"
 )
 
 // fakeSessions resolves exactly one token, standing in for the session store.
 type fakeSessions struct {
 	token string
-	id    bson.ObjectID
+	id    string
 }
 
 func (f fakeSessions) GetByToken(token string) (*models.Session, error) {
@@ -210,7 +209,7 @@ func TestRoutes_DispatchTheSameActionsAndPayloadsAsTheOtherTransports(t *testing
 		},
 	}
 
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 
 	for _, tc := range cases {
 		t.Run(tc.route+" "+tc.body, func(t *testing.T) {
@@ -246,7 +245,7 @@ func TestRoutes_RejectMissingRequiredFields(t *testing.T) {
 		"inquire without a type":    {"/api/inquire", `{}`},
 	}
 
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -266,7 +265,7 @@ func TestRoutes_RejectMissingRequiredFields(t *testing.T) {
 }
 
 func TestRoutes_RejectAMalformedBody(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	_, rec, url := newTestTransport(t, sessions)
 
 	resp := post(t, url+"/api/login", `{"email":`, bearer("good-token"))
@@ -281,7 +280,7 @@ func TestRoutes_RejectAMalformedBody(t *testing.T) {
 }
 
 func TestRoutes_RejectANonPostMethod(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	_, _, url := newTestTransport(t, sessions)
 
 	resp, err := http.Get(url + "/api/login")
@@ -297,7 +296,7 @@ func TestRoutes_RejectANonPostMethod(t *testing.T) {
 }
 
 func TestRoutes_UnknownActionIsNotFound(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	_, rec, url := newTestTransport(t, sessions)
 
 	resp := post(t, url+"/api/definitely-not-an-action", `{}`, bearer("good-token"))
@@ -314,7 +313,7 @@ func TestRoutes_UnknownActionIsNotFound(t *testing.T) {
 // Authorization must come from the caller's own bearer token, never from a
 // field in the body they control.
 func TestDispatch_ResolvesTheSessionFromTheBearerToken(t *testing.T) {
-	id := bson.NewObjectID()
+	id := ids.New()
 	sessions := fakeSessions{token: "good-token", id: id}
 
 	t.Run("valid token", func(t *testing.T) {
@@ -345,7 +344,7 @@ func TestDispatch_ResolvesTheSessionFromTheBearerToken(t *testing.T) {
 // Actions that need no prior session must work without one; those that do are
 // rejected by the handlers themselves, exactly as over WebSocket.
 func TestRoutes_AllowUnauthenticatedRegisterLoginAndReconnect(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 
 	for _, route := range []string{"/api/register", "/api/login", "/api/reconnect"} {
 		t.Run(route, func(t *testing.T) {
@@ -371,7 +370,7 @@ func TestRoutes_AllowUnauthenticatedRegisterLoginAndReconnect(t *testing.T) {
 }
 
 func TestDispatch_ReturnsTheActionResponseDocument(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	_, rec, url := newTestTransport(t, sessions)
 
 	rec.result = actions.Result{Responses: [][]byte{[]byte(`{"authenticated":true}`)}}
@@ -389,7 +388,7 @@ func TestDispatch_ReturnsTheActionResponseDocument(t *testing.T) {
 
 // A handler with nothing to say still needs a valid JSON body on the wire.
 func TestDispatch_ReturnsAnEmptyObjectWhenTheActionHasNoResponse(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	_, _, url := newTestTransport(t, sessions)
 
 	resp := post(t, url+"/api/leave", `{}`, bearer("good-token"))
@@ -400,7 +399,7 @@ func TestDispatch_ReturnsAnEmptyObjectWhenTheActionHasNoResponse(t *testing.T) {
 }
 
 func TestDispatch_ReportsAHandlerErrorAsBadRequest(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	_, rec, url := newTestTransport(t, sessions)
 
 	rec.err = errors.New("that move is not legal")
@@ -419,7 +418,7 @@ func TestDispatch_ReportsAHandlerErrorAsBadRequest(t *testing.T) {
 // Kick and logout close the target's push connections, which live on the SSE
 // and GraphQL transports, not on this one.
 func TestDispatch_DisconnectsSessionsAcrossTransports(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	tr, rec, url := newTestTransport(t, sessions)
 
 	peer := &peerTransport{Registry: &transport.Registry{}}
@@ -504,7 +503,7 @@ func TestDispatch_MultiHandlerActionDeliversTheFirstResponseAndReportsTheRest(t 
 
 	// The real router, not the recorder: the point is that two registered
 	// handlers really do merge into one Result here.
-	tr := New(fakeSessions{token: "good-token", id: bson.NewObjectID()})
+	tr := New(fakeSessions{token: "good-token", id: ids.New()})
 
 	mux := http.NewServeMux()
 	tr.Register(mux)
@@ -540,7 +539,7 @@ func TestDispatch_SingleResponseActionIsUnchangedAndSilent(t *testing.T) {
 
 	logged := captureLog(t)
 
-	tr := New(fakeSessions{token: "good-token", id: bson.NewObjectID()})
+	tr := New(fakeSessions{token: "good-token", id: ids.New()})
 
 	mux := http.NewServeMux()
 	tr.Register(mux)

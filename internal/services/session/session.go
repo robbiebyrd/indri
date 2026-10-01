@@ -76,7 +76,7 @@ func (us *Service) FindID(key, value string) (*string, error) {
 		return nil, err
 	}
 
-	id := s.ID.Hex()
+	id := s.ID
 
 	return &id, nil
 }

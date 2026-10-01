@@ -9,16 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/transport"
 )
 
 // fakeSessions resolves exactly one token, standing in for the session store.
 type fakeSessions struct {
 	token string
-	id    bson.ObjectID
+	id    string
 }
 
 func (f fakeSessions) GetByToken(token string) (*models.Session, error) {
@@ -164,7 +163,7 @@ func waitForConns(t *testing.T, tr *Transport, want int) {
 }
 
 func TestStream_RejectsAMissingOrUnknownToken(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	_, url := newTestTransport(t, sessions)
 
 	cases := map[string]string{
@@ -187,7 +186,7 @@ func TestStream_RejectsAMissingOrUnknownToken(t *testing.T) {
 // EventSource cannot set request headers, so the query parameter is the only
 // way a browser can authenticate the stream. Native clients may use either.
 func TestStream_AuthenticatesByQueryParamOrBearerHeader(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 
 	t.Run("query parameter", func(t *testing.T) {
 		tr, url := newTestTransport(t, sessions)
@@ -203,7 +202,7 @@ func TestStream_AuthenticatesByQueryParamOrBearerHeader(t *testing.T) {
 }
 
 func TestStream_SendsEventStreamHeaders(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	_, url := newTestTransport(t, sessions)
 
 	s := connect(t, url+path+"?token=good-token", nil)
@@ -221,7 +220,7 @@ func TestStream_SendsEventStreamHeaders(t *testing.T) {
 }
 
 func TestStream_DeliversABroadcastAsADataFrame(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	tr, url := newTestTransport(t, sessions)
 
 	s := connect(t, url+path+"?token=good-token", nil)
@@ -239,7 +238,7 @@ func TestStream_DeliversABroadcastAsADataFrame(t *testing.T) {
 // This is the property that makes SSE interchangeable with the other
 // transports: the same session-keyed filter reaches it.
 func TestStream_IsAddressableByItsSessionKey(t *testing.T) {
-	id := bson.NewObjectID()
+	id := ids.New()
 	sessions := fakeSessions{token: "good-token", id: id}
 	tr, url := newTestTransport(t, sessions)
 
@@ -249,7 +248,7 @@ func TestStream_IsAddressableByItsSessionKey(t *testing.T) {
 	match := func(c transport.Conn) bool {
 		value, ok := c.Get(transport.SessionIDKey)
 
-		return ok && value == id.Hex()
+		return ok && value == id
 	}
 
 	if err := tr.BroadcastFilter([]byte(`{"targeted":true}`), match); err != nil {
@@ -264,7 +263,7 @@ func TestStream_IsAddressableByItsSessionKey(t *testing.T) {
 // A multi-line payload must not be split across events: every line needs its
 // own "data:" prefix, and a bare newline would end the event early.
 func TestStream_EscapesNewlinesInThePayload(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	tr, url := newTestTransport(t, sessions)
 
 	s := connect(t, url+path+"?token=good-token", nil)
@@ -284,7 +283,7 @@ func TestStream_EscapesNewlinesInThePayload(t *testing.T) {
 // Proxies and load balancers drop an idle stream. The heartbeat is a comment
 // frame, which clients ignore.
 func TestStream_EmitsAHeartbeatWhileIdle(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	tr, url := newTestTransport(t, sessions)
 
 	tr.Heartbeat = 20 * time.Millisecond
@@ -299,7 +298,7 @@ func TestStream_EmitsAHeartbeatWhileIdle(t *testing.T) {
 // The stream outlives the server's WriteTimeout, which applies to SSE because
 // (unlike a WebSocket upgrade) it never hijacks the connection.
 func TestStream_SurvivesTheServerWriteTimeout(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	tr, url := newTestTransport(t, sessions)
 
 	tr.Heartbeat = 20 * time.Millisecond
@@ -316,7 +315,7 @@ func TestStream_SurvivesTheServerWriteTimeout(t *testing.T) {
 }
 
 func TestStream_DisconnectDeregistersTheConnection(t *testing.T) {
-	sessions := fakeSessions{token: "good-token", id: bson.NewObjectID()}
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
 	tr, url := newTestTransport(t, sessions)
 
 	s := connect(t, url+path+"?token=good-token", nil)
@@ -329,14 +328,14 @@ func TestStream_DisconnectDeregistersTheConnection(t *testing.T) {
 
 // Kicking a player must close their stream, not just stop addressing it.
 func TestStream_DisconnectClosesTheStream(t *testing.T) {
-	id := bson.NewObjectID()
+	id := ids.New()
 	sessions := fakeSessions{token: "good-token", id: id}
 	tr, url := newTestTransport(t, sessions)
 
 	connect(t, url+path+"?token=good-token", nil)
 	waitForConns(t, tr, 1)
 
-	tr.Disconnect([]string{id.Hex()})
+	tr.Disconnect([]string{id})
 
 	waitForConns(t, tr, 0)
 }

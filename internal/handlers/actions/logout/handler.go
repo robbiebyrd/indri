@@ -32,9 +32,9 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		}
 	}
 
-	if err := h.i.SessionService.Delete(session.ID.Hex()); err != nil {
-		log.Printf("logout: could not invalidate session %v: %v", session.ID.Hex(), err)
+	if err := h.i.SessionService.Delete(session.ID); err != nil {
+		log.Printf("logout: could not invalidate session %v: %v", session.ID, err)
 	}
 
-	return actions.Result{DisconnectIDs: []string{session.ID.Hex()}}, nil
+	return actions.Result{DisconnectIDs: []string{session.ID}}, nil
 }

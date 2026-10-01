@@ -95,7 +95,7 @@ func (gs *Service) New(gameCode string, private bool) (*models.Game, error) {
 	// read or edit the game it was told about, and a game that is not stored yet
 	// is a game it cannot find. An insert has no version fence to lose, so its
 	// nil error is the commit.
-	gs.emit(luaService.LifecycleGameCreated, g.ID.Hex(), map[string]interface{}{
+	gs.emit(luaService.LifecycleGameCreated, g.ID, map[string]interface{}{
 		"code":    g.Code,
 		"private": g.Private,
 	})

@@ -118,7 +118,7 @@ func (bs *Service) sendToTeam(gameId, teamId string, jsonData []byte) error {
 
 	for _, session := range sessions {
 		if session.TeamID != nil && *session.TeamID == teamId {
-			ids = append(ids, session.ID.Hex())
+			ids = append(ids, session.ID)
 		}
 	}
 
@@ -189,7 +189,7 @@ func (bs *Service) broadcastToSessions(sessionIds []string, jsonData []byte) err
 func sessionIDs(sessions []*models.Session) []string {
 	ids := make([]string, len(sessions))
 	for i, session := range sessions {
-		ids[i] = session.ID.Hex()
+		ids[i] = session.ID
 	}
 
 	return ids
@@ -201,7 +201,7 @@ func sessionsInGame(sessions []*models.Session, gameId string) []string {
 
 	for _, session := range sessions {
 		if session.GameID != nil && *session.GameID == gameId {
-			ids = append(ids, session.ID.Hex())
+			ids = append(ids, session.ID)
 		}
 	}
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
 )
 
@@ -105,12 +106,7 @@ func (s *Store) FindFirst(key string, value string) (*models.Session, error) {
 
 // Get retrieves user data for a specific user ID.
 func (s *Store) Get(id string) (*models.Session, error) {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.collection.Finder().Filter(query.Id(objectId)).FindOne(*s.ctx)
+	return s.collection.Finder().Filter(query.Id(id)).FindOne(*s.ctx)
 }
 
 // GetByToken retrieves a session by its unguessable bearer token.
@@ -126,24 +122,14 @@ func (s *Store) GetByToken(token string) (*models.Session, error) {
 // be used to reconnect. It is idempotent: deleting an already-gone session is
 // not an error.
 func (s *Store) Delete(id string) error {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
-
-	_, err = s.collection.Collection().DeleteOne(*s.ctx, bson.D{{Key: "_id", Value: objectId}})
+	_, err := s.collection.Collection().DeleteOne(*s.ctx, bson.D{{Key: "_id", Value: id}})
 
 	return err
 }
 
 // Exists checks to see if a user with the given ID already exists.
 func (s *Store) Exists(id string) (bool, error) {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return false, err
-	}
-
-	count, err := s.collection.Finder().Filter(query.Id(objectId)).Count(*s.ctx)
+	count, err := s.collection.Finder().Filter(query.Id(id)).Count(*s.ctx)
 	if err != nil {
 		return false, err
 	}
@@ -154,11 +140,6 @@ func (s *Store) Exists(id string) (bool, error) {
 // Update saves user data to the repository.
 func (s *Store) Update(sessionId string, session *models.UpdateSession) error {
 	session.UpdatedAt = time.Now()
-	objectId, err := bson.ObjectIDFromHex(sessionId)
-	if err != nil {
-		return err
-	}
-
 	doc, err := repoUtils.CreateBSONDoc(session)
 	if err != nil {
 		return err
@@ -169,7 +150,7 @@ func (s *Store) Update(sessionId string, session *models.UpdateSession) error {
 	// one document should ever be updated.
 	result, err := s.collection.Collection().UpdateOne(
 		*s.ctx,
-		bson.D{{Key: "_id", Value: objectId}},
+		bson.D{{Key: "_id", Value: sessionId}},
 		bson.D{{Key: "$set", Value: doc}},
 	)
 	if err != nil {
@@ -186,12 +167,19 @@ func (s *Store) Update(sessionId string, session *models.UpdateSession) error {
 func (s *Store) createNewSession(session models.CreateSession) (*models.Session, error) {
 	session.CreatedAt = time.Now()
 
+	// Mint the id here rather than letting MongoDB generate an ObjectID: the
+	// model stores a backend-neutral string, and an ObjectID does not decode
+	// into one.
+	if session.ID == "" {
+		session.ID = ids.New()
+	}
+
 	doc, err := repoUtils.CreateBSONDoc(session)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := s.collection.Collection().InsertOne(*s.ctx, &doc)
+	_, err = s.collection.Collection().InsertOne(*s.ctx, &doc)
 	if err != nil {
 		// Lost a race with a concurrent login for the same user (the unique
 		// userId index rejected the insert). Return the winner's session
@@ -203,9 +191,7 @@ func (s *Store) createNewSession(session models.CreateSession) (*models.Session,
 		return nil, err
 	}
 
-	insertedId := result.InsertedID.(bson.ObjectID).Hex()
-
-	return s.Get(insertedId)
+	return s.Get(session.ID)
 }
 
 func (s *Store) isSessionInGameAndTeam(gameId, teamId, sessionGameId, sessionTeamId string) bool {

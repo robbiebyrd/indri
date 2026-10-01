@@ -207,7 +207,7 @@ func handleClientMessage(i *injector.Injector, c transport.Conn, msg []byte) {
 	result, dispatchErr := router.DispatchMessage(ctx, session, msg)
 
 	if result.Session != nil {
-		cs.SetKey("sessionId", result.Session.ID.Hex())
+		cs.SetKey("sessionId", result.Session.ID)
 	}
 
 	for _, response := range result.Responses {

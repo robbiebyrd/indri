@@ -119,7 +119,7 @@ func newGame(t *testing.T, gs *Service, events *recorder) string {
 	events.events = nil
 	events.mu.Unlock()
 
-	return g.ID.Hex()
+	return g.ID
 }
 
 // --- game:created -------------------------------------------------------------
@@ -138,8 +138,8 @@ func TestNew_RaisesGameCreatedAfterTheInsert(t *testing.T) {
 
 	got := events.only(t, luaService.LifecycleGameCreated)
 
-	if got.gameID != g.ID.Hex() {
-		t.Fatalf("game:created carried game %q, want %q", got.gameID, g.ID.Hex())
+	if got.gameID != g.ID {
+		t.Fatalf("game:created carried game %q, want %q", got.gameID, g.ID)
 	}
 
 	if got.subject["code"] != "ABCD" {
@@ -322,11 +322,11 @@ func TestService_WorksWithNoEmitter(t *testing.T) {
 		t.Fatalf("creating a game: %v", err)
 	}
 
-	if err := gs.ConnectPlayer(g.ID.Hex(), "", "player-1", "Ada"); err != nil {
+	if err := gs.ConnectPlayer(g.ID, "", "player-1", "Ada"); err != nil {
 		t.Fatalf("connecting a player: %v", err)
 	}
 
-	if err := gs.RemovePlayer(g.ID.Hex(), "player-1"); err != nil {
+	if err := gs.RemovePlayer(g.ID, "player-1"); err != nil {
 		t.Fatalf("removing a player: %v", err)
 	}
 }
@@ -367,11 +367,11 @@ indri.on("player:left",   function(ev) error("broken subscriber", 0) end)
 		t.Fatalf("a raising game:created subscriber failed the create: %v", err)
 	}
 
-	if err := gs.ConnectPlayer(g.ID.Hex(), "", "player-1", "Ada"); err != nil {
+	if err := gs.ConnectPlayer(g.ID, "", "player-1", "Ada"); err != nil {
 		t.Fatalf("a raising player:joined subscriber failed the join: %v", err)
 	}
 
-	joined, err := store.Get(g.ID.Hex())
+	joined, err := store.Get(g.ID)
 	if err != nil {
 		t.Fatalf("reading the game back: %v", err)
 	}
@@ -380,7 +380,7 @@ indri.on("player:left",   function(ev) error("broken subscriber", 0) end)
 		t.Fatalf("the join was rolled back by a failing subscriber; players = %v", joined.Players)
 	}
 
-	if err := gs.RemovePlayer(g.ID.Hex(), "player-1"); err != nil {
+	if err := gs.RemovePlayer(g.ID, "player-1"); err != nil {
 		t.Fatalf("a raising player:left subscriber failed the leave: %v", err)
 	}
 }
@@ -425,12 +425,12 @@ end)
 	}
 
 	for _, player := range []string{"player-1", "player-2"} {
-		if err := gs.ConnectPlayer(g.ID.Hex(), "", player, player); err != nil {
+		if err := gs.ConnectPlayer(g.ID, "", player, player); err != nil {
 			t.Fatalf("connecting %s: %v", player, err)
 		}
 	}
 
-	stored, err := store.Get(g.ID.Hex())
+	stored, err := store.Get(g.ID)
 	if err != nil {
 		t.Fatalf("reading the game back: %v", err)
 	}

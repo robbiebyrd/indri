@@ -11,11 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-
 	pion "github.com/pion/webrtc/v4"
 
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/ids"
 	"github.com/robbiebyrd/indri/internal/transport"
 )
 
@@ -30,7 +29,7 @@ func (noSessions) GetByToken(string) (*models.Session, error) {
 // fakeSessions resolves exactly one token, mirroring sse_test.go's double.
 type fakeSessions struct {
 	token string
-	id    bson.ObjectID
+	id    string
 }
 
 func (f fakeSessions) GetByToken(token string) (*models.Session, error) {
@@ -182,7 +181,7 @@ func TestTransport_OfferReturnsAnswerAndRegistersConn(t *testing.T) {
 // Criterion 2: a request carrying a valid bearer token binds SessionIDKey at
 // handshake so BroadcastFilter reaches it.
 func TestTransport_BearerTokenBindsSessionKey(t *testing.T) {
-	sessionID := bson.NewObjectID()
+	sessionID := ids.New()
 	sessions := fakeSessions{token: "tok-123", id: sessionID}
 	tr := newTestTransport(t, sessions)
 
@@ -206,8 +205,8 @@ func TestTransport_BearerTokenBindsSessionKey(t *testing.T) {
 		t.Fatal("authenticated conn carries no session key")
 	}
 
-	if got != sessionID.Hex() {
-		t.Fatalf("session key = %v, want %s", got, sessionID.Hex())
+	if got != sessionID {
+		t.Fatalf("session key = %v, want %s", got, sessionID)
 	}
 
 	received := make(chan string, 1)
@@ -216,7 +215,7 @@ func TestTransport_BearerTokenBindsSessionKey(t *testing.T) {
 	err := tr.BroadcastFilter([]byte("hello"), func(c transport.Conn) bool {
 		id, _ := c.Get(transport.SessionIDKey)
 
-		return id == sessionID.Hex()
+		return id == sessionID
 	})
 	if err != nil {
 		t.Fatalf("BroadcastFilter: %v", err)
@@ -553,7 +552,7 @@ func TestTransport_SignalChannelMessagesNeverReachActionRouter(t *testing.T) {
 // action router. kick is this repo's reference implementation for
 // authorisation, so a transport that lets it through is a security defect.
 func TestTransport_KickedPeerCannotStillSend(t *testing.T) {
-	id := bson.NewObjectID()
+	id := ids.New()
 
 	tr := newTestTransport(t, fakeSessions{token: "tok", id: id})
 
@@ -568,7 +567,7 @@ func TestTransport_KickedPeerCannotStillSend(t *testing.T) {
 	_, channels := clientHandshake(t, url, "tok", gameChannel)
 
 	// Kick: exactly what a kick or logout Result drives.
-	tr.Disconnect([]string{id.Hex()})
+	tr.Disconnect([]string{id})
 
 	if err := channels[gameChannel].SendText(`{"action":"join","code":"ABCD"}`); err != nil {
 		// A closed DataChannel is an equally good outcome -- the message
@@ -614,7 +613,7 @@ func serverPeerConnection(t *testing.T, tr *Transport) *pion.PeerConnection {
 // our own bookkeeping, and separately that the peer table drops the entry so
 // it stops counting toward MaxPeers.
 func TestTransport_KickClosesThePeerConnection(t *testing.T) {
-	id := bson.NewObjectID()
+	id := ids.New()
 
 	tr := newTestTransport(t, fakeSessions{token: "tok", id: id})
 
@@ -624,7 +623,7 @@ func TestTransport_KickClosesThePeerConnection(t *testing.T) {
 
 	pc := serverPeerConnection(t, tr)
 
-	tr.Disconnect([]string{id.Hex()})
+	tr.Disconnect([]string{id})
 
 	deadline := time.Now().Add(testTimeout)
 

@@ -60,7 +60,7 @@ func TestDelete_InvalidatesToken(t *testing.T) {
 		t.Fatalf("token should resolve before delete: %v", err)
 	}
 
-	if err := store.Delete(created.ID.Hex()); err != nil {
+	if err := store.Delete(created.ID); err != nil {
 		t.Fatalf("deleting session: %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestDelete_InvalidatesToken(t *testing.T) {
 	}
 
 	// Delete is idempotent.
-	if err := store.Delete(created.ID.Hex()); err != nil {
+	if err := store.Delete(created.ID); err != nil {
 		t.Errorf("second delete should be a no-op, got: %v", err)
 	}
 }

@@ -8,12 +8,13 @@ import (
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
-	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/models"
 )
 
-const testGameID = "507f1f77bcf86cd799439011"
+// A fixed id so a fixture reads the same on every run. It is an opaque
+// string now, not a Mongo ObjectID hex — see models.Game.ID.
+const testGameID = "3f2b1c40-9a7e-4d18-8c55-0b6e1a2d7f43"
 
 // fullGame builds a game with every field populated and every collection
 // non-empty. A fresh instance is returned on each call so a test can compare an
@@ -26,13 +27,8 @@ const testGameID = "507f1f77bcf86cd799439011"
 func fullGame(t *testing.T) *models.Game {
 	t.Helper()
 
-	id, err := bson.ObjectIDFromHex(testGameID)
-	if err != nil {
-		t.Fatalf("parsing the fixture object id: %v", err)
-	}
-
 	return &models.Game{
-		ID:        id,
+		ID:        testGameID,
 		Version:   7,
 		CreatedAt: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2026, 9, 12, 11, 30, 0, 123456789, time.UTC),
@@ -99,13 +95,8 @@ func fullGame(t *testing.T) *models.Game {
 func emptyCollectionGame(t *testing.T) *models.Game {
 	t.Helper()
 
-	id, err := bson.ObjectIDFromHex(testGameID)
-	if err != nil {
-		t.Fatalf("parsing the fixture object id: %v", err)
-	}
-
 	return &models.Game{
-		ID:        id,
+		ID:        testGameID,
 		Version:   3,
 		CreatedAt: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC),
@@ -176,7 +167,7 @@ func TestRoundTrip_FullyPopulatedGameSurvivesUnchanged(t *testing.T) {
 	}
 
 	if got.ID != want.ID {
-		t.Errorf("id = %s, want %s", got.ID.Hex(), want.ID.Hex())
+		t.Errorf("id = %s, want %s", got.ID, want.ID)
 	}
 
 	if !got.CreatedAt.Equal(want.CreatedAt) {
@@ -334,7 +325,7 @@ func TestApplyLua_ServerOwnedFieldsAreNotForgeable(t *testing.T) {
 			}
 
 			if got.ID != want.ID {
-				t.Errorf("id = %s, want %s", got.ID.Hex(), want.ID.Hex())
+				t.Errorf("id = %s, want %s", got.ID, want.ID)
 			}
 
 			if !got.CreatedAt.Equal(want.CreatedAt) {

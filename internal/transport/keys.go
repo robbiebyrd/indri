@@ -3,7 +3,7 @@ package transport
 import "sync"
 
 // SessionIDKey is the one per-connection key the application sets, on every
-// transport. Its value is the session ObjectID (session.ID.Hex()), never the
+// transport. Its value is the session ObjectID (session.ID), never the
 // bearer token the client holds — see the identity table in CLAUDE.md. Targeted
 // broadcasts resolve their recipients through the session store and then filter
 // connections on this key, so a connection without it is unreachable.

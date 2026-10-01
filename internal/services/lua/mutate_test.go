@@ -98,7 +98,7 @@ func newTestGame(t *testing.T) (*game.MemoryStore, *capturingPublisher, string) 
 		t.Fatalf("creating a game: %v", err)
 	}
 
-	return store, publisher, g.ID.Hex()
+	return store, publisher, g.ID
 }
 
 // invokeMove loads src, dispatches "move" against gameID and returns the error

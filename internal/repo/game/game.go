@@ -72,7 +72,7 @@ func (m mongoDocs) insert(ctx context.Context, create models.CreateGame) (string
 		return "", err
 	}
 
-	result, err := m.collection.Collection().InsertOne(ctx, &doc)
+	_, err = m.collection.Collection().InsertOne(ctx, &doc)
 	if err != nil {
 		// The unique code index rejected a concurrent create with the same
 		// code — surface the friendly error, not a raw duplicate-key.
@@ -83,18 +83,13 @@ func (m mongoDocs) insert(ctx context.Context, create models.CreateGame) (string
 		return "", err
 	}
 
-	return result.InsertedID.(bson.ObjectID).Hex(), nil
+	return create.ID, nil
 }
 
 // load reads one game under the caller's context, so a mutation can bound its
 // own reads.
 func (m mongoDocs) load(ctx context.Context, id string) (*models.Game, error) {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, err
-	}
-
-	return m.collection.Finder().Filter(query.Id(objectId)).FindOne(ctx)
+	return m.collection.Finder().Filter(query.Id(id)).FindOne(ctx)
 }
 
 func (m mongoDocs) findByCode(ctx context.Context, gameCode string) (*models.Game, error) {
@@ -124,11 +119,6 @@ func (m mongoDocs) saveVersioned(
 	g *models.Game,
 	expectedVersion int64,
 ) (bool, error) {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return false, err
-	}
-
 	g.UpdatedAt = time.Now()
 	g.Version = expectedVersion + 1
 
@@ -139,7 +129,7 @@ func (m mongoDocs) saveVersioned(
 
 	result, err := m.collection.Collection().UpdateOne(
 		ctx,
-		bson.D{{Key: "_id", Value: objectId}, {Key: "version", Value: expectedVersion}},
+		bson.D{{Key: "_id", Value: id}, {Key: "version", Value: expectedVersion}},
 		bson.D{{Key: "$set", Value: withoutKey(doc, "_id")}},
 	)
 	if err != nil {
@@ -238,17 +228,12 @@ func (m mongoDocs) unsetField(ctx context.Context, id string, key string) error 
 // the player still exists, so a concurrent removal cannot recreate a partial
 // player document. The version bump keeps it coherent with Mutate's CAS.
 func (m mongoDocs) setPlayerConnected(ctx context.Context, id string, userId string, connected bool) error {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
-
 	playerKey := playerConnectedKey(userId)
 
 	result, err := m.collection.Collection().UpdateOne(
 		ctx,
 		bson.D{
-			{Key: "_id", Value: objectId},
+			{Key: "_id", Value: id},
 			{Key: "players." + userId, Value: bson.D{{Key: "$exists", Value: true}}},
 		},
 		bson.D{
@@ -285,10 +270,5 @@ func withoutKey(doc bson.D, key string) bson.D {
 }
 
 func bsonDocForID(id string) (bson.D, error) {
-	objectId, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, err
-	}
-
-	return bson.D{{Key: "_id", Value: objectId}}, nil
+	return bson.D{{Key: "_id", Value: id}}, nil
 }
