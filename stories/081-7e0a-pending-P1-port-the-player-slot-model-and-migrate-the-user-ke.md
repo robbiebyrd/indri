@@ -51,3 +51,5 @@ origin/main replaced user-keyed team membership with pre-declared slots: AssignS
 
 ## Work Log
 
+### 2026-10-01T14:53:57.102Z - HANDOFF NOTE. Prerequisites 079, 088 and 080 are complete on POC-00003/main-integration. Local's game Storer is still user-keyed: Game.Players is keyed by userId and AddPlayerToTeam/ChangePlayerTeam/HasPlayerOnTeam/PlayerOnWhichTeam are live call sites. Four backends now implement the docs port, so AssignSlot must land on all four: mongoDocs (game.go), memoryDocs (memory.go) and sqlDocs (sql.go, which serves both SQL dialects). The slot change touches authorisation -- kick resolves the caller from their own connection's sessionId, and the layout handler finds the host via Game.Players; origin/main 0f85d3b is the reference for host-by-slot. Lua checkInvariants must keep refusing membership and host changes once membership is slot-shaped. example/tictactoe/game.lua authorises on session.teamId, which slots preserve, but that was reasoned rather than executed -- the scripttest fixtures are the signal.
+
