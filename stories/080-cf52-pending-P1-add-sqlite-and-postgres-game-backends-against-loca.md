@@ -49,3 +49,5 @@ Local's game Storer already declares Mutate(ctx) and MutateResult(ctx) and alrea
 
 ## Work Log
 
+### 2026-10-01T14:20:41.103Z - CONSTRAINT discovered while porting 079: local models.Game/User/Session all declare ID as bson.ObjectID (internal/models/game.go:10, user.go:10, session.go:10), while the ported DDL uses 'id TEXT PRIMARY KEY' and ids.New() returns a UUID string. Local's Storer signatures already pass ids as string, but the stored type is ObjectID, so a SQLite or Postgres store cannot naturally produce one. origin/main solved this in 0b7a246 by moving every model to string IDs. That means 080 is not just 'add two backends' -- it needs the ObjectID-to-string model change first, which is cross-cutting (mongo store, every handler that constructs an id, the session sessionId key). Size 080 accordingly or split the ID change into its own story.
+
