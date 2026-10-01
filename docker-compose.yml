@@ -60,5 +60,30 @@ services:
     ports:
       - '${INDRI_REDIS_PORT:-6379}:6379'
 
+  # Opt-in, like the server above: MongoDB is the default backend, so a plain
+  # `docker compose up -d` should not pay for a Postgres nobody asked for.
+  # Start it with: docker compose --profile postgres up -d
+  #
+  # The Postgres-backed store tests skip unless INDRI_TEST_POSTGRES_URI is set,
+  # so this is what makes them run:
+  #   INDRI_TEST_POSTGRES_URI=postgres://indri:indri@localhost:5432/indri?sslmode=disable
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=${INDRI_POSTGRES_USER:-indri}
+      - POSTGRES_PASSWORD=${INDRI_POSTGRES_PASSWORD:-indri}
+      - POSTGRES_DB=${INDRI_POSTGRES_DB:-indri}
+    ports:
+      - '${INDRI_POSTGRES_PORT:-5432}:5432'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${INDRI_POSTGRES_USER:-indri} -d ${INDRI_POSTGRES_DB:-indri}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - "postgres_data:/var/lib/postgresql/data"
+
 volumes:
   mongodb_data:
+  postgres_data:
