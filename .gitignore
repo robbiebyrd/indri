@@ -58,3 +58,4 @@ codealike.json
 .codecontext/
 .pnpm-store
 client/.expo-*-check
+.worktrees/

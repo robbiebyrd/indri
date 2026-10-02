@@ -353,4 +353,8 @@ Do not treat these as intentional; check before relying on them.
 - `docs/PROTOCOL.md` — the client protocol: WebSocket messages and GraphQL mutations/subscription.
 - `docs/SCRIPTING.md` — the server-side Lua host API, the sandbox, the caps, and `indri-script`.
 
-@.claude/wiz-claude.md
+## Stories
+
+`stories/*.md` are plain Markdown and are edited by hand — there is no story CLI or wiz tooling.
+Status lives in both the front matter and the filename (`<id>-<status>-<priority>-<slug>.md`), so a
+status change is a `git mv` plus a front-matter edit.

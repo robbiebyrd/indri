@@ -32,9 +32,7 @@ remote's storage, slot model and wire format port *onto* local, not the reverse.
 
 Story **081** — the player slot model.
 
-```bash
-wiz-run stories-cli.js show 081-7e0a    # its worklog carries a handoff note
-```
+Its worklog in `stories/081-7e0a-*.md` carries a handoff note.
 
 Then 082, 084, 086, 083, 085, 087. Story 084 is independent of the storage chain and can
 run at any time.
