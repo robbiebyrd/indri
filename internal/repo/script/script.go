@@ -46,6 +46,13 @@ func NewStore(configFilePath string) (*Store, error) {
 		return nil, err
 	}
 
+	if len(c.Teams) > 0 && c.Config.MaxPlayersPerTeam < 1 {
+		return nil, fmt.Errorf(
+			"script file %q declares teams but maxPlayersPerTeam is %d; every team needs at least one player slot",
+			configFilePath, c.Config.MaxPlayersPerTeam,
+		)
+	}
+
 	if len(c.Scripts) == 0 {
 		log.Printf(
 			"WARNING: the script file %q lists no lua scripts, so this server will serve no game actions;"+

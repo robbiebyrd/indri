@@ -49,8 +49,8 @@ func (s *core) UnsetHost(id string) error {
 // SetPlayerAsHost makes the given player the sole host of the game, atomically.
 func (s *core) SetPlayerAsHost(id string, playerId string) error {
 	return s.Mutate(s.ctx, id, func(g *models.Game) error {
-		if _, ok := g.Players[playerId]; !ok {
-			return fmt.Errorf("player with id %v is not in game %v", playerId, id)
+		if slot, ok := g.Players[playerId]; !ok || slot.UserID == "" {
+			return fmt.Errorf("slot %v of game %v is not held by a player", playerId, id)
 		}
 
 		for pId, p := range g.Players {

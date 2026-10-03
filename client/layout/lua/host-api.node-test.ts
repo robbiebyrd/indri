@@ -64,8 +64,8 @@ function game(): Game {
     return {
         code: "ABCD",
         players: {
-            p1: {name: "Ada", score: 3, connected: true, host: true, controller: false},
-            p2: {name: "Bob", score: 1, connected: false, host: false, controller: false},
+            p1: {userId: "u-ada", name: "Ada", score: 3, connected: true, host: true, controller: false},
+            p2: {userId: "u-bob", name: "Bob", score: 1, connected: false, host: false, controller: false},
         },
         stage: {currentScene: "board", sceneOrder: ["board"]},
         data: {board: {cells: ["X", "", "O"]}},

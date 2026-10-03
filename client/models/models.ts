@@ -25,7 +25,9 @@ export declare interface Scene {
     playerData?: Record<string | number, any>
 }
 
+/** One slot in a game. `players` is keyed by slot id; `userId` is the holder, `""` while free. */
 export declare interface Player {
+    userId: string
     name: string
     score: number
     connected: boolean

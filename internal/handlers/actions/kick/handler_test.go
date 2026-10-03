@@ -45,10 +45,20 @@ func (d directory) GetByUserID(userId string) (*models.Session, error) {
 	return s, nil
 }
 
+// kickGame is a game holding a host and a second player, together with the
+// slot each of them holds.
+type kickGame struct {
+	store      gameStore
+	cancel     context.CancelFunc
+	id         string
+	hostSlot   string
+	targetSlot string
+}
+
 // newGame builds a store holding one game with a host and a second player, and
 // returns the cancel function of the store's context — cancelling it is how a
 // test drives a genuine write failure through the real mutation path.
-func newGame(t *testing.T) (gameStore, context.CancelFunc, string) {
+func newGame(t *testing.T) kickGame {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -56,35 +66,53 @@ func newGame(t *testing.T) (gameStore, context.CancelFunc, string) {
 
 	store := gameStore{gameRepo.NewMemoryStore(ctx, lock.NewInProcess(), nil)}
 
-	g, err := store.New(gameCode, nil, false)
+	g, err := store.New(gameCode, &models.Script{
+		Config: models.Config{MaxPlayersPerTeam: 2},
+		Teams:  map[string]models.Team{"red": {Name: "Red"}},
+	}, false)
 	if err != nil {
 		t.Fatalf("creating game %q: %v", gameCode, err)
 	}
 
-	id := g.ID
-
 	// The first player to join is the host: that is the store's rule, not the
 	// test's, so the host the handler checks for is a real one. The order
 	// matters for exactly that reason.
+	slots := map[string]string{}
+
 	for _, player := range []struct{ id, name string }{{hostID, "Host"}, {targetID, "Target"}} {
-		if err := store.AddPlayer(id, player.id, player.name); err != nil {
-			t.Fatalf("adding player %v to game %v: %v", player.id, id, err)
+		slot, _, err := store.AssignSlot(g.ID, "red", player.id, player.name)
+		if err != nil {
+			t.Fatalf("seating player %v in game %v: %v", player.id, g.ID, err)
 		}
+
+		slots[player.id] = slot
 	}
 
-	if !store.PlayerIsHost(id, hostID) {
-		t.Fatalf("player %v is not the host of game %v; the test cannot kick anybody", hostID, id)
+	if !store.PlayerIsHost(g.ID, slots[hostID]) {
+		t.Fatalf("player %v is not the host of game %v; the test cannot kick anybody", hostID, g.ID)
 	}
 
-	return store, cancel, id
+	return kickGame{store: store, cancel: cancel, id: g.ID, hostSlot: slots[hostID], targetSlot: slots[targetID]}
+}
+
+// holder returns who holds slot in the game.
+func (k kickGame) holder(t *testing.T, slot string) string {
+	t.Helper()
+
+	g, err := k.store.Get(k.id)
+	if err != nil {
+		t.Fatalf("reading game %v: %v", k.id, err)
+	}
+
+	return g.Players[slot].UserID
 }
 
 // sessionsIn returns a session for the host and one for the target, both in the
-// given game.
-func sessionsIn(gameId string) directory {
+// game and naming the slots they hold.
+func sessionsIn(k kickGame) directory {
 	return directory{
-		hostID:   {ID: ids.New(), UserID: ref(hostID), GameID: ref(gameId)},
-		targetID: {ID: ids.New(), UserID: ref(targetID), GameID: ref(gameId)},
+		hostID:   {ID: ids.New(), UserID: ref(hostID), GameID: ref(k.id), SlotID: ref(k.hostSlot)},
+		targetID: {ID: ids.New(), UserID: ref(targetID), GameID: ref(k.id), SlotID: ref(k.targetSlot)},
 	}
 }
 
@@ -92,11 +120,11 @@ func ref[T any](v T) *T {
 	return &v
 }
 
-// kickRequest is the host asking for the target to be kicked.
-func kickRequest(caller *models.Session) actions.Request {
+// kickRequest is caller asking for the player in slot to be kicked.
+func kickRequest(caller *models.Session, slot string) actions.Request {
 	return actions.Request{
 		Session: caller,
-		Payload: map[string]interface{}{"code": gameCode, "userId": targetID},
+		Payload: map[string]interface{}{"code": gameCode, "slotId": slot},
 	}
 }
 
@@ -104,10 +132,10 @@ func kickRequest(caller *models.Session) actions.Request {
 // to keep working: a removal that committed still hands the transport the
 // target's session to close.
 func TestHandle_DisconnectsTheTargetItRemoved(t *testing.T) {
-	store, _, gameId := newGame(t)
-	sessions := sessionsIn(gameId)
+	k := newGame(t)
+	sessions := sessionsIn(k)
 
-	result, err := handle(kickRequest(sessions[hostID]), store, sessions)
+	result, err := handle(kickRequest(sessions[hostID], k.targetSlot), k.store, sessions)
 	if err != nil {
 		t.Fatalf("handle(host kicks target) = %v, want no error", err)
 	}
@@ -117,8 +145,8 @@ func TestHandle_DisconnectsTheTargetItRemoved(t *testing.T) {
 		t.Errorf("DisconnectIDs = %v, want %v", result.DisconnectIDs, want)
 	}
 
-	if store.HasPlayer(gameId, targetID) {
-		t.Errorf("player %v is still in game %v after a successful kick", targetID, gameId)
+	if holder := k.holder(t, k.targetSlot); holder != "" {
+		t.Errorf("slot %v is still held by %q after a successful kick", k.targetSlot, holder)
 	}
 }
 
@@ -131,16 +159,16 @@ func TestHandle_DisconnectsTheTargetItRemoved(t *testing.T) {
 // mutation give up on the game lock, exactly as a write during shutdown does;
 // nothing about the store or the handler is faked to produce it.
 func TestHandle_DoesNotDisconnectATargetItFailedToRemove(t *testing.T) {
-	store, cancel, gameId := newGame(t)
-	sessions := sessionsIn(gameId)
+	k := newGame(t)
+	sessions := sessionsIn(k)
 
-	cancel()
+	k.cancel()
 
-	result, err := handle(kickRequest(sessions[hostID]), store, sessions)
+	result, err := handle(kickRequest(sessions[hostID], k.targetSlot), k.store, sessions)
 
-	if !store.HasPlayer(gameId, targetID) {
+	if k.holder(t, k.targetSlot) != targetID {
 		t.Fatalf("player %v was removed from game %v; the test did not drive a failing removal",
-			targetID, gameId)
+			targetID, k.id)
 	}
 
 	if len(result.DisconnectIDs) != 0 {
@@ -156,8 +184,8 @@ func TestHandle_DoesNotDisconnectATargetItFailedToRemove(t *testing.T) {
 		t.Errorf("handle(failing removal) = %v, want it to wrap the store's own error", err)
 	}
 
-	if !strings.Contains(err.Error(), targetID) || !strings.Contains(err.Error(), gameId) {
-		t.Errorf("handle(failing removal) = %q, want it to name player %v and game %v", err, targetID, gameId)
+	if !strings.Contains(err.Error(), k.targetSlot) || !strings.Contains(err.Error(), k.id) {
+		t.Errorf("handle(failing removal) = %q, want it to name slot %v and game %v", err, k.targetSlot, k.id)
 	}
 }
 
@@ -165,10 +193,10 @@ func TestHandle_DoesNotDisconnectATargetItFailedToRemove(t *testing.T) {
 // it belongs: before the mutation, so a non-host changes nothing and closes
 // nobody's connection.
 func TestHandle_RejectsACallerWhoIsNotTheHost(t *testing.T) {
-	store, _, gameId := newGame(t)
-	sessions := sessionsIn(gameId)
+	k := newGame(t)
+	sessions := sessionsIn(k)
 
-	result, err := handle(kickRequest(sessions[targetID]), store, sessions)
+	result, err := handle(kickRequest(sessions[targetID], k.hostSlot), k.store, sessions)
 	if err == nil {
 		t.Fatalf("handle(non-host kicks) = %v, want an error", result)
 	}
@@ -177,40 +205,99 @@ func TestHandle_RejectsACallerWhoIsNotTheHost(t *testing.T) {
 		t.Errorf("DisconnectIDs = %v, want none for a caller who is not the host", result.DisconnectIDs)
 	}
 
-	if !store.HasPlayer(gameId, targetID) {
-		t.Errorf("player %v was removed from game %v by a caller who is not the host", targetID, gameId)
+	if k.holder(t, k.hostSlot) != hostID {
+		t.Errorf("slot %v was freed by a caller who is not the host", k.hostSlot)
 	}
 }
 
-// TestHandle_RejectsATargetInAnotherGame guards the other half of the check: a
-// host may only kick out of their own game.
-func TestHandle_RejectsATargetInAnotherGame(t *testing.T) {
-	store, _, gameId := newGame(t)
-	sessions := sessionsIn(gameId)
-	sessions[targetID].GameID = ref(ids.New())
+// TestHandle_RejectsACallerWhoNoLongerHoldsTheHostSlot: a session can outlive
+// its seat. One that still names the host slot after somebody else took it
+// must not carry the host's authority.
+func TestHandle_RejectsACallerWhoNoLongerHoldsTheHostSlot(t *testing.T) {
+	k := newGame(t)
+	sessions := sessionsIn(k)
+	sessions[targetID].SlotID = ref(k.hostSlot)
 
-	result, err := handle(kickRequest(sessions[hostID]), store, sessions)
+	result, err := handle(kickRequest(sessions[targetID], k.hostSlot), k.store, sessions)
 	if err == nil {
-		t.Fatalf("handle(target in another game) = %v, want an error", result)
+		t.Fatalf("handle(caller naming a slot they do not hold) = %v, want an error", result)
+	}
+
+	if k.holder(t, k.hostSlot) != hostID {
+		t.Errorf("slot %v was freed by a caller who does not hold the host slot", k.hostSlot)
+	}
+}
+
+// TestHandle_RejectsAnEmptySlot: there is nobody to kick.
+func TestHandle_RejectsAnEmptySlot(t *testing.T) {
+	k := newGame(t)
+	sessions := sessionsIn(k)
+
+	if err := k.store.RemovePlayer(k.id, k.targetSlot, targetID); err != nil {
+		t.Fatalf("freeing the target's slot: %v", err)
+	}
+
+	result, err := handle(kickRequest(sessions[hostID], k.targetSlot), k.store, sessions)
+	if err == nil {
+		t.Fatalf("handle(empty slot) = %v, want an error", result)
 	}
 
 	if len(result.DisconnectIDs) != 0 {
-		t.Errorf("DisconnectIDs = %v, want none for a target in another game", result.DisconnectIDs)
+		t.Errorf("DisconnectIDs = %v, want none for an empty slot", result.DisconnectIDs)
+	}
+}
+
+// TestHandle_FreesTheSlotOfATargetPlayingElsewhere: a player can still hold a
+// slot here while their session has moved to another game. The host must be
+// able to free that seat, and the player — busy in the other game — must stay
+// connected.
+func TestHandle_FreesTheSlotOfATargetPlayingElsewhere(t *testing.T) {
+	k := newGame(t)
+	sessions := sessionsIn(k)
+	sessions[targetID].GameID = ref(ids.New())
+
+	result, err := handle(kickRequest(sessions[hostID], k.targetSlot), k.store, sessions)
+	if err != nil {
+		t.Fatalf("handle(target playing elsewhere) = %v, want no error", err)
 	}
 
-	if !store.HasPlayer(gameId, targetID) {
-		t.Errorf("player %v was removed from game %v while their session named another game",
-			targetID, gameId)
+	if holder := k.holder(t, k.targetSlot); holder != "" {
+		t.Errorf("slot %v is still held by %q", k.targetSlot, holder)
+	}
+
+	if len(result.DisconnectIDs) != 0 {
+		t.Errorf("DisconnectIDs = %v, want none for a target playing in another game", result.DisconnectIDs)
+	}
+}
+
+// TestHandle_FreesTheSlotOfATargetWithNoSession: a player who logged out still
+// holds their slot until someone frees it.
+func TestHandle_FreesTheSlotOfATargetWithNoSession(t *testing.T) {
+	k := newGame(t)
+	sessions := sessionsIn(k)
+	delete(sessions, targetID)
+
+	result, err := handle(kickRequest(sessions[hostID], k.targetSlot), k.store, sessions)
+	if err != nil {
+		t.Fatalf("handle(target with no session) = %v, want no error", err)
+	}
+
+	if holder := k.holder(t, k.targetSlot); holder != "" {
+		t.Errorf("slot %v is still held by %q", k.targetSlot, holder)
+	}
+
+	if len(result.DisconnectIDs) != 0 {
+		t.Errorf("DisconnectIDs = %v, want none for a target with no session", result.DisconnectIDs)
 	}
 }
 
 // TestHandle_RejectsAnUnauthenticatedCaller covers the first gate: no session,
 // no kick.
 func TestHandle_RejectsAnUnauthenticatedCaller(t *testing.T) {
-	store, _, gameId := newGame(t)
-	sessions := sessionsIn(gameId)
+	k := newGame(t)
+	sessions := sessionsIn(k)
 
-	result, err := handle(kickRequest(nil), store, sessions)
+	result, err := handle(kickRequest(nil, k.targetSlot), k.store, sessions)
 	if err == nil {
 		t.Fatalf("handle(no session) = %v, want an error", result)
 	}
@@ -219,7 +306,7 @@ func TestHandle_RejectsAnUnauthenticatedCaller(t *testing.T) {
 		t.Errorf("DisconnectIDs = %v, want none for an unauthenticated caller", result.DisconnectIDs)
 	}
 
-	if !store.HasPlayer(gameId, targetID) {
-		t.Errorf("player %v was removed from game %v by an unauthenticated caller", targetID, gameId)
+	if k.holder(t, k.targetSlot) != targetID {
+		t.Errorf("slot %v was freed by an unauthenticated caller", k.targetSlot)
 	}
 }

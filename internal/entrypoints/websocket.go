@@ -48,11 +48,14 @@ func HandleDisconnect(s transport.Conn, t transport.Transport, gs *gameService.S
 		log.Print("error getting gameId from session")
 		return
 	} else if session.UserID == nil {
-		log.Print("error getting gameId from session")
+		log.Print("error getting userId from session")
+		return
+	} else if session.SlotID == nil {
+		log.Print("error getting slotId from session")
 		return
 	}
 
-	err = gs.DisconnectPlayer(*session.GameID, *session.UserID)
+	err = gs.DisconnectPlayer(*session.GameID, *session.SlotID, *session.UserID)
 	if err != nil {
 		log.Printf("could not set player as disconnected: %v\n", err)
 	}

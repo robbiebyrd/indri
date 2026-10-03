@@ -17,11 +17,6 @@ var (
 )
 
 type Storer interface {
-	HasPlayerOnTeam(id string, teamId string, userId string) bool
-	ChangePlayerTeam(id string, teamId string, userId string) error
-	AddPlayerToTeam(id string, teamId string, userId string) error
-	RemovePlayerFromTeam(id string, userId string) error
-	PlayerOnWhichTeam(id string, userId string) (*string, error)
 	New(code string, script *models.Script, privateGame bool) (*models.Game, error)
 	Get(id string) (*models.Game, error)
 	FindByCode(gameCode string) (*models.Game, error)
@@ -33,14 +28,10 @@ type Storer interface {
 	DeleteField(id string, key string) error
 	Mutate(ctx context.Context, id string, apply func(g *models.Game) error) error
 	MutateResult(ctx context.Context, id string, apply func(g *models.Game) error) (committed bool, err error)
-	HasPlayer(id string, userId string) bool
-	PlayerOnATeam(id string, userId string) bool
-	AddPlayer(id string, userId string, displayName string) error
-	AddPlayerResult(id string, userId string, displayName string) (added bool, err error)
-	RemovePlayer(id string, userId string) error
-	RemovePlayerResult(id string, userId string) (removed bool, err error)
-	ConnectPlayer(id string, userId string) error
-	DisconnectPlayer(id string, userId string) error
+	AssignSlot(id string, teamId string, userId string, displayName string) (slotId string, seated bool, err error)
+	RemovePlayer(id string, slotId string, userId string) error
+	ConnectPlayer(id string, slotId string, userId string) error
+	DisconnectPlayer(id string, slotId string, userId string) error
 	HasHost(id string) bool
 	PlayerIsHost(id string, playerId string) bool
 	UnsetHost(id string) error

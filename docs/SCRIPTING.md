@@ -155,13 +155,18 @@ indri.on("guess", function(req)
 end)
 ```
 
-`req.session`, when present, carries exactly three fields and no more:
+`req.session`, when present, carries exactly four fields and no more:
 
 ```lua
 req.session.userId
 req.session.gameId
 req.session.teamId
+req.session.slotId  -- the caller's key in state.players
 ```
+
+`state.players` is keyed by slot, not by user, so the caller's own player is
+`state.players[req.session.slotId]`. A session can outlive its seat, so a script that acts for the
+caller should check `state.players[req.session.slotId].userId == req.session.userId` first.
 
 `models.Session.Token` (the bearer token) and `models.Session.ID` (the broadcast targeting key) are
 **deliberately not there**. Neither is a script's to read, and neither is needed to decide whether a
@@ -284,7 +289,7 @@ either shape, so nothing there is touched.
 
 ## What a script may and may not write
 
-A script is handed the whole document, which is what makes `state.players[id].score = n` ergonomic.
+A script is handed the whole document, which is what makes `state.players[slotId].score = n` ergonomic.
 It is also what would let a script rewrite who is in the game. `checkInvariants`
 (`internal/services/lua/game.go`) refuses the edit before anything is stored, and unwinds the write:
 
@@ -293,12 +298,13 @@ It is also what would let a script rewrite who is in the game. `checkInvariants`
 | changing `game.code` | `script changed the game code from %q to %q` |
 | changing `game.private` | `script changed the game privacy from %t to %t` |
 | adding or removing a player | `script changed the player set (added [...], removed [...])` |
+| changing which user holds a slot | `script changed the holder of slot %q from %q to %q` |
 | changing any player's `host` | `script changed the host flag of player %q from %t to %t` |
 | changing any player's `connected` | `script changed the connected flag of player %q from %t to %t` |
 | adding or removing a team's members | `script changed the membership of team %q (added [...], removed [...])` |
 
-**Why membership is not a script's to change.** `models.Session` stores `GameID`, `TeamID` and
-`UserID` independently of the game document. A membership edit made from Lua does not desynchronise
+**Why membership is not a script's to change.** `models.Session` stores `GameID`, `TeamID`, `SlotID`
+and `UserID` independently of the game document. A membership edit made from Lua does not desynchronise
 one document, it desynchronises two, and nothing reconciles them afterwards. Host is worse: a script
 could promote its own caller. Membership therefore stays in Go, reached only through the built-in
 actions (`join`, `leave`, `kick`, …) which also maintain the session.
@@ -455,8 +461,8 @@ Four events, raised by the server about something that has **already happened**:
 | Event | Raised by | Subject fields |
 |---|---|---|
 | `game:created` | `GameService.New` | `code`, `private` |
-| `player:joined` | `GameService.ConnectPlayer`, only when a player was added | `userId`, `teamId` |
-| `player:left` | `GameService.RemovePlayer`, only when a player was removed | `userId` |
+| `player:joined` | `GameService.ConnectPlayer`, only when it seated a user who held no slot | `userId`, `teamId`, `slotId` |
+| `player:left` | `GameService.RemovePlayer`, only when it freed the user's slot | `userId`, `slotId` |
 | `scene:changed` | the engine itself, when a script's `indri.mutate` changes `stage.currentScene` | `sceneId`, `previous` |
 
 The handler receives the subject table plus two fields the host writes **after** it, so a subject key
@@ -468,8 +474,13 @@ indri.on("player:joined", function(ev)
   ev.gameId  -- the game
   ev.userId  -- from the subject
   ev.teamId
+  ev.slotId  -- the player's key in state.players
 end)
 ```
+
+A freed slot keeps its departed holder's `score`, `data` and `privateData` until somebody else is seated
+in it, so a `player:left` handler can still read `state.players[ev.slotId]`. The next user seated there
+starts clean; a player rejoining the slot they already hold keeps everything.
 
 There is **no `ev.session`** — same contract as a timer, and for the same reason. Nobody is connected
 when a game is created or a player drops.
@@ -924,7 +935,7 @@ a timer id publishes a delta carrying a fresh ObjectID, which no fixture can pre
 | `cases[].state` | overrides the file's, and the config's, for this case alone |
 | `cases[].name` | required, unique within the file. Reported as `<file>/<name>` |
 | `cases[].event.action` | required |
-| `cases[].event.session` | `{userId, teamId?}`. **Omit it entirely for an unauthenticated caller** |
+| `cases[].event.session` | `{userId, teamId?, slotId?}`. **Omit it entirely for an unauthenticated caller** |
 | `cases[].event.payload` | the client's arguments |
 | `expected.published` | the delta, as dotted path → value. `{}` asserts **nothing was published** |
 | `expected.removed` | removed paths. Absent asserts none, rather than ignoring them |

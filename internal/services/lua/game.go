@@ -238,6 +238,12 @@ func checkPlayers(before, after map[string]models.Player) error {
 	for _, id := range slices.Sorted(maps.Keys(before)) {
 		was, is := before[id], after[id]
 
+		// Slots are fixed when the game is created, so a membership change is
+		// a slot changing holder rather than a key appearing or vanishing.
+		if was.UserID != is.UserID {
+			return fmt.Errorf("script changed the holder of slot %q from %q to %q", id, was.UserID, is.UserID)
+		}
+
 		if was.Host != is.Host {
 			return fmt.Errorf("script changed the host flag of player %q from %t to %t", id, was.Host, is.Host)
 		}

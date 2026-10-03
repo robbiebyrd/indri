@@ -271,9 +271,8 @@ func (s sqlDocs) saveVersioned(
 // version bumped. The read and the write run in one transaction so a
 // concurrent writer cannot land between them.
 //
-// It backs every write that is not itself version-fenced — replace, setField,
-// unsetField and setPlayerConnected — which on the document stores are single
-// update operators. A SQL row holds the game as one JSON blob, so the
+// It backs every write that is not itself version-fenced — replace, setField
+// and unsetField — which on the document stores are single update operators. A SQL row holds the game as one JSON blob, so the
 // equivalent is read-modify-write, and it has to be atomic to match.
 func (s sqlDocs) mutateStored(ctx context.Context, id string, edit func(*models.Game) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -346,21 +345,5 @@ func (s sqlDocs) setField(ctx context.Context, id string, key string, value inte
 func (s sqlDocs) unsetField(ctx context.Context, id string, key string) error {
 	return s.mutateStored(ctx, id, func(g *models.Game) error {
 		return unsetPath(g, key)
-	})
-}
-
-func (s sqlDocs) setPlayerConnected(ctx context.Context, id string, userId string, connected bool) error {
-	return s.mutateStored(ctx, id, func(g *models.Game) error {
-		player, ok := g.Players[userId]
-		if !ok {
-			// Mirrors the MongoDB filter's $exists guard: a player who has been
-			// removed must not be recreated by a connect.
-			return fmt.Errorf("no player %v found in game %v", userId, id)
-		}
-
-		player.Connected = connected
-		g.Players[userId] = player
-
-		return nil
 	})
 }

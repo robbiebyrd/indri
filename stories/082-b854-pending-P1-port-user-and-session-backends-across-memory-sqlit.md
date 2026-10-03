@@ -9,7 +9,7 @@ updated: "2026-10-01T13:52:39.768Z"
 dependencies: ["081-7e0a"]
 plan: plans/main-divergence-integration.md
 plan_step: Step 5
-depends_on: ["stories/081-7e0a-pending-P1-port-the-player-slot-model-and-migrate-the-user-ke.md"]
+depends_on: ["stories/081-7e0a-complete-P1-port-the-player-slot-model-and-migrate-the-user-ke.md"]
 ---
 
 # Port user and session backends across memory, SQLite and Postgres
@@ -27,6 +27,7 @@ Local has Mongo-only user and session stores. origin/main added Storer interface
 - [ ] Moving a session onto a taken user reports repo.ErrDuplicate (origin 33bf874)
 - [ ] A user's password survives an Update that omits it (origin 284d617)
 - [ ] Sessions remain one-per-user; the unique index on userId is preserved on every backend
+- [ ] Every session store keeps SlotID in New and Update, and Update leaves empty fields alone rather than blanking them (origin 191813c)
 - [ ] VERIFY: go test ./internal/repo/user/ ./internal/repo/session/
 
 ## Files

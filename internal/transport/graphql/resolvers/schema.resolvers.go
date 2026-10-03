@@ -68,8 +68,8 @@ func (r *mutationResolver) Refresh(ctx context.Context) (model.JSON, error) {
 }
 
 // Kick is the resolver for the kick field.
-func (r *mutationResolver) Kick(ctx context.Context, code string, userID string) (model.JSON, error) {
-	return r.dispatch(ctx, "kick", map[string]interface{}{"code": code, "userId": userID})
+func (r *mutationResolver) Kick(ctx context.Context, code string, slotID string) (model.JSON, error) {
+	return r.dispatch(ctx, "kick", map[string]interface{}{"code": code, "slotId": slotID})
 }
 
 // Logout is the resolver for the logout field.

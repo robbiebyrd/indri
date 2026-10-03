@@ -224,15 +224,17 @@ func newGame(t *testing.T, store Storer, script *models.Script) *models.Game {
 	return g
 }
 
-// TestAddPlayer_ConcurrentNoLostUpdates verifies that concurrent AddPlayer
-// calls against the same game do not lose players — the exact lost-update race
-// the optimistic-concurrency version check is meant to prevent — and that the
-// host election inside the mutation stays single-valued while it happens.
-func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
+// TestAssignSlot_ConcurrentNoLostUpdates: concurrent joins must each land in
+// their own slot — the lost-update race the version fence exists to prevent —
+// and the host election inside the mutation must stay single-valued.
+func TestAssignSlot_ConcurrentNoLostUpdates(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID
-
 		const players = 25
+
+		g := newGame(t, b.store, &models.Script{
+			Config: models.Config{MaxPlayersPerTeam: players},
+			Teams:  map[string]models.Team{"red": {Name: "Red"}},
+		})
 
 		var wg sync.WaitGroup
 
@@ -245,7 +247,7 @@ func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
 				defer wg.Done()
 
 				userId := fmt.Sprintf("user-%d", n)
-				if err := b.store.AddPlayer(gameId, userId, userId); err != nil {
+				if _, _, err := b.store.AssignSlot(g.ID, "red", userId, userId); err != nil {
 					errs <- err
 				}
 			}(i)
@@ -255,23 +257,27 @@ func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
 		close(errs)
 
 		for err := range errs {
-			t.Errorf("concurrent AddPlayer failed: %v", err)
+			t.Errorf("concurrent AssignSlot failed: %v", err)
 		}
 
-		final, err := b.store.Get(gameId)
+		final, err := b.store.Get(g.ID)
 		if err != nil {
 			t.Fatalf("reloading game: %v", err)
 		}
 
-		if len(final.Players) != players {
-			t.Fatalf("expected %d players after concurrent adds, got %d (lost updates)", players, len(final.Players))
-		}
-
-		hosts := 0
+		holders, hosts := map[string]bool{}, 0
 
 		for _, p := range final.Players {
+			holders[p.UserID] = true
+
 			if p.Host {
 				hosts++
+			}
+		}
+
+		for i := 0; i < players; i++ {
+			if !holders[fmt.Sprintf("user-%d", i)] {
+				t.Errorf("user-%d has no slot (lost update)", i)
 			}
 		}
 
@@ -281,51 +287,32 @@ func TestAddPlayer_ConcurrentNoLostUpdates(t *testing.T) {
 	})
 }
 
-// TestMutate_PublishesTheCommittedDelta is the mutate bracket itself: load,
-// snapshot, apply, fence, then publish what actually changed. A write that
-// never publishes is invisible to every player in the game, so the delta is
-// part of the contract, not a side effect.
-func TestMutate_PublishesTheCommittedDelta(t *testing.T) {
+// TestAssignSlot_PublishesTheSeat: a join that never publishes is invisible to
+// every other player, and it must publish only the slot that changed.
+func TestAssignSlot_PublishesTheSeat(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID
-
-		if err := b.store.AddPlayer(gameId, "alice", "Alice"); err != nil {
-			t.Fatalf("adding the first player: %v", err)
-		}
+		g := twoSlotGame(t, b.store)
+		assign(t, b.store, g.ID, "blue", "alice")
 
 		b.events.drain()
 
-		// The second join is the interesting one: the players map already
-		// exists, so the delta must be the dotted path of the new player
-		// rather than a wholesale replacement of everyone's state.
-		if err := b.store.AddPlayer(gameId, "bob", "Bob"); err != nil {
-			t.Fatalf("adding the second player: %v", err)
+		slot, _, err := b.store.AssignSlot(g.ID, "blue", "bob", "Bob")
+		if err != nil {
+			t.Fatalf("AssignSlot: %v", err)
 		}
 
 		updated := b.events.updated()
 
-		player, published := updated["players.bob"]
-		if !published {
-			t.Fatalf("adding a player published no delta for it: %v", updated)
+		if updated["players."+slot+".userId"] != "bob" || updated["players."+slot+".name"] != "Bob" {
+			t.Fatalf("seating bob in %s published %v", slot, updated)
 		}
 
-		fields, ok := player.(map[string]interface{})
-		if !ok {
-			t.Fatalf("player delta is %T, want the whole player object", player)
-		}
-
-		if fields["name"] != "Bob" {
-			t.Errorf("published player is %v, want Bob", fields)
-		}
-
-		// Alice was host first and stays host, so nothing about her changed
-		// and the delta must not mention her.
-		if _, mentioned := updated["players.alice"]; mentioned {
-			t.Errorf("the delta rewrote an unchanged player: %v", updated)
-		}
-
-		if fields["host"] != false {
-			t.Errorf("the second player joined as host too: %v", fields)
+		// Alice joined first and stays host, so nothing about her changed and the
+		// delta must not mention her.
+		for key := range updated {
+			if strings.HasPrefix(key, "players.") && !strings.HasPrefix(key, "players."+slot+".") {
+				t.Errorf("the delta wrote %q, which seating bob did not change", key)
+			}
 		}
 	})
 }
@@ -455,15 +442,13 @@ func TestMutate_PrivateDataNeverReachesTheDelta(t *testing.T) {
 // inside one fenced mutation.
 func TestSetPlayerAsHost_LeavesExactlyOneHost(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID
+		gameId := twoSlotGame(t, b.store).ID
 
-		for _, name := range []string{"alice", "bob", "carol"} {
-			if err := b.store.AddPlayer(gameId, name, name); err != nil {
-				t.Fatalf("adding %s: %v", name, err)
-			}
-		}
+		assign(t, b.store, gameId, "red", "alice")
+		assign(t, b.store, gameId, "red", "bob")
+		carol := assign(t, b.store, gameId, "blue", "carol")
 
-		if err := b.store.SetPlayerAsHost(gameId, "carol"); err != nil {
+		if err := b.store.SetPlayerAsHost(gameId, carol); err != nil {
 			t.Fatalf("setting host: %v", err)
 		}
 
@@ -480,56 +465,49 @@ func TestSetPlayerAsHost_LeavesExactlyOneHost(t *testing.T) {
 			}
 		}
 
-		if len(hosts) != 1 || hosts[0] != "carol" {
-			t.Errorf("hosts are %v, want exactly [carol]", hosts)
+		if len(hosts) != 1 || hosts[0] != carol {
+			t.Errorf("hosts are %v, want exactly carol's slot [%s]", hosts, carol)
 		}
 
-		if err := b.store.SetPlayerAsHost(gameId, "nobody"); err == nil {
-			t.Error("promoting a player who is not in the game was accepted")
+		if err := b.store.SetPlayerAsHost(gameId, "p99"); err == nil {
+			t.Error("promoting a slot the game does not have was accepted")
+		}
+
+		// blue's second slot is free: a host nobody holds would leave the game
+		// with a host flag set and so stop the next joiner being elected.
+		if err := b.store.SetPlayerAsHost(gameId, "p1"); err == nil {
+			t.Error("promoting a free slot was accepted")
+		}
+
+		if !b.store.PlayerIsHost(gameId, carol) {
+			t.Error("a refused promotion still moved the host")
 		}
 	})
 }
 
-// TestConnectPlayer_RefusesAPlayerWhoHasLeft: the connected flag is written
-// outside Mutate, conditional on the player still existing, so a reconnect
-// racing a kick cannot resurrect a partial player document.
-func TestConnectPlayer_RefusesAPlayerWhoHasLeft(t *testing.T) {
+// TestConnectPlayer_DoesNotReseatAPlayerWhoHasLeft: a reconnect racing a kick
+// must not bring the kicked player back into their old slot.
+func TestConnectPlayer_DoesNotReseatAPlayerWhoHasLeft(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b backend) {
-		gameId := newGame(t, b.store, &models.Script{}).ID
+		g := twoSlotGame(t, b.store)
+		slot := assign(t, b.store, g.ID, "red", "alice")
 
-		if err := b.store.AddPlayer(gameId, "alice", "Alice"); err != nil {
-			t.Fatalf("adding player: %v", err)
-		}
-
-		if err := b.store.ConnectPlayer(gameId, "alice"); err != nil {
-			t.Fatalf("connecting player: %v", err)
-		}
-
-		if updated := b.events.updated(); updated["players.alice.connected"] != true {
-			t.Errorf("connecting published %v, want players.alice.connected true", updated)
-		}
-
-		if err := b.store.RemovePlayer(gameId, "alice"); err != nil {
-			t.Fatalf("removing player: %v", err)
+		if err := b.store.RemovePlayer(g.ID, slot, "alice"); err != nil {
+			t.Fatalf("RemovePlayer: %v", err)
 		}
 
 		b.events.drain()
 
-		if err := b.store.ConnectPlayer(gameId, "alice"); err == nil {
-			t.Error("connecting a player who has left was accepted")
+		if err := b.store.ConnectPlayer(g.ID, slot, "alice"); err != nil {
+			t.Fatalf("a connect for a slot the user no longer holds should be a no-op, got %v", err)
 		}
 
 		if published := b.events.drain(); len(published) != 0 {
 			t.Errorf("a refused connect still published %v", published)
 		}
 
-		g, err := b.store.Get(gameId)
-		if err != nil {
-			t.Fatalf("reloading game: %v", err)
-		}
-
-		if _, resurrected := g.Players["alice"]; resurrected {
-			t.Error("a refused connect recreated the player")
+		if p := player(t, b.store, g.ID, slot); p.UserID != "" || p.Connected {
+			t.Errorf("a refused connect reseated the player: %+v", p)
 		}
 	})
 }

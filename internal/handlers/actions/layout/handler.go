@@ -57,11 +57,6 @@ func editLayout(req actions.Request, games gameLookup, mutator gameMutator) (act
 		return actions.Result{}, fmt.Errorf("must be logged in to edit a layout")
 	}
 
-	callerSession := req.Session
-	if callerSession.UserID == nil {
-		return actions.Result{}, fmt.Errorf("calling session has no user id")
-	}
-
 	gameCode, err := handlerUtils.RequireGameCode(req.Payload)
 	if err != nil {
 		return actions.Result{}, err
@@ -74,12 +69,8 @@ func editLayout(req actions.Request, games gameLookup, mutator gameMutator) (act
 
 	gameId := g.ID
 
-	if callerSession.GameID == nil || *callerSession.GameID != gameId {
-		return actions.Result{}, fmt.Errorf("caller %v is not in game %v", *callerSession.UserID, *gameCode)
-	}
-
-	if !g.Players[*callerSession.UserID].Host {
-		return actions.Result{}, fmt.Errorf("caller %v is not the host of game %v", *callerSession.UserID, *gameCode)
+	if err := handlerUtils.RequireHost(req.Session, g); err != nil {
+		return actions.Result{}, err
 	}
 
 	op, err := decodeOp(req.Payload)

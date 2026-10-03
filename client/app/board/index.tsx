@@ -7,8 +7,7 @@ import {DOCK_WIDTH_FRACTION, EditorDock} from "@/components/board/editor/editor-
 import {useGameState} from "@/providers/game-state/use-game-state"
 import {useSocket} from "@/providers/socket/use-socket"
 import {useUserState} from "@/providers/user-state/use-user-state"
-
-import type {Game} from "@/models/models"
+import {isHost} from "@/services/players"
 
 /**
  * The live board route, with the layout editor over it.
@@ -34,8 +33,8 @@ export default function Board() {
     const code = gameState?.code
 
     // Editing is host-only, and host-ness comes from the GAME, not the layout:
-    // `game.players[userId].host` is the same flag the server's `layout` handler
-    // authorizes against, so the button appears exactly when the action would
+    // the host flag on the slot the user holds is the same one the server's
+    // `layout` handler authorizes against, so the button appears exactly when the action would
     // be accepted. Deriving it from layout data is impossible — a layout says
     // nothing about who anyone is.
     //
@@ -107,13 +106,6 @@ export default function Board() {
             )}
         </View>
     )
-}
-
-/** `players` is keyed by user id; an absent player is simply not the host. */
-function isHost(game: Game | undefined, userId: string | undefined): boolean {
-    if (game?.players === undefined || userId === undefined) return false
-
-    return game.players[userId]?.host === true
 }
 
 const styles = StyleSheet.create({

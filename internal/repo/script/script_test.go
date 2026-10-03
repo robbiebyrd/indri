@@ -213,6 +213,13 @@ func TestNewStore_ReturnsErrors(t *testing.T) {
 			path: writeConfig(t, dir, "negative.json", `{"schemaVersion": -1}`),
 			want: "declares schema version -1",
 		},
+		{
+			// Every team's player slots are declared from this number when a
+			// game is created, so a team with none can never be joined.
+			name: "teams with no player slots",
+			path: writeConfig(t, dir, "noslots.json", versioned(`, "teams": {"red": {"name": "Red"}}`)),
+			want: "maxPlayersPerTeam",
+		},
 	}
 
 	for _, test := range tests {

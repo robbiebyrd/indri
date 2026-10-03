@@ -224,37 +224,6 @@ func (m mongoDocs) unsetField(ctx context.Context, id string, key string) error 
 	return nil
 }
 
-// setPlayerConnected sets the player's connected status atomically, only if
-// the player still exists, so a concurrent removal cannot recreate a partial
-// player document. The version bump keeps it coherent with Mutate's CAS.
-func (m mongoDocs) setPlayerConnected(ctx context.Context, id string, userId string, connected bool) error {
-	playerKey := playerConnectedKey(userId)
-
-	result, err := m.collection.Collection().UpdateOne(
-		ctx,
-		bson.D{
-			{Key: "_id", Value: id},
-			{Key: "players." + userId, Value: bson.D{{Key: "$exists", Value: true}}},
-		},
-		bson.D{
-			{Key: "$set", Value: bson.D{
-				{Key: playerKey, Value: connected},
-				{Key: "updatedAt", Value: time.Now()},
-			}},
-			{Key: "$inc", Value: bson.D{{Key: "version", Value: 1}}},
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("no player %v found in game %v", userId, id)
-	}
-
-	return nil
-}
-
 // withoutKey returns a copy of doc with the given top-level key removed, used
 // to keep the immutable _id out of a $set.
 func withoutKey(doc bson.D, key string) bson.D {

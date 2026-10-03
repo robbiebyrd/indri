@@ -247,6 +247,7 @@ func sessionToLua(L *lua.LState, session *models.Session) *lua.LTable {
 		"userId": session.UserID,
 		"gameId": session.GameID,
 		"teamId": session.TeamID,
+		"slotId": session.SlotID,
 	} {
 		if value != nil {
 			tbl.RawSetString(key, lua.LString(*value))

@@ -134,6 +134,10 @@ type Session struct {
 
 	// TeamID is empty for a caller who has joined no team.
 	TeamID string `json:"teamId,omitempty"`
+
+	// SlotID is the caller's key in state.players, empty for a caller who
+	// holds no slot.
+	SlotID string `json:"slotId,omitempty"`
 }
 
 // model renders the fixture's caller as the session a transport would have
@@ -149,6 +153,11 @@ func (s *Session) model(gameID string) *models.Session {
 	if s.TeamID != "" {
 		teamID := s.TeamID
 		session.TeamID = &teamID
+	}
+
+	if s.SlotID != "" {
+		slotID := s.SlotID
+		session.SlotID = &slotID
 	}
 
 	return session

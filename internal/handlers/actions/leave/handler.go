@@ -23,7 +23,7 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 
 	session := req.Session
 
-	if session.GameID == nil || *session.GameID == "" {
+	if session.GameID == nil || *session.GameID == "" || session.SlotID == nil || session.UserID == nil {
 		return actions.Result{}, fmt.Errorf("player is not in a game")
 	}
 
@@ -32,8 +32,8 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		return actions.Result{}, err
 	}
 
-	if err = h.i.GameService.RemovePlayer(g.ID, *session.UserID); err != nil {
-		log.Printf("could not disconnect player %v from game %v: %v\n", *session.UserID, *session.GameID, err)
+	if err = h.i.GameService.RemovePlayer(g.ID, *session.SlotID, *session.UserID); err != nil {
+		log.Printf("could not free slot %v of game %v: %v\n", *session.SlotID, *session.GameID, err)
 	}
 
 	return actions.Result{}, nil

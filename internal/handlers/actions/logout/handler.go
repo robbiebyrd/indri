@@ -26,8 +26,8 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 	// Mark the player disconnected while the session still exists, then
 	// invalidate the session so its bearer token can't be replayed, then ask the
 	// transport to close the connection.
-	if session.GameID != nil && session.UserID != nil {
-		if err := h.i.GameService.DisconnectPlayer(*session.GameID, *session.UserID); err != nil {
+	if session.GameID != nil && session.SlotID != nil && session.UserID != nil {
+		if err := h.i.GameService.DisconnectPlayer(*session.GameID, *session.SlotID, *session.UserID); err != nil {
 			log.Printf("logout: could not mark player disconnected: %v", err)
 		}
 	}

@@ -259,30 +259,6 @@ func (m *memoryDocs) unsetField(_ context.Context, id string, key string) error 
 	return nil
 }
 
-func (m *memoryDocs) setPlayerConnected(_ context.Context, id string, userId string, connected bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	stored, ok := m.games[id]
-	if !ok {
-		return fmt.Errorf("no player %v found in game %v", userId, id)
-	}
-
-	player, ok := stored.Players[userId]
-	if !ok {
-		// Mirrors the MongoDB filter's $exists guard: a player who has been
-		// removed must not be recreated by a connect.
-		return fmt.Errorf("no player %v found in game %v", userId, id)
-	}
-
-	player.Connected = connected
-	stored.Players[userId] = player
-	stored.UpdatedAt = time.Now()
-	stored.Version++
-
-	return nil
-}
-
 // errNotFound stands in for the driver's ErrNoDocuments. Callers of the store
 // only ever check for a non-nil error, so the distinction does not travel any
 // further than this package.

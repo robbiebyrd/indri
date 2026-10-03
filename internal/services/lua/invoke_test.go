@@ -27,6 +27,7 @@ indri.on("echo", function(req)
     tostring(s.userId),
     tostring(s.gameId),
     tostring(s.teamId),
+    tostring(s.slotId),
     tostring(s.token),
     tostring(s.id),
   }, "|"), 0)
@@ -78,27 +79,28 @@ func TestInvoke_HandsTheRequestToTheRegisteredHandler(t *testing.T) {
 					UserID: stringPtr("player-1"),
 					GameID: stringPtr("game-1"),
 					TeamID: stringPtr("team-1"),
+					SlotID: stringPtr("p1"),
 				},
 			},
 			// The trailing nils are the two fields a script may not have: the
 			// bearer token a client resumes with, and the connection key every
 			// targeted broadcast filters on.
-			want: "echo|hello|player-1|game-1|team-1|nil|nil",
+			want: "echo|hello|player-1|game-1|team-1|p1|nil|nil",
 		},
 		"a session that has not joined a game": {
 			req: actions.Request{
 				Payload: map[string]interface{}{"word": "hello"},
 				Session: &models.Session{UserID: stringPtr("player-1")},
 			},
-			want: "echo|hello|player-1|nil|nil|nil|nil",
+			want: "echo|hello|player-1|nil|nil|nil|nil|nil",
 		},
 		"no session at all": {
 			req:  actions.Request{Payload: map[string]interface{}{"word": "hello"}},
-			want: "echo|hello|nil|nil|nil|nil|nil",
+			want: "echo|hello|nil|nil|nil|nil|nil|nil",
 		},
 		"no payload at all": {
 			req:  actions.Request{},
-			want: "echo|nil|nil|nil|nil|nil|nil",
+			want: "echo|nil|nil|nil|nil|nil|nil|nil",
 		},
 	}
 

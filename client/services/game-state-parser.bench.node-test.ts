@@ -129,6 +129,7 @@ function buildGame(layout: GameLayout): BenchGame {
     const players: Record<string, Player> = {};
     for (let i = 0; i < 8; i++) {
         players[`p${i}`] = {
+            userId: `user-${i}`,
             name: `player ${i}`,
             score: i,
             connected: true,

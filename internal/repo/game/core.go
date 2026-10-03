@@ -50,11 +50,6 @@ type docs interface {
 	// prior state. Both bump the version so they stay coherent with the fence.
 	setField(ctx context.Context, id string, key string, value interface{}) error
 	unsetField(ctx context.Context, id string, key string) error
-
-	// setPlayerConnected flips one player's connected flag, and only while
-	// that player still exists, so a concurrent removal cannot recreate a
-	// partial player document.
-	setPlayerConnected(ctx context.Context, id string, userId string, connected bool) error
 }
 
 // core is the backend-independent half of a game store. Both Store and
@@ -280,7 +275,9 @@ func newGameDoc(code string, script *models.Script, privateGame bool) models.Cre
 	}
 
 	if script != nil {
-		doc.Teams = &script.Teams
+		teams, players := declareSlots(script.Teams, script.Config.MaxPlayersPerTeam)
+		doc.Teams = &teams
+		doc.Players = &players
 		doc.Stage = &script.Stage
 		doc.PublicData = script.PublicData
 		doc.PrivateData = script.PrivateData

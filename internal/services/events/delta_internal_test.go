@@ -45,8 +45,8 @@ func TestEscapeSegmentRoundTrip(t *testing.T) {
 	}
 }
 
-// Paths are also published by writers that build them by hand (UpdateField,
-// playerConnectedKey). Those contain no backslash, so the decoder must treat
+// Paths are also published by writers that build them by hand (UpdateField and
+// DeleteField). Those contain no backslash, so the decoder must treat
 // them exactly as a plain split would — otherwise the two producers would
 // disagree about the same path.
 func TestSplitPath(t *testing.T) {

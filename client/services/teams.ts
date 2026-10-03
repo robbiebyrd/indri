@@ -1,5 +1,6 @@
 import {Game, Team} from "@/models/models";
 
+/** The team that lists slot `playerId` among its pre-declared slots. */
 export const getTeam = (playerId?: string, gameState?: Game): { [key: string]: Team } | undefined => {
     if (!playerId || !gameState) {
         return undefined

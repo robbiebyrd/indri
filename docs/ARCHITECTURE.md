@@ -159,7 +159,7 @@ Every multi-field edit to a game goes through `gameRepo.Store.Mutate`, which del
 6. After 10 failed attempts, return `mutation.ErrConflict`.
 
 The lock avoids the retry loop in the common case; the version fence is what makes a lease expiring
-mid-mutation safe. Single-field writes (`UpdateField`, `DeleteField`, `markPlayerConnected`) skip the
+mid-mutation safe. Single-field writes (`UpdateField`, `DeleteField`) skip the
 lock but still `$inc` `version`, keeping them coherent with the CAS, and publish their own delta
 explicitly.
 
@@ -174,7 +174,7 @@ Collections: `game`, `user`, `session`.
 Game
 ├── Code                 unique index
 ├── Version              optimistic-concurrency counter
-├── Players  map[userId] → Player  { name, score, connected, host, controller, data, privateData }
+├── Players  map[slotId] → Player  { userId, name, score, connected, host, controller, data, privateData }
 ├── Teams    map[teamId] → Team    { name, playerIds, data, privateData, playerData }
 ├── Stage
 │   ├── CurrentScene, SceneOrder
@@ -191,7 +191,14 @@ Three data stores repeat at every level:
 | `PrivateData` | `privateData` | server-only; removed from keyframes by `GameService.Sanitize` and from deltas by `events.SanitizeDelta` |
 | `PlayerData` | `playerData` | keyed per player |
 
-`Session` links a `userId` to a `gameId` and `teamId`, and holds the secret resume `Token`. Unique
+Players are pre-declared **slots**: `repo/game` gives every script team `maxPlayersPerTeam` of them when
+the game is created (teams in name order, ids `p0`, `p1`, …), listed in the team's `playerIds`.
+Membership is a slot changing holder — `Player.userId`, `""` when free — never a key appearing or
+vanishing, so delta paths stay stable. `AssignSlot`, `RemovePlayer`, `ConnectPlayer` and
+`DisconnectPlayer` are the only membership writes, all over `Mutate`, and the last three act only for
+the slot's current holder.
+
+`Session` links a `userId` to a `gameId`, `teamId` and `slotId`, and holds the secret resume `Token`. Unique
 indexes on `userId` and (sparse) `token`; compound indexes on `(userId, gameId)` and
 `(gameId, userId, teamId)`.
 

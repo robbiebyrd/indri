@@ -47,7 +47,7 @@ var routes = map[string]build{
 
 	"join":   args(required("code", "teamId")),
 	"leave":  args(),
-	"kick":   args(required("code", "userId")),
+	"kick":   args(required("code", "slotId")),
 	"logout": args(),
 
 	// The keyframe route. An SSE client cannot build state from deltas alone,

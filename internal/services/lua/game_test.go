@@ -51,6 +51,7 @@ func fullGame(t *testing.T) *models.Game {
 		},
 		Players: map[string]models.Player{
 			"alice": {
+				UserID:      "user-alice",
 				Name:        "Alice",
 				Score:       3,
 				Connected:   true,
@@ -59,6 +60,7 @@ func fullGame(t *testing.T) *models.Game {
 				PrivateData: &map[string]interface{}{"hand": []interface{}{"a", "b"}},
 			},
 			"bob": {
+				UserID:     "user-bob",
 				Name:       "Bob",
 				Score:      1,
 				Controller: true,
@@ -361,6 +363,9 @@ func TestApplyLua_RejectsStructuralChanges(t *testing.T) {
 		{"promoting itself to host", "state.players.bob.host = true"},
 		{"demoting the host", "state.players.alice.host = false"},
 		{"flipping a connected flag", "state.players.bob.connected = true"},
+		{"handing a slot to another user", `state.players.bob.userId = "mallory"`},
+		{"vacating a slot", `state.players.bob.userId = ""`},
+		{"swapping two slots' holders", `state.players.alice.userId, state.players.bob.userId = "user-bob", "user-alice"`},
 		{"changing the game code", `state.code = "HACK"`},
 		{"changing the game privacy", "state.private = false"},
 		{"adding a player to a team", `table.insert(state.teams.red.playerIds, "bob")`},

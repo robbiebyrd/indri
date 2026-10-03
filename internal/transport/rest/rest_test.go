@@ -178,9 +178,9 @@ func TestRoutes_DispatchTheSameActionsAndPayloadsAsTheOtherTransports(t *testing
 		},
 		{
 			route:   "/api/kick",
-			body:    `{"code":"ABCD","userId":"u1"}`,
+			body:    `{"code":"ABCD","slotId":"p1"}`,
 			action:  "kick",
-			payload: map[string]interface{}{"code": "ABCD", "userId": "u1"},
+			payload: map[string]interface{}{"code": "ABCD", "slotId": "p1"},
 		},
 		{
 			route:   "/api/logout",
@@ -241,7 +241,7 @@ func TestRoutes_RejectMissingRequiredFields(t *testing.T) {
 		"login without a password":  {"/api/login", `{"email":"a@b.c"}`},
 		"reconnect without a token": {"/api/reconnect", `{}`},
 		"join without a code":       {"/api/join", `{"teamId":"red"}`},
-		"kick without a userId":     {"/api/kick", `{"code":"ABCD"}`},
+		"kick without a slotId":     {"/api/kick", `{"code":"ABCD"}`},
 		"inquire without a type":    {"/api/inquire", `{}`},
 	}
 
@@ -429,7 +429,7 @@ func TestDispatch_DisconnectsSessionsAcrossTransports(t *testing.T) {
 
 	rec.result = actions.Result{DisconnectIDs: []string{"kick-me"}}
 
-	post(t, url+"/api/kick", `{"code":"ABCD","userId":"u1"}`, bearer("good-token"))
+	post(t, url+"/api/kick", `{"code":"ABCD","slotId":"p1"}`, bearer("good-token"))
 
 	if !victim.IsClosed() {
 		t.Error("the kicked session's connection on the peer transport was left open")

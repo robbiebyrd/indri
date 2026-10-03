@@ -155,16 +155,19 @@ Re-sends a full sanitized keyframe for the session's current game, or a `WSError
 { "action": "leave" }
 ```
 
-Removes the caller from their game and from any team, atomically.
+Frees the caller's slot in their game. The slot stays — a game's slots are fixed when it is created —
+and is open to the next player who joins that team.
 
 ### `kick`
 
 ```json
-{ "action": "kick", "code": "my-room", "userId": "<target user id>" }
+{ "action": "kick", "code": "my-room", "slotId": "<target slot id>" }
 ```
 
-Host-only. The caller is authorized from their own connection's session — never from the payload. The
-target is removed from the game and force-disconnected if currently connected.
+Host-only. The caller is authorized from their own connection's session — never from the payload — and
+must still hold the host slot their session names. The target is named by slot, the key it has in
+`players`. The slot is freed even when its holder's session is in another game or gone; the holder is
+force-disconnected only when their session is in this game and currently connected.
 
 ### `layout`
 
@@ -287,9 +290,11 @@ from the stage, every scene, every team, and every player before sending.
 ```json
 {
   "id": "…", "code": "my-room", "createdAt": "…", "updatedAt": "…",
-  "players": { "<userId>": { "name": "…", "score": 0, "connected": true,
-                             "host": true, "controller": false, "data": {} } },
-  "teams":   { "team1": { "name": "Player 1", "playerIds": ["<userId>"], "data": {"marker": "X"} } },
+  "players": { "p0": { "userId": "<userId>", "name": "…", "score": 0, "connected": true,
+                       "host": true, "controller": false, "data": {} },
+               "p1": { "userId": "", "name": "", "score": 0, "connected": false,
+                       "host": false, "controller": false } },
+  "teams":   { "team1": { "name": "Player 1", "playerIds": ["p0", "p1"], "data": {"marker": "X"} } },
   "stage":   { "currentScene": "board", "sceneOrder": ["board"],
                "scenes": { "board": { "data": { "board": [["","",""],["","",""],["","",""]] } } } },
   "data": {}
@@ -297,6 +302,11 @@ from the stage, every scene, every team, and every player before sending.
 ```
 
 Sent on `create`, `join`, `refresh`, and after a `reconnect` into an active game.
+
+`players` is keyed by **slot**, not by user. Every team's slots are declared when the game is created
+(teams in name order, `maxPlayersPerTeam` each, ids `p0`, `p1`, …) and listed in its `playerIds`, so
+slot ids — and the delta paths built from them — never move as players come and go. A slot's `userId`
+names its holder and is `""` while the slot is free; find yourself by matching `userId`.
 
 ### Delta — change event
 
@@ -309,7 +319,7 @@ Published by the store at each write and broadcast to every session in the affec
 ```
 
 Keys in `updated` are dotted paths into the game's **JSON** representation — the same field names the
-keyframe uses. Nested objects are walked (`players.<userId>.host`); arrays and scalars are replaced
+keyframe uses. Nested objects are walked (`players.<slotId>.host`); arrays and scalars are replaced
 whole. Apply them onto the last keyframe.
 
 A path segment is one document key, and a key is arbitrary — a user id, a team id, a widget id, a
@@ -391,7 +401,7 @@ action this affects: it resolves to the auth payload, and its keyframe is not re
 | `createGame(code, teamId, private)` | create | |
 | `joinGame(code, teamId)` | join | |
 | `leaveGame` | leave | |
-| `kick(code, userId)` | kick | host-only |
+| `kick(code, slotId)` | kick | host-only |
 | `logout` | logout | |
 | `inquire(inquiryType, inquiry, code)` | inquire | |
 | `layout(code, op, args)` | layout | host-only; result is always null |
@@ -442,7 +452,7 @@ is treated as `{}`, so argument-less actions can be POSTed with nothing.
 | `POST /api/create` | create | `{code, teamId, private?}` |
 | `POST /api/join` | join | `{code, teamId}` |
 | `POST /api/leave` | leave | — |
-| `POST /api/kick` | kick | `{code, userId}` — host-only |
+| `POST /api/kick` | kick | `{code, slotId}` — host-only |
 | `POST /api/logout` | logout | — |
 | `POST /api/inquire` | inquire | `{inquiryType, inquiry?, code?}` |
 | `POST /api/refresh` | refresh | — returns the current keyframe |

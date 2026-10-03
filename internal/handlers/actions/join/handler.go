@@ -2,13 +2,10 @@ package join
 
 import (
 	"fmt"
-	"log"
-	"time"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
-	"github.com/robbiebyrd/indri/internal/models"
 )
 
 type Handler struct {
@@ -27,11 +24,9 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		}, fmt.Errorf("not authenticated")
 	}
 
-	session := req.Session
-
-	gameCode, teamId := utils.ParseGameCodeAndTeamID(req.Payload)
-	if gameCode == nil {
-		return actions.Result{}, fmt.Errorf("game code not provided")
+	gameCode, teamId, err := utils.RequireGameCodeAndTeamID(req.Payload)
+	if err != nil {
+		return actions.Result{}, err
 	}
 
 	g, err := h.i.GameService.GetByCode(*gameCode)
@@ -39,35 +34,10 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		return actions.Result{}, err
 	}
 
-	user, err := h.i.UserService.Get(*session.UserID)
-	if err != nil {
+	keyframe, err := utils.SeatCaller(h.i.GameService, h.i.UserService, h.i.SessionService, req.Session, g.ID, *teamId)
+	if keyframe == nil {
 		return actions.Result{}, err
 	}
 
-	displayName := user.Name
-	if user.DisplayName != nil {
-		displayName = *user.DisplayName
-	}
-
-	if err = h.i.GameService.ConnectPlayer(g.ID, *teamId, *session.UserID, displayName); err != nil {
-		log.Printf("error adding player %v to game %v: %v\n", *session.UserID, *gameCode, err)
-	}
-
-	gameJSONBytes, err := h.i.GameService.GetJSONBytes(g.ID)
-	if err != nil {
-		return actions.Result{}, err
-	}
-
-	result := actions.Result{Responses: [][]byte{*gameJSONBytes}}
-
-	if err = h.i.SessionService.Update(session.ID, &models.UpdateSession{
-		GameID:    g.ID,
-		UserID:    *session.UserID,
-		TeamID:    *teamId,
-		UpdatedAt: time.Time{},
-	}); err != nil {
-		return result, err
-	}
-
-	return result, nil
+	return actions.Result{Responses: [][]byte{*keyframe}}, err
 }

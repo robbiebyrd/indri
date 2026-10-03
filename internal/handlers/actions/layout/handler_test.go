@@ -74,18 +74,30 @@ func hostedGame() *models.Game {
 	g.ID = ids.New()
 	g.Code = gameCode
 	g.Players = map[string]models.Player{
-		hostID:   {Name: "Host", Host: true},
-		playerID: {Name: "Player"},
+		slotOf[hostID]:   {UserID: hostID, Name: "Host", Host: true},
+		slotOf[playerID]: {UserID: playerID, Name: "Player"},
 	}
-	g.Teams = map[string]models.Team{"red": {Name: "Red"}}
+	g.Teams = map[string]models.Team{"red": {Name: "Red", PlayerIDs: []string{slotOf[hostID], slotOf[playerID]}}}
 	g.Stage = models.Stage{CurrentScene: "board"}
 	g.PrivateData = map[string]interface{}{"answer": "42"}
 
 	return g
 }
 
+// slotOf is the slot each fixture user holds in hostedGame.
+var slotOf = map[string]string{hostID: "p0", playerID: "p1"}
+
+// sessionFor is a session for userID in gameID, naming the slot that user holds.
 func sessionFor(userID *string, gameID *string) *models.Session {
-	return &models.Session{ID: ids.New(), UserID: userID, GameID: gameID}
+	session := &models.Session{ID: ids.New(), UserID: userID, GameID: gameID}
+
+	if userID != nil {
+		if slot, ok := slotOf[*userID]; ok {
+			session.SlotID = &slot
+		}
+	}
+
+	return session
 }
 
 // addWidgetPayload is a valid op that does not collide with the fixture's
@@ -159,6 +171,28 @@ func TestEditLayout_RejectsANonHost(t *testing.T) {
 
 	if mutator.called {
 		t.Errorf("editLayout(non-host) reached Mutate; only the host may edit a layout")
+	}
+}
+
+// A session can outlive its seat. One that still names the host's slot while
+// another user holds it must not carry the host's authority.
+func TestEditLayout_RejectsACallerWhoDoesNotHoldTheHostSlot(t *testing.T) {
+	g := hostedGame()
+	mutator := &fakeMutator{game: g}
+	session := sessionFor(ptr(playerID), ptr(g.ID))
+	session.SlotID = ptr(slotOf[hostID])
+
+	_, err := editLayout(
+		actions.Request{Session: session, Payload: addWidgetPayload()},
+		&fakeGames{game: g},
+		mutator,
+	)
+	if err == nil {
+		t.Fatalf("editLayout(caller naming the host slot) = nil, want the caller rejected")
+	}
+
+	if mutator.called {
+		t.Errorf("a session naming a slot its user does not hold reached Mutate")
 	}
 }
 

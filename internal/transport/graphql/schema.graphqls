@@ -26,7 +26,7 @@ type Mutation {
   # here and starts again from the sanitised game the caller's own session is in.
   refresh: JSON!
 
-  kick(code: String!, userId: String!): JSON
+  kick(code: String!, slotId: String!): JSON
   logout: JSON
   inquire(inquiryType: String!, inquiry: String, code: String): JSON
 

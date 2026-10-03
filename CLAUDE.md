@@ -25,7 +25,7 @@ go vet ./...
 go test ./...
 go test -race ./...                                   # what CI runs
 go test ./internal/services/mutation/                 # one package
-go test -run TestAddPlayer_ConcurrentNoLostUpdates ./internal/repo/game/   # one test
+go test -run TestAssignSlot_ConcurrentNoLostUpdates ./internal/repo/game/   # one test
 
 go run ./cmd/server -script ./config.json             # run (defaults to ./config.json)
 go run ./cmd/server -script ./example/tictactoe/config.json   # run the tic-tac-toe example
@@ -176,7 +176,7 @@ the repo, because nothing in the database enforces it:
 
 - `Store.Mutate` snapshots the game before `apply`, diffs it after a committed save, and publishes
   automatically. Prefer it.
-- `UpdateField`, `DeleteField`, and `markPlayerConnected` publish explicitly via `s.publish(...)`. Any
+- `UpdateField` and `DeleteField` publish explicitly via `s.publish(...)`. Any
   new write path must do the same.
 - Publish failures are logged, never returned — the write already committed, so a fan-out hiccup must
   not fail the mutation.
@@ -233,7 +233,10 @@ creating a second one (unique index on `userId`).
 
 MongoDB collections: `game`, `user`, `session`. Models live in `internal/models/`.
 
-A **Game** holds `Teams`, `Players`, and a `Stage`. A **Stage** holds ordered **Scenes** plus a
+A **Game** holds `Teams`, `Players`, and a `Stage`. `Players` is keyed by **slot id**, not user id:
+every team's slots are declared when the game is created, and `Player.UserID` names a slot's holder
+(`""` when free). Find a user's player by matching `userId`; authorize from the session's `SlotID` only
+after checking that slot is still held by the session's user (`handlerUtils.RequireHost`). A **Stage** holds ordered **Scenes** plus a
 `currentScene`; a scene is the visual unit the client renders. Games, stages, scenes, teams, and players
 each carry up to three data stores:
 
@@ -280,7 +283,7 @@ array (`events.Diff` replaces arrays whole). The host-only `layout` action
    ```
 
    `req` is `{action, gameId, payload, session?}`. `req.session` is **absent** for an unauthenticated
-   caller, and carries only `userId`/`gameId`/`teamId`. Read `req.gameId`, not `req.session.gameId` —
+   caller, and carries only `userId`/`gameId`/`teamId`/`slotId` (players are keyed by slot). Read `req.gameId`, not `req.session.gameId` —
    a timer-fired action has no session at all. Authority comes from `req.session`, never `req.payload`.
 3. Validate the move, then write through `indri.mutate(function(state) ... return state end)`. The
    callback runs inside the store's apply closure, so it gets the same lock and the same version

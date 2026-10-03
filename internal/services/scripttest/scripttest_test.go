@@ -673,3 +673,20 @@ func TestNewRunner_RefusesAConfigWithNoScripts(t *testing.T) {
 		}
 	}
 }
+
+// A fixture's caller is rendered as the session a transport would resolve, slot
+// included: players are keyed by slot, so a script finds its caller's player
+// through req.session.slotId.
+func TestSession_ModelCarriesTheCallersSlot(t *testing.T) {
+	t.Parallel()
+
+	got := (&Session{UserID: "p1", TeamID: "red", SlotID: "p0"}).model("game-1")
+
+	if got.SlotID == nil || *got.SlotID != "p0" {
+		t.Fatalf("SlotID = %v, want p0", got.SlotID)
+	}
+
+	if got := (&Session{UserID: "p1"}).model("game-1"); got.SlotID != nil {
+		t.Fatalf("a caller holding no slot was given slot %q", *got.SlotID)
+	}
+}

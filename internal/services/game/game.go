@@ -233,71 +233,46 @@ func (gs *Service) Sanitize(game *models.Game) *models.Game {
 	return game
 }
 
-func (gs *Service) ConnectPlayer(id string, teamId string, userId string, displayName string) error {
-	log.Printf("Adding player %v to game lobby\n", userId)
+// ConnectPlayer seats userId on teamId and returns the slot they hold. A rejoin
+// keeps their slot and a team change moves them; see gameRepo.Storer.AssignSlot.
+func (gs *Service) ConnectPlayer(id string, teamId string, userId string, displayName string) (string, error) {
+	log.Printf("Seating player %v on team %v of game %v\n", userId, teamId, id)
 
-	// The flag, not the error: a player who is already in the game joined once
-	// and must not raise player:joined again on every reconnect.
-	added, err := gs.gameRepo.AddPlayerResult(id, userId, displayName)
+	slotId, seated, err := gs.gameRepo.AssignSlot(id, teamId, userId, displayName)
 	if err != nil {
-		log.Printf("Error adding player %v to game lobby: %v\n", userId, err)
+		return "", err
 	}
 
-	if err := gs.placeOnTeam(id, teamId, userId); err != nil {
-		return err
-	}
-
-	// Raised here rather than beside AddPlayerResult so that a subscriber
-	// reading the game finds the player where the join left them — on their
-	// team — rather than half-joined.
-	if added {
+	// The flag, not the error: a player who already held a slot joined once and
+	// must not raise player:joined again on every reconnect or team change.
+	if seated {
 		gs.emit(luaService.LifecyclePlayerJoined, id, map[string]interface{}{
 			"userId": userId,
 			"teamId": teamId,
+			"slotId": slotId,
 		})
 	}
 
-	return nil
+	return slotId, nil
 }
 
-// placeOnTeam puts a joining player on the team they asked for, whichever of
-// the four cases they are in.
-func (gs *Service) placeOnTeam(id string, teamId string, userId string) error {
-	switch {
-	case gs.gameRepo.HasPlayerOnTeam(id, teamId, userId):
-		log.Printf("Player %v is on team %v\n", userId, teamId)
-		return gs.gameRepo.ConnectPlayer(id, userId)
-	case gs.gameRepo.PlayerOnATeam(id, userId):
-		log.Printf("Player %v is already on a team, changing\n", userId)
-		return gs.gameRepo.ChangePlayerTeam(id, teamId, userId)
-	case teamId != "":
-		log.Printf("Adding player %v to team %v\n", userId, teamId)
-		return gs.gameRepo.AddPlayerToTeam(id, teamId, userId)
-	default:
-		return nil
-	}
+// DisconnectPlayer marks userId offline in slotId. A user who no longer holds
+// the slot changes nothing.
+func (gs *Service) DisconnectPlayer(id string, slotId string, userId string) error {
+	return gs.gameRepo.DisconnectPlayer(id, slotId, userId)
 }
 
-func (gs *Service) DisconnectPlayer(id string, userId string) error {
-	if gs.gameRepo.HasPlayer(id, userId) {
-		return gs.gameRepo.DisconnectPlayer(id, userId)
-	}
-
-	return nil
-}
-
-func (gs *Service) RemovePlayer(id string, userId string) error {
-	// Removing somebody who is not in the game writes an unchanged document and
-	// is not a departure; the store answers which it was. A leave and a kick
-	// racing therefore raise player:left once between them, not twice.
-	removed, err := gs.gameRepo.RemovePlayerResult(id, userId)
-	if err != nil {
+// RemovePlayer frees userId's slot. It fails if they do not hold it, so a leave
+// and a kick racing each other raise player:left once between them, not twice.
+func (gs *Service) RemovePlayer(id string, slotId string, userId string) error {
+	if err := gs.gameRepo.RemovePlayer(id, slotId, userId); err != nil {
 		return err
 	}
 
-	if removed {
-		gs.emit(luaService.LifecyclePlayerLeft, id, map[string]interface{}{"userId": userId})
-	}
+	gs.emit(luaService.LifecyclePlayerLeft, id, map[string]interface{}{
+		"userId": userId,
+		"slotId": slotId,
+	})
 
 	return nil
 }

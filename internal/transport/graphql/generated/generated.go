@@ -41,7 +41,7 @@ type ComplexityRoot struct {
 		CreateGame func(childComplexity int, code string, teamID string, private *bool) int
 		Inquire    func(childComplexity int, inquiryType string, inquiry *string, code *string) int
 		JoinGame   func(childComplexity int, code string, teamID string) int
-		Kick       func(childComplexity int, code string, userID string) int
+		Kick       func(childComplexity int, code string, slotID string) int
 		Layout     func(childComplexity int, code string, op string, args model.JSON) int
 		LeaveGame  func(childComplexity int) int
 		Login      func(childComplexity int, email string, password string) int
@@ -72,7 +72,7 @@ type MutationResolver interface {
 	JoinGame(ctx context.Context, code string, teamID string) (model.JSON, error)
 	LeaveGame(ctx context.Context) (model.JSON, error)
 	Refresh(ctx context.Context) (model.JSON, error)
-	Kick(ctx context.Context, code string, userID string) (model.JSON, error)
+	Kick(ctx context.Context, code string, slotID string) (model.JSON, error)
 	Logout(ctx context.Context) (model.JSON, error)
 	Inquire(ctx context.Context, inquiryType string, inquiry *string, code *string) (model.JSON, error)
 	Layout(ctx context.Context, code string, op string, args model.JSON) (model.JSON, error)
@@ -145,7 +145,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.ComplexityRoot.Mutation.Kick(childComplexity, args["code"].(string), args["userId"].(string)), true
+		return e.ComplexityRoot.Mutation.Kick(childComplexity, args["code"].(string), args["slotId"].(string)), true
 	case "Mutation.layout":
 		if e.ComplexityRoot.Mutation.Layout == nil {
 			break
@@ -355,7 +355,7 @@ type Mutation {
   # here and starts again from the sanitised game the caller's own session is in.
   refresh: JSON!
 
-  kick(code: String!, userId: String!): JSON
+  kick(code: String!, slotId: String!): JSON
   logout: JSON
   inquire(inquiryType: String!, inquiry: String, code: String): JSON
 
@@ -589,14 +589,14 @@ func (ec *executionContext) field_Mutation_kick_args(ctx context.Context, rawArg
 		return nil, err
 	}
 	args["code"] = arg0
-	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "userId",
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "slotId",
 		func(ctx context.Context, v any) (string, error) {
 			return ec.unmarshalNString2string(ctx, v)
 		})
 	if err != nil {
 		return nil, err
 	}
-	args["userId"] = arg1
+	args["slotId"] = arg1
 	return args, nil
 }
 
@@ -1060,7 +1060,7 @@ func (ec *executionContext) _Mutation_kick(ctx context.Context, field graphql.Co
 		},
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Mutation().Kick(ctx, fc.Args["code"].(string), fc.Args["userId"].(string))
+			return ec.Resolvers.Mutation().Kick(ctx, fc.Args["code"].(string), fc.Args["slotId"].(string))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v model.JSON) graphql.Marshaler {

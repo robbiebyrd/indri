@@ -89,20 +89,42 @@ func (r *recorder) only(t *testing.T, event string) raised {
 	return found[0]
 }
 
+// testScript gives every game two teams of four slots, so a player has a team
+// to join and another to move to.
+func testScript() *models.Script {
+	return &models.Script{
+		Config: models.Config{MaxPlayersPerTeam: 4},
+		Teams:  map[string]models.Team{"red": {Name: "Red"}, "blue": {Name: "Blue"}},
+	}
+}
+
 // newService builds the game service over a real in-memory store.
 //
 // A MemoryStore rather than a stub: it runs the same core as the MongoDB store,
 // so the lock, the version fence, the retry loop and the change deltas these
 // events are sequenced against are the production ones. Constructed as a struct
 // literal rather than through NewService because the script store NewService
-// reads is a MongoDB-backed repo and these tests need no script at all.
+// reads is a MongoDB-backed repo; the script is handed over directly instead.
 func newService(t *testing.T) (*Service, *recorder) {
 	t.Helper()
 
 	store := gameRepo.NewMemoryStore(context.Background(), nil, nil)
 	events := &recorder{store: store}
 
-	return &Service{gameRepo: store, Lifecycle: events}, events
+	return &Service{gameRepo: store, Script: testScript(), Lifecycle: events}, events
+}
+
+// join seats userId on red and returns their slot, failing the test if it
+// cannot.
+func join(t *testing.T, gs *Service, id, userId string) string {
+	t.Helper()
+
+	slot, err := gs.ConnectPlayer(id, "red", userId, userId)
+	if err != nil {
+		t.Fatalf("connecting %s: %v", userId, err)
+	}
+
+	return slot
 }
 
 // newGame creates a game and returns its id, discarding whatever the creation
@@ -173,22 +195,24 @@ func TestNew_RaisesNothingWhenTheCodeIsTaken(t *testing.T) {
 
 // --- player:joined -------------------------------------------------------------
 
-// Joining raises player:joined once, with the player and the team, and only
-// once the player is stored and on that team.
+// Joining raises player:joined once, with the player, the team and the slot,
+// and only once the player is seated in that slot.
 func TestConnectPlayer_RaisesPlayerJoinedAfterTheCommit(t *testing.T) {
 	t.Parallel()
 
 	gs, events := newService(t)
 	id := newGame(t, gs, events)
 
-	if err := gs.ConnectPlayer(id, "", "player-1", "Ada"); err != nil {
+	slot, err := gs.ConnectPlayer(id, "red", "player-1", "Ada")
+	if err != nil {
 		t.Fatalf("connecting a player: %v", err)
 	}
 
 	got := events.only(t, luaService.LifecyclePlayerJoined)
 
-	if got.gameID != id || got.subject["userId"] != "player-1" {
-		t.Fatalf("player:joined carried %q/%v, want %q/player-1", got.gameID, got.subject["userId"], id)
+	if got.gameID != id || got.subject["userId"] != "player-1" ||
+		got.subject["teamId"] != "red" || got.subject["slotId"] != slot {
+		t.Fatalf("player:joined carried %q/%v, want %q and player-1/red/%s", got.gameID, got.subject, id, slot)
 	}
 
 	if got.readErr != nil {
@@ -197,25 +221,26 @@ func TestConnectPlayer_RaisesPlayerJoinedAfterTheCommit(t *testing.T) {
 
 	// The write the event describes is already visible, which is the whole
 	// contract: a subscriber must never see the game as it was before.
-	if _, ok := got.game.Players["player-1"]; !ok {
-		t.Fatalf("player:joined was raised before the player was stored; players = %v", got.game.Players)
+	if got.game.Players[slot].UserID != "player-1" {
+		t.Fatalf("player:joined was raised before the player was seated; players = %v", got.game.Players)
 	}
 }
 
 // A player who is already in the game joined once.
 //
-// A rejoin writes nothing — AddPlayer refuses a duplicate — so raising again
-// would tell every subscriber that somebody joined on each reconnect. The store
-// reports whether it committed; a nil error would not have distinguished these.
+// A rejoin keeps the slot they hold and a team change moves them between
+// slots; neither is somebody joining, so raising again would tell every
+// subscriber that somebody joined on each reconnect. The store reports whether
+// the call seated a newcomer; a nil error would not have distinguished these.
 func TestConnectPlayer_RaisesNothingForAPlayerAlreadyInTheGame(t *testing.T) {
 	t.Parallel()
 
 	gs, events := newService(t)
 	id := newGame(t, gs, events)
 
-	for range 3 {
-		if err := gs.ConnectPlayer(id, "", "player-1", "Ada"); err != nil {
-			t.Fatalf("connecting a player: %v", err)
+	for _, team := range []string{"red", "red", "blue", "red"} {
+		if _, err := gs.ConnectPlayer(id, team, "player-1", "Ada"); err != nil {
+			t.Fatalf("connecting a player to %s: %v", team, err)
 		}
 	}
 
@@ -225,49 +250,49 @@ func TestConnectPlayer_RaisesNothingForAPlayerAlreadyInTheGame(t *testing.T) {
 
 // --- player:left ---------------------------------------------------------------
 
-// Leaving raises player:left once the player is gone from the stored game.
+// Leaving raises player:left once the player's slot is free in the stored game.
 func TestRemovePlayer_RaisesPlayerLeftAfterTheCommit(t *testing.T) {
 	t.Parallel()
 
 	gs, events := newService(t)
 	id := newGame(t, gs, events)
+	slot := join(t, gs, id, "player-1")
 
-	if err := gs.ConnectPlayer(id, "", "player-1", "Ada"); err != nil {
-		t.Fatalf("connecting a player: %v", err)
-	}
-
-	if err := gs.RemovePlayer(id, "player-1"); err != nil {
+	if err := gs.RemovePlayer(id, slot, "player-1"); err != nil {
 		t.Fatalf("removing a player: %v", err)
 	}
 
 	got := events.only(t, luaService.LifecyclePlayerLeft)
 
-	if got.gameID != id || got.subject["userId"] != "player-1" {
-		t.Fatalf("player:left carried %q/%v, want %q/player-1", got.gameID, got.subject["userId"], id)
+	if got.gameID != id || got.subject["userId"] != "player-1" || got.subject["slotId"] != slot {
+		t.Fatalf("player:left carried %q/%v, want %q and player-1/%s", got.gameID, got.subject, id, slot)
 	}
 
 	if got.readErr != nil {
 		t.Fatalf("a subscriber reading the game as it was told about it got %v", got.readErr)
 	}
 
-	if _, ok := got.game.Players["player-1"]; ok {
-		t.Fatalf("player:left was raised before the player was removed; players = %v", got.game.Players)
+	if holder := got.game.Players[slot].UserID; holder != "" {
+		t.Fatalf("player:left was raised before the slot was freed; it is held by %q", holder)
 	}
 }
 
-// Removing somebody who is not in the game is not a departure.
-//
-// The write still commits — the document simply does not change — so a commit
-// flag alone would raise the event. A leave racing a kick for the same player
-// must raise player:left once between them, not twice.
+// Removing somebody from a slot they do not hold is not a departure: it fails,
+// and raises nothing. A leave racing a kick for the same player therefore
+// raises player:left once between them, not twice.
 func TestRemovePlayer_RaisesNothingForSomebodyWhoWasNotThere(t *testing.T) {
 	t.Parallel()
 
 	gs, events := newService(t)
 	id := newGame(t, gs, events)
+	slot := join(t, gs, id, "player-1")
 
-	if err := gs.RemovePlayer(id, "never-joined"); err != nil {
-		t.Fatalf("removing an absent player: %v", err)
+	events.mu.Lock()
+	events.events = nil
+	events.mu.Unlock()
+
+	if err := gs.RemovePlayer(id, slot, "never-joined"); err == nil {
+		t.Fatal("removing somebody from a slot they do not hold succeeded")
 	}
 
 	if got := events.names(); len(got) != 0 {
@@ -284,9 +309,7 @@ func TestRemovePlayer_RaisesOnceUnderARace(t *testing.T) {
 	gs, events := newService(t)
 	id := newGame(t, gs, events)
 
-	if err := gs.ConnectPlayer(id, "", "player-1", "Ada"); err != nil {
-		t.Fatalf("connecting a player: %v", err)
-	}
+	slot := join(t, gs, id, "player-1")
 
 	var wg sync.WaitGroup
 
@@ -296,9 +319,9 @@ func TestRemovePlayer_RaisesOnceUnderARace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			if err := gs.RemovePlayer(id, "player-1"); err != nil {
-				t.Errorf("removing a player: %v", err)
-			}
+			// One of the two loses, and losing is an error: the slot is no
+			// longer the player's to give up. The event count is the assertion.
+			_ = gs.RemovePlayer(id, slot, "player-1")
 		}()
 	}
 
@@ -315,18 +338,16 @@ func TestService_WorksWithNoEmitter(t *testing.T) {
 	t.Parallel()
 
 	store := gameRepo.NewMemoryStore(context.Background(), nil, nil)
-	gs := &Service{gameRepo: store}
+	gs := &Service{gameRepo: store, Script: testScript()}
 
 	g, err := gs.New("ABCD", false)
 	if err != nil {
 		t.Fatalf("creating a game: %v", err)
 	}
 
-	if err := gs.ConnectPlayer(g.ID, "", "player-1", "Ada"); err != nil {
-		t.Fatalf("connecting a player: %v", err)
-	}
+	slot := join(t, gs, g.ID, "player-1")
 
-	if err := gs.RemovePlayer(g.ID, "player-1"); err != nil {
+	if err := gs.RemovePlayer(g.ID, slot, "player-1"); err != nil {
 		t.Fatalf("removing a player: %v", err)
 	}
 }
@@ -360,14 +381,15 @@ indri.on("player:left",   function(ev) error("broken subscriber", 0) end)
 
 	t.Cleanup(engine.Close)
 
-	gs := &Service{gameRepo: store, Lifecycle: engine}
+	gs := &Service{gameRepo: store, Script: testScript(), Lifecycle: engine}
 
 	g, err := gs.New("ABCD", false)
 	if err != nil {
 		t.Fatalf("a raising game:created subscriber failed the create: %v", err)
 	}
 
-	if err := gs.ConnectPlayer(g.ID, "", "player-1", "Ada"); err != nil {
+	slot, err := gs.ConnectPlayer(g.ID, "red", "player-1", "Ada")
+	if err != nil {
 		t.Fatalf("a raising player:joined subscriber failed the join: %v", err)
 	}
 
@@ -376,11 +398,11 @@ indri.on("player:left",   function(ev) error("broken subscriber", 0) end)
 		t.Fatalf("reading the game back: %v", err)
 	}
 
-	if _, ok := joined.Players["player-1"]; !ok {
+	if joined.Players[slot].UserID != "player-1" {
 		t.Fatalf("the join was rolled back by a failing subscriber; players = %v", joined.Players)
 	}
 
-	if err := gs.RemovePlayer(g.ID, "player-1"); err != nil {
+	if err := gs.RemovePlayer(g.ID, slot, "player-1"); err != nil {
 		t.Fatalf("a raising player:left subscriber failed the leave: %v", err)
 	}
 }
@@ -398,7 +420,9 @@ func TestLifecycleHandler_MutatesTheCommittedState(t *testing.T) {
 indri.on("player:joined", function(ev)
   indri.mutate(function(state)
     local roster = {}
-    for id in pairs(state.players) do roster[#roster + 1] = id end
+    for _, p in pairs(state.players) do
+      if p.userId ~= "" then roster[#roster + 1] = p.userId end
+    end
     table.sort(roster)
 
     state.data = state.data or {}
@@ -417,7 +441,7 @@ end)
 
 	t.Cleanup(engine.Close)
 
-	gs := &Service{gameRepo: store, Lifecycle: engine}
+	gs := &Service{gameRepo: store, Script: testScript(), Lifecycle: engine}
 
 	g, err := gs.New("ABCD", false)
 	if err != nil {
@@ -425,9 +449,7 @@ end)
 	}
 
 	for _, player := range []string{"player-1", "player-2"} {
-		if err := gs.ConnectPlayer(g.ID, "", player, player); err != nil {
-			t.Fatalf("connecting %s: %v", player, err)
-		}
+		join(t, gs, g.ID, player)
 	}
 
 	stored, err := store.Get(g.ID)
