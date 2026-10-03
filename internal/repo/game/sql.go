@@ -3,10 +3,11 @@ package game
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/robbiebyrd/indri/internal/models"
 	"github.com/robbiebyrd/indri/internal/repo/sqldialect"
@@ -16,13 +17,16 @@ import (
 // serves both SQLite and PostgreSQL: the two differ only in how a placeholder
 // is spelled, which dialect supplies.
 //
-// The game is stored whole, as JSON in a single column, with id, code, version
-// and private lifted out beside it. Those four are the only things a query ever
+// The game is stored whole, as BSON in a single column, with id, code, version
+// and private lifted out beside it. BSON rather than JSON because it is what
+// MongoDB stores and the memory store round-trips through: JSON's omitempty
+// drops an empty data map, which would read back as null — a store a dotted
+// write cannot descend into — where MongoDB keeps it empty and writable. Those four are the only things a query ever
 // filters or fences on, so nothing else needs a column — and the document keeps
 // the exact shape the rest of the package already works with, which is what
 // lets every rule in core stay backend-independent.
 //
-// Version lives in its own column rather than only inside the JSON because the
+// Version lives in its own column rather than only inside the document because the
 // version fence is a conditional UPDATE: the database has to compare it without
 // parsing the document.
 type sqlDocs struct {
@@ -32,9 +36,9 @@ type sqlDocs struct {
 
 func (s sqlDocs) query(q string) string { return s.dialect.Rebind(q) }
 
-// encode renders the game as the JSON stored in the data column.
+// encode renders the game as the BSON stored in the data column.
 func encodeGame(g *models.Game) ([]byte, error) {
-	raw, err := json.Marshal(g)
+	raw, err := bson.Marshal(g)
 	if err != nil {
 		return nil, fmt.Errorf("encoding game %q: %w", g.ID, err)
 	}
@@ -47,7 +51,7 @@ func encodeGame(g *models.Game) ([]byte, error) {
 // authoritative even if the two ever disagree.
 func decodeGame(raw []byte, id string, version int64, private bool) (*models.Game, error) {
 	var g models.Game
-	if err := json.Unmarshal(raw, &g); err != nil {
+	if err := bson.Unmarshal(raw, &g); err != nil {
 		return nil, fmt.Errorf("decoding game %q: %w", id, err)
 	}
 
@@ -76,7 +80,7 @@ func (s sqlDocs) insert(ctx context.Context, create models.CreateGame) (string, 
 
 	_, err = s.db.ExecContext(ctx, s.query(
 		`INSERT INTO games (id, code, version, private, data) VALUES (?, ?, ?, ?, ?)`),
-		g.ID, g.Code, g.Version, g.Private, string(raw),
+		g.ID, g.Code, g.Version, g.Private, raw,
 	)
 	if err != nil {
 		// The unique code index rejected a concurrent create with the same
@@ -204,7 +208,7 @@ func (s sqlDocs) saveVersioned(
 
 	result, err := s.db.ExecContext(ctx, s.query(
 		`UPDATE games SET data = ?, version = ?, code = ?, private = ? WHERE id = ? AND version = ?`),
-		string(raw), g.Version, g.Code, g.Private, id, expectedVersion,
+		raw, g.Version, g.Code, g.Private, id, expectedVersion,
 	)
 	if err != nil {
 		return false, fmt.Errorf("saving game %q: %w", id, err)
@@ -279,7 +283,7 @@ func (s sqlDocs) mutateStored(ctx context.Context, id string, edit func(*models.
 
 	if _, err := tx.ExecContext(ctx, s.query(
 		`UPDATE games SET data = ?, version = ?, code = ?, private = ? WHERE id = ?`),
-		string(updated), g.Version, g.Code, g.Private, id,
+		updated, g.Version, g.Code, g.Private, id,
 	); err != nil {
 		return fmt.Errorf("editing game %q: %w", id, err)
 	}

@@ -283,5 +283,14 @@ func newGameDoc(code string, script *models.Script, privateGame bool) models.Cre
 		doc.PrivateData = script.PrivateData
 	}
 
+	// A game's own data stores start empty, not absent: a dotted write such as
+	// UpdateField("data.round") can create a key in an empty store, but cannot
+	// descend into a missing one, which every backend stores as null.
+	for _, store := range []*map[string]interface{}{&doc.PublicData, &doc.PrivateData, &doc.PlayerData} {
+		if *store == nil {
+			*store = map[string]interface{}{}
+		}
+	}
+
 	return doc
 }

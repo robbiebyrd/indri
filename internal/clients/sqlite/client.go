@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS games (
     code    TEXT    UNIQUE NOT NULL,
     version INTEGER NOT NULL DEFAULT 1,
     private INTEGER NOT NULL DEFAULT 0,
-    data    TEXT    NOT NULL
+    data    BLOB    NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS users (

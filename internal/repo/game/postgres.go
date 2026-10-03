@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS games (
     code    TEXT    UNIQUE NOT NULL,
     version BIGINT  NOT NULL DEFAULT 1,
     private BOOLEAN NOT NULL DEFAULT FALSE,
-    data    JSONB   NOT NULL
+    data    BYTEA   NOT NULL
 );
 `
 

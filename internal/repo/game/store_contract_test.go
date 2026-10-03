@@ -604,3 +604,49 @@ func TestUpdateField_ConcurrentWritesAreNotLost(t *testing.T) {
 		}
 	})
 }
+
+// TestUpdateField_WritesUnderAnEmptyDataStore: a data store declared empty in
+// the script must be writable key by key on every backend. A backend that
+// stored an empty map as absent would read it back as null, and a dotted write
+// cannot descend into null.
+func TestUpdateField_WritesUnderAnEmptyDataStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b backend) {
+		g := newGame(t, b.store, &models.Script{
+			PublicData: map[string]interface{}{},
+			Stage: models.Stage{
+				CurrentScene: "board",
+				SceneOrder:   []string{"board"},
+				PublicData:   map[string]interface{}{},
+				Scenes:       map[string]models.Scene{"board": {PublicData: &map[string]interface{}{}}},
+			},
+		})
+
+		for _, key := range []string{"data.round", "stage.data.round", "stage.scenes.board.data.round"} {
+			b.events.drain()
+
+			if err := b.store.UpdateField(g.ID, key, 1); err != nil {
+				t.Errorf("UpdateField(%s) under an empty data store: %v", key, err)
+
+				continue
+			}
+
+			if got := b.events.updated()[key]; fmt.Sprint(got) != "1" {
+				t.Errorf("UpdateField(%s) published %v, want 1", key, got)
+			}
+		}
+	})
+}
+
+// TestNew_GivesAGameWritableDataStores: a script that declares no data still
+// stamps games whose own data stores can be written key by key.
+func TestNew_GivesAGameWritableDataStores(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b backend) {
+		g := newGame(t, b.store, &models.Script{})
+
+		for _, key := range []string{"data.round", "privateData.deck", "playerData.p0"} {
+			if err := b.store.UpdateField(g.ID, key, 1); err != nil {
+				t.Errorf("UpdateField(%s) on a game whose script declared no data: %v", key, err)
+			}
+		}
+	})
+}
