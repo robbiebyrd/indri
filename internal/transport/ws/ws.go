@@ -105,6 +105,12 @@ func (t *Transport) BroadcastFilter(msg []byte, match func(transport.Conn) bool)
 }
 
 func (t *Transport) Conns() ([]transport.Conn, error) {
+	// A closed transport holds no connections. melody reports that as an
+	// error; every other transport reports it as none, and so does this one.
+	if t.m.IsClosed() {
+		return nil, nil
+	}
+
 	sessions, err := t.m.Sessions()
 	if err != nil {
 		return nil, err

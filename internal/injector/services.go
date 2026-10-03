@@ -70,7 +70,7 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 
 	clients.Transport = multi
 
-	gs, err := gameService.NewService(repos.GameRepo, repos.ScriptRepo)
+	gs, err := gameService.NewService(repos.GameRepo, repos.ScriptRepo.Get())
 	if err != nil {
 		return nil, err
 	}

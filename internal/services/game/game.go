@@ -11,7 +11,6 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/models"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
-	scriptRepo "github.com/robbiebyrd/indri/internal/repo/script"
 	luaService "github.com/robbiebyrd/indri/internal/services/lua"
 )
 
@@ -42,15 +41,16 @@ type Service struct {
 	Lifecycle LifecycleEmitter
 }
 
-// NewService creates a new repository for accessing game data.
-func NewService(gameRepo gameRepo.Storer, scriptRepo *scriptRepo.Store) (*Service, error) {
+// NewService creates the game service over a game store, stamping new games
+// from script.
+func NewService(gameRepo gameRepo.Storer, script *models.Script) (*Service, error) {
 	if gameRepo == nil {
 		return nil, errors.New("the game service did not receive a game repo")
 	}
 
 	return &Service{
 		gameRepo: gameRepo,
-		Script:   scriptRepo.Get(),
+		Script:   script,
 	}, nil
 }
 

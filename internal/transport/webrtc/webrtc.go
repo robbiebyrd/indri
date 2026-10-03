@@ -119,11 +119,16 @@ func (t *Transport) Register(mux *http.ServeMux) {
 // Close stops accepting connections, closes every open conn (via the embedded
 // Registry) and releases the shared UDP mux.
 func (t *Transport) Close() error {
-	if err := t.udpMux.Close(); err != nil {
-		log.Printf("webrtc: closing udp mux: %v", err)
+	// Connections first, while the UDP mux can still carry their close to the
+	// client; with the mux gone first, a client would only learn of the
+	// shutdown when ICE timed out.
+	err := t.Registry.Close()
+
+	if muxErr := t.udpMux.Close(); muxErr != nil {
+		log.Printf("webrtc: closing udp mux: %v", muxErr)
 	}
 
-	return t.Registry.Close()
+	return err
 }
 
 func (t *Transport) maxPeers() int {
