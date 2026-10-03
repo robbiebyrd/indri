@@ -6,18 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/robbiebyrd/indri/internal/clients/mongodb"
-	postgresClient "github.com/robbiebyrd/indri/internal/clients/postgres"
-	sqliteClient "github.com/robbiebyrd/indri/internal/clients/sqlite"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/repo/ids"
+	"github.com/robbiebyrd/indri/internal/repo/repotest"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 	"github.com/robbiebyrd/indri/internal/services/mutation"
@@ -72,64 +67,18 @@ func forEachBackend(t *testing.T, test func(t *testing.T, b backend)) {
 	})
 }
 
-// newTestSQLiteStore builds a store over a private, file-backed database in the
-// test's own temp directory.
-//
-// A file rather than ":memory:" because these tests run in parallel goroutines
-// against one *sql.DB, and the pool is pinned to a single connection — a
-// file-backed database gives the same isolation without serialising every test
-// in the package behind one in-memory handle.
+// newTestSQLiteStore builds a store over a private, file-backed database.
 func newTestSQLiteStore(t *testing.T, publisher events.Publisher) *SQLiteStore {
 	t.Helper()
 
-	db, err := sqliteClient.Open(filepath.Join(t.TempDir(), "game.db"))
-	if err != nil {
-		t.Fatalf("opening the test SQLite database: %v", err)
-	}
-
-	t.Cleanup(func() { _ = db.Close() })
-
-	return NewSQLiteStore(context.Background(), db, lock.NewInProcess(), publisher)
+	return NewSQLiteStore(context.Background(), repotest.SQLite(t), lock.NewInProcess(), publisher)
 }
 
-// newTestPostgresStore connects to the database named by
-// INDRI_TEST_POSTGRES_URI, giving each test its own schema so parallel runs and
-// leftover rows from an earlier run cannot collide. It skips when the variable
-// is unset, which is the only skip this backend is allowed.
+// newTestPostgresStore builds a store in a PostgreSQL schema of the test's own.
 func newTestPostgresStore(t *testing.T, publisher events.Publisher) *PostgresStore {
 	t.Helper()
 
-	uri := os.Getenv("INDRI_TEST_POSTGRES_URI")
-	if uri == "" {
-		t.Skip("INDRI_TEST_POSTGRES_URI not set; skipping the PostgreSQL backend")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	db, err := postgresClient.Open(ctx, uri)
-	if err != nil {
-		t.Skipf("skipping: PostgreSQL not reachable: %v", err)
-	}
-
-	t.Cleanup(func() { _ = db.Close() })
-
-	// A schema per test keeps the games table private to it. Dropping it on
-	// cleanup means a failed run leaves nothing behind for the next one.
-	schema := "indri_test_" + strings.ReplaceAll(ids.New(), "-", "")
-	if _, err := db.ExecContext(context.Background(), `CREATE SCHEMA `+schema); err != nil {
-		t.Fatalf("creating the test schema: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_, _ = db.ExecContext(context.Background(), `DROP SCHEMA `+schema+` CASCADE`)
-	})
-
-	if _, err := db.ExecContext(context.Background(), `SET search_path TO `+schema); err != nil {
-		t.Fatalf("selecting the test schema: %v", err)
-	}
-
-	store, err := NewPostgresStore(context.Background(), db, lock.NewInProcess(), publisher)
+	store, err := NewPostgresStore(context.Background(), repotest.Postgres(t), lock.NewInProcess(), publisher)
 	if err != nil {
 		t.Fatalf("creating the PostgreSQL game store: %v", err)
 	}
@@ -137,29 +86,11 @@ func newTestPostgresStore(t *testing.T, publisher events.Publisher) *PostgresSto
 	return store
 }
 
-// newTestStore connects to a local MongoDB (a single-node replica set is not
-// required for these repo-level tests). It skips when no database is
-// reachable; the in-memory backend carries the same assertions in that case.
+// newTestStore builds a store over MongoDB, which skips when none is reachable.
 func newTestStore(t *testing.T, publisher events.Publisher) *Store {
 	t.Helper()
 
-	uri := os.Getenv("INDRI_TEST_MONGO_URI")
-	if uri == "" {
-		uri = "mongodb://localhost:27017/?directConnection=true"
-	}
-
-	_ = os.Setenv("INDRI_MONGO_URI", uri)
-	_ = os.Setenv("INDRI_MONGO_DATABASE", "indri_test")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	client, err := mongodb.New(ctx)
-	if err != nil {
-		t.Skipf("skipping: MongoDB not reachable: %v", err)
-	}
-
-	store, err := NewStore(context.Background(), client, lock.NewInProcess(), publisher)
+	store, err := NewStore(context.Background(), repotest.Mongo(t), lock.NewInProcess(), publisher)
 	if err != nil {
 		t.Skipf("skipping: could not create game store: %v", err)
 	}
@@ -627,6 +558,49 @@ func TestUpdateField_PublishesAStructWithoutItsPrivateData(t *testing.T) {
 		// Sanitizing must copy, not edit: the caller still holds this stage.
 		if stage.PrivateData["answer"] != stageSecret {
 			t.Errorf("publishing emptied the caller's own stage, got %v", stage.PrivateData)
+		}
+	})
+}
+
+// TestUpdateField_ConcurrentWritesAreNotLost: single-field writes to different
+// keys, racing, must all land and each count once on the version. A backend
+// that read the game, set one key and wrote the whole document back would put
+// a stale copy of the other keys over a concurrent write.
+func TestUpdateField_ConcurrentWritesAreNotLost(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b backend) {
+		g := newGame(t, b.store, &models.Script{PublicData: map[string]interface{}{"seed": 0}})
+
+		const writers = 20
+
+		var wg sync.WaitGroup
+
+		for i := range writers {
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+
+				if err := b.store.UpdateField(g.ID, fmt.Sprintf("data.k%d", i), i); err != nil {
+					t.Errorf("UpdateField(k%d): %v", i, err)
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		got, err := b.store.Get(g.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+
+		for i := range writers {
+			if v := fmt.Sprint(got.PublicData[fmt.Sprintf("k%d", i)]); v != fmt.Sprint(i) {
+				t.Errorf("data.k%d = %s, want %d (a concurrent write was lost)", i, v, i)
+			}
+		}
+
+		if want := g.Version + writers; got.Version != want {
+			t.Errorf("version = %d, want %d: every write must count once", got.Version, want)
 		}
 	})
 }

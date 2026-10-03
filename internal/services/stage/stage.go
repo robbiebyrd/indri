@@ -42,7 +42,7 @@ type Service struct {
 // engine instead.
 
 // NewService creates a new repository for accessing game data.
-func NewService(gameRepo *gameRepo.Store, gameService *gameService.Service) *Service {
+func NewService(gameRepo gameRepo.Storer, gameService *gameService.Service) *Service {
 	return &Service{
 		gameRepo:    gameRepo,
 		gameService: gameService,

@@ -16,12 +16,12 @@ import (
 
 type Service struct {
 	t  transport.Transport
-	ur *userRepo.Store
-	sr *sessionRepo.Store
+	ur userRepo.Storer
+	sr sessionRepo.Storer
 }
 
 // NewService creates a new service for broadcasting to connected clients.
-func NewService(ctx context.Context, t transport.Transport, userRepo *userRepo.Store, sessionRepo *sessionRepo.Store) (*Service, error) {
+func NewService(ctx context.Context, t transport.Transport, userRepo userRepo.Storer, sessionRepo sessionRepo.Storer) (*Service, error) {
 	if ctx == nil {
 		return nil, errors.New("context was not passed to the connection service")
 	}

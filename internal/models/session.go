@@ -31,9 +31,8 @@ type Session struct {
 	DeletedAt time.Time `bson:"deletedAt,omitempty" json:"-"`
 }
 
+// CreateSession carries no id: the store mints it, as it does a user's.
 type CreateSession struct {
-	// ID is minted by the caller (internal/repo/ids); see models.Game.ID.
-	ID        string    `bson:"_id,omitempty" json:"id"`
 	Token     string    `bson:"token"     json:"-"`
 	GameID    string    `bson:"gameId"     json:"gameId"`
 	UserID    string    `bson:"userId"     json:"userId"`

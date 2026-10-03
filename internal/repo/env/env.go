@@ -16,6 +16,9 @@ type Vars struct {
 	RedisPassword         string `default:""          envconfig:"REDIS_PASSWORD"`
 	RedisDatabase         int    `default:"0"         envconfig:"REDIS_DATABASE"`
 	LockBackend           string `default:"inprocess" envconfig:"LOCK_BACKEND"`
+	DBBackend             string `default:"mongodb"   envconfig:"DB_BACKEND"`
+	SQLitePath            string `default:"./indri.db" envconfig:"SQLITE_PATH"`
+	PostgresURI           string `default:""          envconfig:"POSTGRES_URI"`
 	MongoURI              string `default:"localhost" envconfig:"MONGO_URI"`
 	MongoDatabase         string `default:"indri"     envconfig:"MONGO_DATABASE"`
 	MongoAuthDatabase     string `default:"admin"     envconfig:"MONGO_AUTH_DATABASE"`

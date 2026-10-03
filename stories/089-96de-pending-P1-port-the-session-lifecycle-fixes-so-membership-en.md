@@ -9,7 +9,7 @@ updated: "2026-10-03T03:52:28.000Z"
 dependencies: ["081-7e0a", "082-b854"]
 plan: plans/main-divergence-integration.md
 plan_step: Step 5
-depends_on: ["stories/081-7e0a-complete-P1-port-the-player-slot-model-and-migrate-the-user-ke.md", "stories/082-b854-pending-P1-port-user-and-session-backends-across-memory-sqlit.md"]
+depends_on: ["stories/081-7e0a-complete-P1-port-the-player-slot-model-and-migrate-the-user-ke.md", "stories/082-b854-complete-P1-port-user-and-session-backends-across-memory-sqlit.md"]
 ---
 
 # Port the session-lifecycle fixes so game membership ends on leave, kick and moving games

@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	sqliteClient "github.com/robbiebyrd/indri/internal/clients/sqlite"
+	"github.com/robbiebyrd/indri/internal/repo/sqldialect"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 )
@@ -31,16 +31,9 @@ func NewSQLiteStore(
 	return &SQLiteStore{
 		core: core{
 			ctx:       ctx,
-			docs:      sqlDocs{db: db, dialect: sqliteDialect},
+			docs:      sqlDocs{db: db, dialect: sqldialect.SQLite},
 			locks:     locks,
 			publisher: publisher,
 		},
 	}
-}
-
-// sqliteDialect: SQLite binds with "?" and reports a unique violation only
-// through the driver's error text.
-var sqliteDialect = dialect{
-	placeholder:       func(int) string { return "?" },
-	isUniqueViolation: sqliteClient.IsUniqueViolation,
 }

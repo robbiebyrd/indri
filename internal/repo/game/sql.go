@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/robbiebyrd/indri/internal/models"
+	"github.com/robbiebyrd/indri/internal/repo/sqldialect"
 )
 
 // sqlDocs is core's persistence port over a SQL database. One implementation
@@ -27,49 +27,10 @@ import (
 // parsing the document.
 type sqlDocs struct {
 	db      *sql.DB
-	dialect dialect
+	dialect sqldialect.Dialect
 }
 
-// dialect is the small amount that genuinely differs between SQLite and
-// PostgreSQL. Anything larger than this belongs in sqlDocs, shared.
-type dialect struct {
-	// placeholder renders the n-th bind parameter, 1-based: "?" for SQLite,
-	// "$1" for PostgreSQL.
-	placeholder func(n int) string
-
-	// isUniqueViolation reports whether err is the database's way of saying a
-	// unique index rejected the write. Both drivers report it differently and
-	// neither does so with a sentinel error.
-	isUniqueViolation func(error) bool
-}
-
-// rebind renders query, replacing each "?" with the dialect's placeholder.
-// Writing every statement once in "?" form and translating here keeps a single
-// copy of each query.
-func (d dialect) rebind(query string) string {
-	if d.placeholder(1) == "?" {
-		return query
-	}
-
-	var b strings.Builder
-
-	n := 0
-
-	for _, r := range query {
-		if r == '?' {
-			n++
-			b.WriteString(d.placeholder(n))
-
-			continue
-		}
-
-		b.WriteRune(r)
-	}
-
-	return b.String()
-}
-
-func (s sqlDocs) query(q string) string { return s.dialect.rebind(q) }
+func (s sqlDocs) query(q string) string { return s.dialect.Rebind(q) }
 
 // encode renders the game as the JSON stored in the data column.
 func encodeGame(g *models.Game) ([]byte, error) {
@@ -121,7 +82,7 @@ func (s sqlDocs) insert(ctx context.Context, create models.CreateGame) (string, 
 		// The unique code index rejected a concurrent create with the same
 		// code. Both other backends phrase this the same way; a test that
 		// asserts on the message must not care which store answered.
-		if s.dialect.isUniqueViolation(err) {
+		if s.dialect.IsUniqueViolation(err) {
 			return "", fmt.Errorf("game with code %s already exists", create.Code)
 		}
 
@@ -288,8 +249,10 @@ func (s sqlDocs) mutateStored(ctx context.Context, id string, edit func(*models.
 		raw      []byte
 	)
 
+	// The row stays locked until the transaction ends, so a concurrent edit
+	// waits for this one rather than writing back a stale copy over it.
 	switch err := tx.QueryRowContext(ctx,
-		s.query(selectColumns+` WHERE id = ?`), id,
+		s.query(selectColumns+` WHERE id = ?`+s.dialect.LockForUpdate()), id,
 	).Scan(&storedID, &version, &private, &raw); {
 	case errors.Is(err, sql.ErrNoRows):
 		return fmt.Errorf("fetching game %q: %w", id, errNotFound)

@@ -21,9 +21,10 @@ type User struct {
 	PrivateData map[string]interface{} `bson:"privateData"          json:"privateData,omitempty"`
 }
 
+// CreateUser is what a registration asks for. It carries no id: register
+// decodes it straight from the client's payload, and an id the client chose
+// could name — and replace — another user. The store mints it.
 type CreateUser struct {
-	// ID is minted by the caller (internal/repo/ids); see models.Game.ID.
-	ID          string    `bson:"_id,omitempty" json:"id"`
 	CreatedAt   time.Time `bson:"createdAt"   json:"createdAt"`
 	UpdatedAt   time.Time `bson:"updatedAt"   json:"updatedAt"`
 	Email       string    `bson:"email"       json:"email"`

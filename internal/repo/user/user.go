@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 
 	"github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
-	"github.com/robbiebyrd/indri/internal/repo/ids"
+	repoErrors "github.com/robbiebyrd/indri/internal/repo"
 	repoUtils "github.com/robbiebyrd/indri/internal/repo/utils"
 )
 
@@ -54,55 +55,53 @@ func NewStore(ctx context.Context, client *mongodb.Client) (*Store, error) {
 	}, nil
 }
 
-// New creates a new user, given an ID.
-func (s *Store) New(user models.CreateUser) (*models.User, error) {
-	matchingUser, _ := s.collection.Finder().Filter(query.Eq("email", user.Email)).FindOne(*s.ctx)
+// New stores a new user. A taken email is repo.ErrDuplicate, decided by the
+// unique index on email rather than by a check two registrations could both
+// pass.
+func (s *Store) New(c models.CreateUser) (*models.User, error) {
+	u := newUser(c)
 
-	if matchingUser != nil {
-		return nil, fmt.Errorf("a user with email address %v already exists", user.Email)
-	}
-
-	now := time.Now()
-	user.CreatedAt = now
-	user.UpdatedAt = now
-
-	// Mint the id here rather than letting MongoDB generate an ObjectID: the
-	// model stores a backend-neutral string, and an ObjectID does not decode
-	// into one.
-	if user.ID == "" {
-		user.ID = ids.New()
-	}
-
-	doc, err := repoUtils.CreateBSONDoc(user)
+	doc, err := repoUtils.CreateBSONDoc(u)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create the update document, specifying the fields to update. `nil` fields are not updated,
-	// as they are dropped in the conversion. We specify a filter for the requested user ID, so only
-	// one document should ever be updated.
-	_, err = s.collection.Collection().InsertOne(*s.ctx, &doc)
-	if err != nil {
+	if _, err := s.collection.Collection().InsertOne(*s.ctx, &doc); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return nil, fmt.Errorf("a user with email %q: %w", c.Email, repoErrors.ErrDuplicate)
+		}
+
 		return nil, err
 	}
 
-	// Get the User and return it
-	return s.Get(user.ID)
+	return s.Get(u.ID)
 }
 
-// Find retrieves user data records for a specific key/value.
+// Find retrieves every user whose key field equals value.
 func (s *Store) Find(key string, value string) ([]*models.User, error) {
+	if err := requireLookup(key); err != nil {
+		return nil, err
+	}
+
 	return s.collection.Finder().Filter(query.Eq(key, value)).Find(*s.ctx)
 }
 
-// FindFirst retrieves the first user data record, given a key/value.
+// FindFirst retrieves the first user whose key field equals value.
 func (s *Store) FindFirst(key string, value string) (*models.User, error) {
-	return s.collection.Finder().Filter(query.Eq(key, value)).FindOne(*s.ctx)
+	if err := requireLookup(key); err != nil {
+		return nil, err
+	}
+
+	u, err := s.collection.Finder().Filter(query.Eq(key, value)).FindOne(*s.ctx)
+
+	return u, notFound(err, fmt.Sprintf("no user with %s %q", key, value))
 }
 
-// Get retrieves user data for a specific user ID.
+// Get retrieves the user with this id.
 func (s *Store) Get(id string) (*models.User, error) {
-	return s.collection.Finder().Filter(query.Id(id)).FindOne(*s.ctx)
+	u, err := s.collection.Finder().Filter(query.Id(id)).FindOne(*s.ctx)
+
+	return u, notFound(err, fmt.Sprintf("user %q", id))
 }
 
 // Exists checks to see if a user with the given ID already exists.
@@ -115,30 +114,46 @@ func (s *Store) Exists(id string) (bool, error) {
 	return count > 0, nil
 }
 
-// Update saves user data to the repository.
-func (s *Store) Update(user *models.UpdateUser) error {
-	user.UpdatedAt = time.Now()
+// Update sets the fields the update carries; the BSON form omits the rest, so
+// an edit that does not mention the password keeps it.
+func (s *Store) Update(update *models.UpdateUser) error {
+	if err := requireID(update); err != nil {
+		return err
+	}
 
-	doc, err := repoUtils.CreateBSONDoc(user)
+	update.UpdatedAt = time.Now()
+
+	doc, err := repoUtils.CreateBSONDoc(update)
 	if err != nil {
 		return err
 	}
 
-	// Create the update document, specifying the fields to update. `nil` fields are not updated,
-	// as they are dropped in the conversion. We specify a filter for the requested user ID, so only
-	// one document should ever be updated.
 	result, err := s.collection.Collection().UpdateOne(
-		context.TODO(),
-		bson.D{{Key: "_id", Value: user.ID}},
+		*s.ctx,
+		bson.D{{Key: "_id", Value: update.ID}},
 		bson.D{{Key: "$set", Value: doc}},
 	)
 	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return fmt.Errorf("a user with email %q: %w", update.Email, repoErrors.ErrDuplicate)
+		}
+
 		return err
 	}
 
 	if result.MatchedCount == 0 {
-		return fmt.Errorf("user with id %v does not exists", user.ID)
+		return fmt.Errorf("user %q: %w", update.ID, repoErrors.ErrNotFound)
 	}
 
 	return nil
+}
+
+// notFound maps the driver's "no document" onto repo.ErrNotFound, so callers
+// test one sentinel whichever backend they run on.
+func notFound(err error, what string) error {
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return fmt.Errorf("%s: %w", what, repoErrors.ErrNotFound)
+	}
+
+	return err
 }

@@ -2,6 +2,7 @@ package injector
 
 import (
 	"context"
+	"database/sql"
 
 	mongodbClient "github.com/robbiebyrd/indri/internal/clients/mongodb"
 	"github.com/robbiebyrd/indri/internal/models"
@@ -25,15 +26,18 @@ import (
 
 type ReposInjector struct {
 	EnvVars      *envVars.Vars
-	GameRepo     *gameRepo.Store
-	UserRepo     *userRepo.Store
-	SessionRepo  *sessionRepo.Store
+	GameRepo     gameRepo.Storer
+	UserRepo     userRepo.Storer
+	SessionRepo  sessionRepo.Storer
 	ScriptRepo   *scriptRepo.Store
-	ScheduleRepo *scheduleRepo.Store
+	ScheduleRepo scheduleRepo.Storer
 }
 
 type ClientsInjector struct {
+	// MongoDBClient is set when INDRI_DB_BACKEND is mongodb, and SQLDB when it
+	// is sqlite or postgres; the memory backend opens neither.
 	MongoDBClient *mongodbClient.Client
+	SQLDB         *sql.DB
 	Transport     transport.Transport
 	LockManager   lock.Manager
 	Publisher     events.Publisher

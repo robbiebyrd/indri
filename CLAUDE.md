@@ -8,7 +8,8 @@ Indri is a Go backend for real-time, multiplayer, browser/mobile party games. Cl
 swappable transport — WebSocket (`/ws`, JSON messages routed by an `action` field), GraphQL
 (`/graphql`, typed mutations + a `gameUpdates` subscription), REST+SSE (`/api/<action>` posts +
 a `/events` stream), or WebRTC (`/rtc/offer` signalling + a DataChannel) — behind the
-`internal/transport` interface. Game state lives in MongoDB; each write computes its own delta in application code and
+`internal/transport` interface. Game state lives in MongoDB, SQLite, PostgreSQL or memory
+(`INDRI_DB_BACKEND`); each write computes its own delta in application code and
 publishes it on an event bus, which broadcasts it to everyone in that game. `client/` is a companion
 Expo/React Native reference client.
 
@@ -56,13 +57,16 @@ change stream. `docker-compose.yml` starts a standalone `mongod`.
 
 `Boot` wires a three-layer injector (`internal/injector/`), in strict order:
 
-1. **clients** (`clients.go`) — MongoDB, the WebSocket transport (`internal/transport/ws`), the lock
+1. **clients** (`clients.go`) — the one database `INDRI_DB_BACKEND` names (MongoDB, or a `*sql.DB` for
+   SQLite/PostgreSQL; nothing for `memory`), the WebSocket transport (`internal/transport/ws`), the lock
    manager, and the change-event publisher. Clients are process-global singletons; `GetClients` returns
    a cached `*ClientsInjector` on every call after the first, and accepts overrides for tests.
    `INDRI_LOCK_BACKEND=redis` is the *multi-instance switch*: it flips **both** the lock manager and the
    event bus to Redis, sharing one connection. Otherwise both are in-process.
-2. **repos** (`repos.go`) — game/user/session Mongo stores plus the script store (loaded from the JSON
-   file). Stores create their own indexes in `NewStore`.
+2. **repos** (`repos.go`, `backend.go`) — game/user/session stores, all on the same backend, plus the
+   schedule store and the script store (loaded from the JSON file). Every repo package has a Mongo
+   `Store`, a `MemoryStore` and SQL stores, held to one contract suite per package (`repotest` opens the
+   databases). Timers have no SQL store yet: on SQLite/PostgreSQL they are in memory, with a boot warning.
 3. **services** (`services.go`) — business logic over the repos. Also builds the GraphQL transport
    (`internal/transport/graphql`) and wraps it with the WebSocket transport in a `transport.Multi`,
    replacing `clients.Transport` with the aggregate.
@@ -72,7 +76,7 @@ change stream. `docker-compose.yml` starts a standalone `mongod`.
 
 `Serve` runs two goroutines under an `errgroup`: the HTTP server (all transports mounted via
 `Transport.Register`) and the change-event broadcaster. Both shut down on root-context cancellation
-(SIGINT/SIGTERM), then `closeResources` closes the transport and drains the Mongo pool.
+(SIGINT/SIGTERM), then `closeResources` closes the transport and the database pool.
 
 ### Transports
 
@@ -219,7 +223,7 @@ There are **two different values both called `sessionId`**, and confusing them i
 
 | Where | Value | Notes |
 |---|---|---|
-| Connection key `sessionId` (`transport.Conn`) | `session.ID.Hex()` (Mongo ObjectID) | Server-side targeting key for broadcasts. Never sent to clients. |
+| Connection key `sessionId` (`transport.Conn`) | `session.ID` (a backend-neutral string id) | Server-side targeting key for broadcasts. Never sent to clients. |
 | JSON field `sessionId` on the wire | `session.Token` (256-bit hex) | Unguessable bearer token. Client echoes it back in a `reconnect`. |
 
 `login` and `reconnect` are the only places that call `SetKey`, and the only key they set is `sessionId`.
@@ -231,7 +235,10 @@ creating a second one (unique index on `userId`).
 
 ### Data model
 
-MongoDB collections: `game`, `user`, `session`. Models live in `internal/models/`.
+Collections (MongoDB) or tables (SQL): `game`/`games`, `user`/`users`, `session`/`sessions`. Models live in
+`internal/models/`. The user and session stores map "not found" and "unique index refused" onto
+`repo.ErrNotFound` and `repo.ErrDuplicate` on every backend; callers test those with `errors.Is`, never a
+driver error. (The game store does not yet: a taken game code is a plain error.)
 
 A **Game** holds `Teams`, `Players`, and a `Stage`. `Players` is keyed by **slot id**, not user id:
 every team's slots are declared when the game is created, and `Player.UserID` names a slot's holder

@@ -2,9 +2,14 @@ package user
 
 import "github.com/robbiebyrd/indri/internal/models"
 
-// Storer is the contract a user store must satisfy. The assertion below keeps
-// it in step with *Store: change one without the other and the build fails.
-var _ Storer = (*Store)(nil)
+// Storer is the contract a user store must satisfy. The assertions below keep
+// it in step with every backend: change one without the others and the build
+// fails.
+var (
+	_ Storer = (*Store)(nil)
+	_ Storer = (*MemoryStore)(nil)
+	_ Storer = (*SQLStore)(nil)
+)
 
 type Storer interface {
 	New(user models.CreateUser) (*models.User, error)

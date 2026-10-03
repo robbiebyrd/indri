@@ -3,12 +3,9 @@ package game
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
-	"strconv"
 
-	"github.com/jackc/pgx/v5/pgconn"
-
+	"github.com/robbiebyrd/indri/internal/repo/sqldialect"
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 )
@@ -51,20 +48,9 @@ func NewPostgresStore(
 	return &PostgresStore{
 		core: core{
 			ctx:       ctx,
-			docs:      sqlDocs{db: db, dialect: postgresDialect},
+			docs:      sqlDocs{db: db, dialect: sqldialect.Postgres},
 			locks:     locks,
 			publisher: publisher,
 		},
 	}, nil
-}
-
-// postgresDialect: PostgreSQL binds with "$n" and reports a unique violation as
-// SQLSTATE 23505, which pgx surfaces as a typed error rather than in the text.
-var postgresDialect = dialect{
-	placeholder: func(n int) string { return "$" + strconv.Itoa(n) },
-	isUniqueViolation: func(err error) bool {
-		var pgErr *pgconn.PgError
-
-		return errors.As(err, &pgErr) && pgErr.Code == "23505"
-	},
 }

@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT PRIMARY KEY,
     token      TEXT UNIQUE,
     user_id    TEXT UNIQUE,
+    game_id    TEXT,
     data       TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT 0
 );

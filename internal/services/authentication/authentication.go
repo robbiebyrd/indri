@@ -12,12 +12,12 @@ import (
 )
 
 type Service struct {
-	userRepo    *userRepo.Store
-	sessionRepo *sessionRepo.Store
+	userRepo    userRepo.Storer
+	sessionRepo sessionRepo.Storer
 }
 
 // NewService creates a new repository for accessing user data.
-func NewService(userRepo *userRepo.Store, sessionRepo *sessionRepo.Store) (*Service, error) {
+func NewService(userRepo userRepo.Storer, sessionRepo sessionRepo.Storer) (*Service, error) {
 	if userRepo == nil {
 		return nil, errors.New("userRepo is required")
 	}
