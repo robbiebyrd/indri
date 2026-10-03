@@ -5,7 +5,7 @@ status: pending
 priority: P2
 type: task
 created: "2026-10-01T13:52:29.872Z"
-updated: "2026-10-01T13:52:39.842Z"
+updated: "2026-10-03T04:30:15.000Z"
 dependencies: ["080-cf52"]
 plan: plans/main-divergence-integration.md
 plan_step: Step 6
@@ -52,3 +52,5 @@ origin/main replaced the dotted-path delta with positional integer-array encodin
 
 ### 2026-10-01T14:15:50.904Z - RN compression check (partial). Client constructs the global WebSocket (client/services/transport.ts:156), so compression support is per-platform. Verified in the installed RN 0.79.6 tree: no deflate/permessage/compress handling anywhere in RN's WebSocket JS layer; Android's WebSocketModule.kt:82-89 builds OkHttpClient.Builder() with only timeouts configured. NOT settled from this tree: whether OkHttp negotiates permessage-deflate by default on Android (OkHttp is an external dep, not vendored here), and what iOS actually uses in 0.79. Expo web gets browser-native compression. DECISIVE TEST NEEDED: enable gorilla EnableCompression server-side, connect from web/iOS/Android, and observe whether the handshake response carries Sec-WebSocket-Extensions: permessage-deflate. FALLBACK if iOS lacks it: application-layer deflate on the payload before Write with the client inflating -- keeps dotted paths and escaped-key support, and is far less work than the positional migration.
 
+
+### 2026-10-03T04:30:15.000Z - DECISION (Boss). Decline the compact delta protocol; keep local's dotted-path JSON deltas. Instead: (1) enable permessage-deflate server-side and verify the handshake (Sec-WebSocket-Extensions: permessage-deflate) from web, iOS and Android; if a native platform does not negotiate it, fall back to application-layer deflate of the payload; (2) split layout out of the keyframe onto its own content-hash-versioned frame sent once per connection (measured 4936 -> 754 bytes). Given up, explicitly: the further ~30% on deflated deltas (292 -> 205 bytes per 9-move game), MessagePack framing, and alignment with origin/main's wire format -- the later rebase onto main will conflict on the delta path. Kept: the client parser as is, every scripttest fixture, and escaped-key path support. The compact protocol is to be filed as its own plan, not implemented.
