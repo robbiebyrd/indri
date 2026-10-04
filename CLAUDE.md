@@ -96,7 +96,8 @@ than reimplement:
   broadcaster. Backs both GraphQL subscriptions and SSE streams.
 - `Registry` — the open-connection set and all protocol-independent `Transport` methods. Embed it and
   supply only `Handle` and `Register`.
-- `OriginPolicy` — the allowlist, same-origin acceptance and CORS middleware, applied once in
+- `OriginPolicy` — the allowlist (every origin when empty; when set, exactly its origins plus no-`Origin`
+  clients) and CORS middleware, applied once in
   `internal/entrypoints/http` so every route agrees.
 
 SSE is push-only (no inbound channel), so SSE clients send actions over `rest` or GraphQL mutations.

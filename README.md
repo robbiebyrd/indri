@@ -128,7 +128,7 @@ The ones you are most likely to change:
 | Variable | Default | Purpose |
 |---|---|---|
 | `INDRI_LISTEN_ADDRESS`, `INDRI_LISTEN_PORT` | `localhost`, `5002` | Where to listen |
-| `INDRI_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to open a socket, matched as exact strings — `http://localhost:8081` does not cover `http://127.0.0.1:8081`. Empty rejects all cross-origin browsers; clients that send no `Origin` are always allowed |
+| `INDRI_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to open a socket, matched as exact strings — `http://localhost:8081` does not cover `http://127.0.0.1:8081`. Empty accepts every origin (no ambient credentials, so a foreign page can't act as a player — but any page can reach a localhost/LAN server through a visitor's browser). A list accepts only its origins, plus clients that send no `Origin`; React Native's iOS WebSocket sends the server's own origin, so list it too |
 | `INDRI_MONGO_URI`, `INDRI_MONGO_DATABASE` | `localhost`, `indri` | Database |
 | `INDRI_LOCK_BACKEND` | `inprocess` | Multi-instance switch. `redis` moves both the edit locks and the delta bus to Redis |
 | `INDRI_WS_*` | see `.env.example` | Timeouts, ping interval, message size limits |

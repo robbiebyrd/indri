@@ -2,26 +2,28 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"flag"
-
+	"github.com/robbiebyrd/indri/internal/cli"
 	"github.com/robbiebyrd/indri/internal/services/boot"
 )
 
 func main() {
-	scriptFilePath := flag.String("script", "", "The name to greet")
-	flag.Parse()
+	scriptFilePath, err := cli.Parse(flag.CommandLine, os.Args[1:])
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Cancel the root context on SIGINT/SIGTERM so the server can drain and
 	// shut down cleanly instead of being killed mid-write.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	i, err := boot.Boot(ctx, scriptFilePath)
+	i, err := boot.Boot(ctx, &scriptFilePath)
 	if err != nil {
 		log.Fatalf("could not bootstrap: %v", err)
 	}

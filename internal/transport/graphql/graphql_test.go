@@ -39,9 +39,11 @@ func TestRegister_SubscriptionUpgradeUsesTheOriginPolicy(t *testing.T) {
 		allowed    bool
 	}{
 		"allowlisted cross origin": {origin: "http://localhost:8081", allowed: true},
-		"same origin":              {sameOrigin: true, allowed: true},
-		"no origin (native)":       {allowed: true},
-		"disallowed origin":        {origin: "http://evil.example"},
+		// With a list, the server's own origin gets no pass (a DNS-rebinding
+		// page presents it); it must be listed like any other.
+		"same origin, unlisted": {sameOrigin: true, allowed: false},
+		"no origin (native)":    {allowed: true},
+		"disallowed origin":     {origin: "http://evil.example"},
 	}
 
 	for name, tc := range cases {

@@ -1,7 +1,11 @@
 package env
 
 import (
+	"fmt"
 	"log"
+	"reflect"
+	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/kelseyhightower/envconfig"
@@ -35,26 +39,122 @@ type Vars struct {
 
 var globalClient *Vars
 
+// GetEnv returns the settings, loading them from the environment (and a .env
+// file) on first use. A server that takes flags calls Load first.
 func GetEnv() *Vars {
 	if globalClient != nil {
 		return globalClient
 	}
 
+	v, err := Load(nil)
+	if err != nil {
+		log.Printf("Error applying settings, continuing with what loaded: %v", err)
+	}
+
+	return v
+}
+
+// Load reads the settings from, in rising priority: their defaults, the
+// environment (and a .env file), then overrides — command-line values keyed
+// by flag name. It replaces the settings GetEnv returns.
+func Load(overrides map[string]string) (*Vars, error) {
 	var v Vars
 
-	err := godotenv.Load()
-	if err != nil {
+	if err := godotenv.Load(); err != nil {
 		log.Println("Error loading .env file, continuing anyway with environment variables.")
 		log.Println(err)
 	}
 
-	err = envconfig.Process("indri", &v)
-	if err != nil {
+	if err := envconfig.Process("indri", &v); err != nil {
 		log.Println("Error parsing environment variables, continuing anyway with defaults.")
 		log.Println(err)
 	}
 
 	globalClient = &v
 
-	return &v
+	return &v, applyOverrides(&v, overrides)
+}
+
+// Setting is one configurable value: its environment variable, the flag that
+// overrides it, and its default.
+type Setting struct {
+	EnvVar  string
+	Flag    string
+	Default string
+	Kind    reflect.Kind
+
+	field int
+}
+
+// Settings lists every setting. A flag's name is derived from its environment
+// variable — INDRI_LISTEN_PORT is -listen-port — so a new setting has a flag
+// without anyone remembering to add one.
+func Settings() []Setting {
+	t := reflect.TypeFor[Vars]()
+	settings := make([]Setting, 0, t.NumField())
+
+	for i := range t.NumField() {
+		field := t.Field(i)
+
+		name := field.Tag.Get("envconfig")
+		if name == "" {
+			continue
+		}
+
+		settings = append(settings, Setting{
+			EnvVar:  "INDRI_" + name,
+			Flag:    strings.ReplaceAll(strings.ToLower(name), "_", "-"),
+			Default: field.Tag.Get("default"),
+			Kind:    field.Type.Kind(),
+			field:   i,
+		})
+	}
+
+	return settings
+}
+
+// applyOverrides sets each overridden setting on v from its string form.
+func applyOverrides(v *Vars, overrides map[string]string) error {
+	if len(overrides) == 0 {
+		return nil
+	}
+
+	byFlag := map[string]Setting{}
+	for _, s := range Settings() {
+		byFlag[s.Flag] = s
+	}
+
+	target := reflect.ValueOf(v).Elem()
+
+	for flag, value := range overrides {
+		s, ok := byFlag[flag]
+		if !ok {
+			return fmt.Errorf("no setting has the flag -%s", flag)
+		}
+
+		field := target.Field(s.field)
+
+		switch s.Kind {
+		case reflect.String:
+			field.SetString(value)
+		case reflect.Int:
+			n, err := strconv.Atoi(value)
+			if err != nil {
+				return fmt.Errorf("-%s must be a whole number, got %q", flag, value)
+			}
+
+			field.SetInt(int64(n))
+		case reflect.Bool:
+			b, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("-%s must be true or false, got %q", flag, value)
+			}
+
+			field.SetBool(b)
+		default:
+			return fmt.Errorf("-%s has a type flags cannot set", flag)
+		}
+	}
+
+	return nil
 }

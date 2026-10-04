@@ -6,7 +6,24 @@ import (
 	"testing"
 )
 
-func TestOriginPolicyAllows(t *testing.T) {
+// Without an allowlist every origin may connect. Connections carry no ambient
+// credentials — no cookies; a client authenticates with login or a token it
+// holds — so a foreign page cannot act as a player by opening one. (It can
+// still reach a server on localhost or a private network through a visitor's
+// browser; .env.example says so.)
+func TestOriginPolicyAllows_WithoutAListAcceptsEveryOrigin(t *testing.T) {
+	policy := NewOriginPolicy("")
+
+	for _, origin := range []string{"", "http://evil.example", "http://localhost:5004", "http://%zz"} {
+		if !policy.Allows(request(origin, "localhost:5004")) {
+			t.Errorf("Allows(origin=%q) with no allowlist = false, want true", origin)
+		}
+	}
+}
+
+// With an allowlist, the list is the whole policy: its origins, and requests
+// with no Origin (native and CLI clients).
+func TestOriginPolicyAllows_WithAListAcceptsOnlyItAndNativeClients(t *testing.T) {
 	policy := NewOriginPolicy(" http://localhost:8081 ,, http://localhost:19006 ")
 
 	cases := map[string]struct {
@@ -14,19 +31,16 @@ func TestOriginPolicyAllows(t *testing.T) {
 		host   string
 		want   bool
 	}{
-		"no origin (native client)":  {origin: "", want: true},
-		"allowed origin":             {origin: "http://localhost:8081", want: true},
-		"second allowed origin":      {origin: "http://localhost:19006", want: true},
-		"disallowed origin":          {origin: "http://evil.example", want: false},
-		"empty entry is not a match": {origin: "", want: true},
+		"no origin (native client)": {origin: "", want: true},
+		"listed origin":             {origin: "http://localhost:8081", want: true},
+		"second listed origin":      {origin: "http://localhost:19006", want: true},
+		"unlisted origin":           {origin: "http://evil.example", want: false},
+		"malformed origin":          {origin: "http://%zz", want: false},
 
-		// React Native's WebSocket derives an Origin from the target URL, so a
-		// native client dialling the server sends the server's own origin.
-		// Same-origin is not cross-site, so no allowlist entry is needed.
-		"same origin as the server":       {origin: "http://localhost:5004", host: "localhost:5004", want: true},
-		"same host over https":            {origin: "https://indri.example", host: "indri.example", want: true},
-		"same host, different port":       {origin: "http://localhost:5005", host: "localhost:5004", want: false},
-		"origin host is a prefix of host": {origin: "http://localhost", host: "localhost:5004", want: false},
+		// The server's own origin gets no pass: a DNS-rebinding page presents
+		// exactly that. A React Native iOS client, which sends it, must be
+		// listed.
+		"the server's own origin, unlisted": {origin: "http://localhost:5004", host: "localhost:5004", want: false},
 	}
 
 	for name, tc := range cases {
@@ -40,8 +54,9 @@ func TestOriginPolicyAllows(t *testing.T) {
 	}
 }
 
-// The policy is the same for every transport, so a nil one must not mean "open
-// to everyone": a transport built without one still rejects cross-origin.
+// A nil policy is a transport built without one — a wiring bug, not a choice
+// of configuration — so it must not mean "open to everyone": it still rejects
+// cross-origin.
 func TestOriginPolicyAllows_NilPolicyRejectsCrossOrigin(t *testing.T) {
 	var policy *OriginPolicy
 
@@ -53,9 +68,6 @@ func TestOriginPolicyAllows_NilPolicyRejectsCrossOrigin(t *testing.T) {
 		t.Error("Allows(cross origin) = true, want false")
 	}
 
-	if !policy.Allows(request("http://localhost:5004", "localhost:5004")) {
-		t.Error("Allows(same origin) = false, want true")
-	}
 }
 
 func TestOriginPolicyMiddleware(t *testing.T) {

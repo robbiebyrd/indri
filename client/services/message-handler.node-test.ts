@@ -202,3 +202,19 @@ test("send before open is dropped, and lands once open", () => {
         );
     });
 });
+
+// With no open games the server sends "games": null. The present-but-null key
+// must be used, as an empty list, not mistaken for an absent key — which handed
+// the whole message to the Join screen as its game list, and crashed it.
+test("an inquiry response with no games gives an empty game list", () => {
+    withFakeSocket(() => {
+        const lists: unknown[] = [];
+        const noop = () => undefined;
+        const ws = new MessageHandler("ws://test/ws", noop, noop, (m: any) => lists.push(m.payload));
+
+        ws.routeIncomingMessage({data: JSON.stringify({op: "inquiryResponse", games: null})} as MessageEvent);
+        ws.routeIncomingMessage({data: JSON.stringify({op: "inquiryResponse", games: [{code: "ABC"}]})} as MessageEvent);
+
+        assert.deepEqual(lists, [[], [{code: "ABC"}]]);
+    });
+});

@@ -2,7 +2,6 @@ package transport
 
 import (
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/robbiebyrd/indri/internal/repo/env"
@@ -22,8 +21,18 @@ const (
 // shares one policy, so a browser that can open a WebSocket can also open an
 // SSE stream and POST an action.
 //
-// A nil *OriginPolicy is usable and denies every cross-origin request, so a
-// transport constructed without one fails closed.
+// Without an allowlist every origin may connect. Connections carry no ambient
+// credentials — no cookies; a client authenticates with login or a token it
+// holds — so a foreign page cannot act as a player by opening one. It can still
+// reach a server on localhost or a private network through a visitor's browser,
+// which is why a deployment that cares sets INDRI_ALLOWED_ORIGINS. With an
+// allowlist, the list is the whole policy: its origins, plus requests with no
+// Origin (native and CLI clients). The server's own origin gets no pass then,
+// since a DNS-rebinding page presents exactly that; a React Native iOS client,
+// which sends it, must be listed.
+//
+// A nil *OriginPolicy is a transport built without one — a wiring bug, not a
+// configuration — and denies every cross-origin request.
 type OriginPolicy struct {
 	allowed map[string]struct{}
 }
@@ -58,16 +67,17 @@ func (p *OriginPolicy) Allows(r *http.Request) bool {
 		return true
 	}
 
-	if p != nil {
-		if _, ok := p.allowed[origin]; ok {
-			return true
-		}
+	if p == nil {
+		return false
 	}
 
-	// Same-origin is by definition not cross-site. React Native's WebSocket
-	// derives an Origin from the URL it dials, so a native client would
-	// otherwise need the server's own address in the allowlist.
-	return isSameOrigin(origin, r.Host)
+	if len(p.allowed) == 0 {
+		return true
+	}
+
+	_, ok := p.allowed[origin]
+
+	return ok
 }
 
 // Middleware rejects disallowed origins, answers CORS preflights, and adds the
@@ -113,16 +123,4 @@ func (p *OriginPolicy) Middleware(next http.Handler) http.Handler {
 func isPreflight(r *http.Request) bool {
 	return r.Method == http.MethodOptions &&
 		r.Header.Get("Access-Control-Request-Method") != ""
-}
-
-// isSameOrigin reports whether origin addresses host. The comparison is on the
-// full host:port, so a different port on the same hostname is a different
-// origin, as the web platform defines it.
-func isSameOrigin(origin, host string) bool {
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-
-	return u.Host != "" && u.Host == host
 }

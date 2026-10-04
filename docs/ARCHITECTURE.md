@@ -84,7 +84,7 @@ streams behave identically rather than approximately:
 | `Keys` | Per-connection key/value state and the closed flag. `WhileOpen` holds the read lock for a delivery, so a send cannot overlap the `Close` that releases what it sends to; `MarkClosed` is won by exactly one caller. |
 | `BufferedConn[T]` | A push-only `Conn` queueing onto a buffered channel. Drops the oldest rather than blocking the broadcaster on a slow client. Generic only so each transport hands out the channel type its framework wants. |
 | `Registry` | The open-connection set plus fan-out — every part of `Transport` that is protocol-independent. A transport embeds it and supplies only `Handle` and `Register`. |
-| `OriginPolicy` | The origin allowlist, same-origin acceptance, and the CORS middleware. Applied once in `entrypoints/http`, so all four routes agree. |
+| `OriginPolicy` | The origin allowlist (open when empty, the whole policy when set) and the CORS middleware. Applied once in `entrypoints/http`, so all four routes agree. |
 
 | Adapter | Route | Notes |
 |---|---|---|
@@ -347,7 +347,7 @@ server-supplied dot paths.
 | Variable | Default | Note |
 |---|---|---|
 | `INDRI_LISTEN_ADDRESS` / `INDRI_LISTEN_PORT` | `localhost` / `5002` | |
-| `INDRI_ALLOWED_ORIGINS` | `""` | Comma-separated, matched as exact strings (host *and* port; `localhost` ≠ `127.0.0.1`). Empty rejects all cross-origin browsers. |
+| `INDRI_ALLOWED_ORIGINS` | `""` | Comma-separated, matched as exact strings (host *and* port; `localhost` ≠ `127.0.0.1`). Empty accepts every origin: no ambient credentials, so a foreign page can't act as a player, though any page can reach a localhost/LAN server through a visitor's browser. A list accepts only its origins plus clients with no `Origin`; list React Native iOS's own-origin. |
 | `INDRI_MONGO_URI` / `INDRI_MONGO_DATABASE` | `localhost` / `indri` | A replica set is not required. |
 | `INDRI_LOCK_BACKEND` | `inprocess` | Multi-instance switch: `redis` moves both the lock manager and the event bus to Redis. |
 | `INDRI_REDIS_*` | localhost:6379 | Only used in `redis` mode. |
