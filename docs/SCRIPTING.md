@@ -22,7 +22,7 @@ This document is the reference for the person writing that script.
 - [What a handler is given](#what-a-handler-is-given)
 - [Changing state: `indri.mutate`](#changing-state-indrimutate)
 - [What a script may and may not write](#what-a-script-may-and-may-not-write)
-- [Talking to players: `indri.reply` and `indri.send`](#talking-to-players-indrireply-and-indrisend)
+- [Talking to players: `indri.reply` and `indri.send`](#talking-to-players-indrireply-and-indrisend) (and `indri.refresh`)
 - [Timers: `indri.after`, `indri.at`, `indri.cancel`](#timers-indriafter-indriat-indricancel)
 - [Lifecycle events](#lifecycle-events)
 - [Hooks on built-in actions](#hooks-on-built-in-actions)
@@ -354,6 +354,20 @@ are not what bounds the tree**. What bounds it is the deadline. Every effect is 
 below one client message shares that message's 100 ms budget and unwinds together when it expires.
 The caps keep an honest script honest; the deadline is what stops a hostile one.
 
+### `indri.refresh()` and `indri.refreshSelf()`
+
+Send a whole keyframe — the sanitized game, `privateData` stripped — rather than a delta.
+`indri.refresh()` sends it to every player in the game; `indri.refreshSelf()` answers the caller
+alone, alongside any `indri.reply`. Reach for them when a client must rebuild from scratch (a new
+round that reshapes the board); an ordinary write needs neither, because its delta is broadcast.
+
+- Both are **effects**: sent after the handler returns and its write commits, so the keyframe is
+  rendered from the stored game and shows the write. A refresh asked for in a write that failed is
+  dropped with it.
+- Asking twice is asking once: one keyframe per kind per invocation, however many retries a mutate
+  took or how many helpers asked.
+- Both refuse when the call has no game (`req.gameId` absent) — an inquiry, say.
+
 ### The effect ledger
 
 Nothing `indri.reply`, `indri.send`, `indri.after`, `indri.at` or `indri.cancel` asks for happens when
@@ -593,6 +607,9 @@ end)
   arrives with `session` absent and `payload` empty.
 - **A hook is not dispatchable.** It lives in a third registry that no dispatch can reach, so hooking
   `join` is not a way to acquire the name `join`.
+- **An inquiry notification is an `after_action("inquire", …)` hook.** It runs once the inquiry has
+  been answered and sees what was asked in `req.payload`. An inquiry belongs to no game, so
+  `indri.mutate` and `indri.refresh` refuse inside it.
 
 ## Capabilities
 
@@ -1050,6 +1067,7 @@ mutation yourself.
 | `internal/services/lua/engine.go` | `indri.on`, the manifests, reserved names, the host table |
 | `internal/services/lua/host_mutate.go` | `indri.mutate`, the invocation context, `scene:changed` |
 | `internal/services/lua/host_io.go` | `indri.reply`, `indri.send`, the depth and fan-out caps |
+| `internal/services/lua/host_refresh.go` | `indri.refresh`, `indri.refreshSelf`, the `Keyframes` dependency |
 | `internal/services/lua/host_timer.go` | `indri.after`, `indri.at`, `indri.cancel`, the nil-session contract |
 | `internal/services/lua/hooks.go` | `indri.before`, `indri.after_action`, the auth-action refusal |
 | `internal/services/lua/lifecycle.go` | the four events, the deferred queue, the `trigger` interface |

@@ -773,3 +773,31 @@ end)
 		t.Errorf("the hook published %d deltas without a game of its own", got)
 	}
 }
+
+// The membership actions a game most often extends — join, leave, kick and
+// inquire — are reached through the hook API, both before and after.
+func TestHooks_TheMembershipActionsCanBeHooked(t *testing.T) {
+	t.Parallel()
+
+	var src strings.Builder
+
+	actions := []string{"join", "leave", "kick", "inquire"}
+	for _, action := range actions {
+		fmt.Fprintf(&src, "indri.before(%q, function(req) end)\nindri.after_action(%q, function(req) end)\n", action, action)
+	}
+
+	e := newTestEngine(t, writeScript(t, "membership.lua", src.String()))
+
+	registered := map[Hook]bool{}
+	for _, h := range e.Hooks() {
+		registered[h] = true
+	}
+
+	for _, action := range actions {
+		for _, kind := range hookKinds {
+			if !registered[Hook{Kind: kind, Action: action}] {
+				t.Errorf("the %v hook on %q did not register", kind, action)
+			}
+		}
+	}
+}

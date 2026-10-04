@@ -67,6 +67,10 @@ type invocation struct {
 	// refuse.
 	timers GameScheduler
 
+	// keyframes is how a refresh is sent. Nil on an engine built without one,
+	// and indri.refresh and indri.refreshSelf refuse.
+	keyframes Keyframes
+
 	// lifecycle is where an event this call *caused* is raised — as opposed to
 	// the trigger above, which is why it is running. The only one a script can
 	// cause is scene:changed, by writing stage.currentScene through indri.mutate;

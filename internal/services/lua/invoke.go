@@ -109,6 +109,7 @@ func (e *Engine) run(
 		session:   session,
 		dispatch:  e.Dispatch,
 		timers:    e.Timers,
+		keyframes: e.Keyframes,
 		lifecycle: e,
 	}
 

@@ -105,6 +105,10 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 	// script's events silently stop working on a server that loaded fine.
 	le.Dispatch = router.Dispatch
 
+	// indri.refresh and indri.refreshSelf send a whole keyframe through the
+	// same services a join's keyframe and a delta's fan-out go through.
+	le.Keyframes = keyframeSender{games: gs, broadcast: bs}
+
 	// The other direction: the game service raises a lifecycle event when a
 	// game is created or a player joins or leaves, and the engine is what tells
 	// the scripts. Set here for the same reason Dispatch is — the engine is

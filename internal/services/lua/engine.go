@@ -119,6 +119,11 @@ type Engine struct {
 	// all three refuse rather than silently lose a timer, which would hang a
 	// game with nothing in the log.
 	Timers GameScheduler
+
+	// Keyframes is how indri.refresh and indri.refreshSelf send a whole game.
+	// Exported and set at boot for the same reason Dispatch is. A nil one makes
+	// both refuse.
+	Keyframes Keyframes
 }
 
 // scriptChunk is one script file's bytecode, under the path it was read from.
@@ -329,6 +334,11 @@ func installHostAPI(L *lua.LState, h *stateHandlers) error {
 	// to has committed. See host_io.go.
 	indri.RawSetString("reply", L.NewFunction(hostReply))
 	indri.RawSetString("send", L.NewFunction(hostSend))
+
+	// A whole-game keyframe, to everyone or to the caller, queued like a reply
+	// and sent from the committed game. See host_refresh.go.
+	indri.RawSetString("refresh", L.NewFunction(hostRefresh))
+	indri.RawSetString("refreshSelf", L.NewFunction(hostRefreshSelf))
 
 	// The deferred half of the same idea: an action dispatched at a time rather
 	// than now. These queue too, so a timer set inside a mutate that lost its
