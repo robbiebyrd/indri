@@ -355,15 +355,18 @@ func TestAnswerOffer_ClosedMidGatherReturnsError(t *testing.T) {
 
 	offer := gatherLocalOffer(t, gatherCtx, clientPC)
 
-	// An unreachable STUN server (TEST-NET-3, RFC 5737) gives gathering a
-	// server-reflexive candidate it can never resolve, so the server's own
-	// host candidates finish almost instantly but ICEGatheringStateComplete
-	// does not -- without this, host-only gathering on loopback completes in
-	// well under a millisecond and the close below would race a gather that
-	// has usually already finished, rather than exercising the mid-gather
-	// path pion issue #2507 is about.
+	// A STUN server that never answers gives gathering a server-reflexive
+	// candidate it can never resolve, so the server's own host candidates
+	// finish almost instantly but ICEGatheringStateComplete does not --
+	// without this, host-only gathering on loopback completes in well under a
+	// millisecond and the close below would race a gather that has usually
+	// already finished, rather than exercising the mid-gather path pion issue
+	// #2507 is about. It is a local socket rather than an unroutable address:
+	// with outbound UDP denied (a sandbox, a locked-down CI runner) a send to
+	// an outside address fails at once, gathering completes, and the test
+	// stops testing what it is for.
 	serverPC, err := api.NewPeerConnection(pion.Configuration{
-		ICEServers: []pion.ICEServer{{URLs: []string{"stun:203.0.113.1:19302"}}},
+		ICEServers: []pion.ICEServer{{URLs: []string{silentSTUN(t)}}},
 	})
 	if err != nil {
 		t.Fatalf("server NewPeerConnection: %v", err)
@@ -400,6 +403,31 @@ func TestAnswerOffer_ClosedMidGatherReturnsError(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("answerOffer did not return after the PeerConnection was closed mid-gather (goroutine leak, pion #2507)")
 	}
+}
+
+// silentSTUN listens on loopback and reads, but never answers, every STUN
+// request sent to it, returning its stun: URL.
+func silentSTUN(t *testing.T) string {
+	t.Helper()
+
+	conn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening for STUN: %v", err)
+	}
+
+	t.Cleanup(func() { _ = conn.Close() })
+
+	go func() {
+		buf := make([]byte, 1500)
+
+		for {
+			if _, _, err := conn.ReadFrom(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	return "stun:" + conn.LocalAddr().String()
 }
 
 // Criterion 7: an in-process test drives both peers with pion and exchanges
