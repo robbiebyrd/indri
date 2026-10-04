@@ -23,7 +23,8 @@ import (
 //
 // What it prints is the other half of its job: the actions and lifecycle events
 // the scripts registered are what the router, the REST route table and the
-// scheduler are all built from, and they are not written down anywhere else.
+// scheduler are all built from, and the hooks are what runs around the
+// built-in actions; none of them is written down anywhere else.
 func Check(out io.Writer, configPath string) error {
 	store, err := scriptRepo.NewStore(configPath)
 	if err != nil {
@@ -53,7 +54,8 @@ func Check(out io.Writer, configPath string) error {
 		fmt.Fprintf(out, "  %s (%s)\n", file.Path, grants(file.Grants))
 	}
 
-	fmt.Fprintf(out, "\nactions\n%s\nlifecycle events\n%s", list(engine.Actions()), list(engine.Lifecycle()))
+	fmt.Fprintf(out, "\nactions\n%s\nlifecycle events\n%s\nhooks\n%s",
+		list(engine.Actions()), list(engine.Lifecycle()), list(hooks(engine.Hooks())))
 
 	return nil
 }
@@ -66,6 +68,16 @@ func grants(granted []string) string {
 	}
 
 	return "grants: " + strings.Join(granted, ", ")
+}
+
+// hooks names each hook by when it runs and the built-in action it wraps.
+func hooks(registered []luaService.Hook) []string {
+	names := make([]string, 0, len(registered))
+	for _, h := range registered {
+		names = append(names, fmt.Sprintf("%s %s", h.Kind, h.Action))
+	}
+
+	return names
 }
 
 // list renders a manifest, one name per line, saying so when it is empty.

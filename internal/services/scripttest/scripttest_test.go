@@ -513,6 +513,24 @@ func TestCheck_ReportsWhatAConfigDeclares(t *testing.T) {
 	}
 }
 
+// A script that only hooks built-in actions has loaded and registered
+// something, and the report has to say so: with no hooks section it would read
+// as a script that declares nothing at all.
+func TestCheck_ReportsHooks(t *testing.T) {
+	out := &bytes.Buffer{}
+
+	config := "testdata/hooksonly/config.json"
+	if err := Check(out, config); err != nil {
+		t.Fatalf("checking %s: %v", config, err)
+	}
+
+	for _, want := range []string{"actions\n  (none)", "hooks\n  after-success leave\n  before join\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("check reported\n%s\nwant it to contain %q", out, want)
+		}
+	}
+}
+
 // Every failure a server would hit at boot is a check failure.
 func TestCheck_RefusesAConfigTheServerCouldNotBoot(t *testing.T) {
 	tests := map[string]struct {

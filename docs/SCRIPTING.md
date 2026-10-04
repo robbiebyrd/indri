@@ -865,8 +865,8 @@ usage:
   indri-script check [config.json]
 ```
 
-- **`check`** compiles the scripts a config declares, resolves their grants, and prints the actions
-  and lifecycle events they register. Nothing is booted. Every failure a server would hit at boot
+- **`check`** compiles the scripts a config declares, resolves their grants, and prints the actions,
+  lifecycle events and hooks they register. Nothing is booted. Every failure a server would hit at boot
   surfaces here.
 - **`test`** plays every `.test.json` fixture the paths name. A path is a fixture file, or a directory
   scanned for them. With a single directory and no `-script`, the config is **that directory's**
@@ -992,8 +992,6 @@ a timer id publishes a delta carrying a fresh ObjectID, which no fixture can pre
 - **Built-in actions via `indri.send`.** The harness dispatches only actions a game script declares;
   sending a built-in is refused rather than silently doing nothing, because running one would need
   the session, user and game services a real server boots.
-- **`indri-script check` does not list hooks**, only actions and lifecycle events, even though the
-  engine tracks them.
 
 Where a fixture cannot reach, a Go test can: `example/tictactoe/game_test.go` drives the same engine
 directly and is the pattern to copy.

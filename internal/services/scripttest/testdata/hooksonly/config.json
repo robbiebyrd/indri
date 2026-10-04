@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "teams": {},
+  "stage": {"currentScene": "board", "scenes": {"board": {}}},
+  "scripts": [{"path": "hooks.lua", "grants": []}]
+}
