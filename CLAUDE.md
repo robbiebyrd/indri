@@ -66,7 +66,7 @@ change stream. `docker-compose.yml` starts a standalone `mongod`.
 2. **repos** (`repos.go`, `backend.go`) — game/user/session stores, all on the same backend, plus the
    schedule store and the script store (loaded from the JSON file). Every repo package has a Mongo
    `Store`, a `MemoryStore` and SQL stores, held to one contract suite per package (`repotest` opens the
-   databases). Timers have no SQL store yet: on SQLite/PostgreSQL they are in memory, with a boot warning.
+   databases). The schedule store (script timers) follows the same backend.
 3. **services** (`services.go`) — business logic over the repos. Also builds the GraphQL transport
    (`internal/transport/graphql`) and wraps it with the WebSocket transport in a `transport.Multi`,
    replacing `clients.Transport` with the aggregate.

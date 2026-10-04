@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -8,6 +9,8 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+
+	"github.com/robbiebyrd/indri/internal/repo/repotest"
 )
 
 // The lifecycle a deferred event goes through — claimed once, renewable while
@@ -15,7 +18,9 @@ import (
 // claimed — is the store's contract, not MongoDB's. Every test below is
 // therefore written once and run against both backends: the in-memory store,
 // which always runs, and the MongoDB store, which runs wherever a database is
-// reachable.
+// reachable. SQLite and PostgreSQL run the same suite: every SQL store of one
+// factory shares one database, so a later call is a peer instance exactly as
+// it is for the other two.
 //
 // Before that split, all of this needed MongoDB and skipped itself on a CI
 // runner that has none, so a broken lease fence would have reported green.
@@ -43,6 +48,29 @@ func forEachScheduleBackend(t *testing.T, test func(t *testing.T, newStore store
 			}
 
 			return first.Peer(cfg)
+		})
+	})
+
+	t.Run("sqlite", func(t *testing.T) {
+		db := repotest.SQLite(t)
+
+		test(t, func(_ *testing.T, cfg Config) Storer {
+			return NewSQLiteStore(context.Background(), db, cfg)
+		})
+	})
+
+	t.Run("postgres", func(t *testing.T) {
+		db := repotest.Postgres(t)
+
+		test(t, func(t *testing.T, cfg Config) Storer {
+			t.Helper()
+
+			store, err := NewPostgresStore(context.Background(), db, cfg)
+			if err != nil {
+				t.Fatalf("opening the PostgreSQL schedule store: %v", err)
+			}
+
+			return store
 		})
 	})
 

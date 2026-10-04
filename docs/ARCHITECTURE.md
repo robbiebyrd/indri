@@ -56,7 +56,7 @@ Three-stage construction, each stage depending only on the previous one.
 | File | Builds |
 |---|---|
 | `clients.go` | The database `INDRI_DB_BACKEND` names (Mongo client, or `*sql.DB` for SQLite/PostgreSQL), the WebSocket transport, lock manager, change-event publisher. Cached process-globally; all injectable for tests. |
-| `backend.go` | `openStores`: game, user, session and schedule stores over that one backend. SQL backends keep timers in memory, with a boot warning. |
+| `backend.go` | `openStores`: game, user, session and schedule stores over that one backend. |
 | `repos.go` | `game`, `user`, `session` Mongo stores (each creates its indexes in `NewStore`) plus the script store. |
 | `services.go` | game, broadcast, auth, user, session services. Also builds the GraphQL, SSE and REST transports (each needs the session store to authenticate bearer tokens) and wraps them with the WebSocket transport in a `transport.Multi`, which becomes the injector's `Transport`. Each is given the aggregate as its peer, so a kick closes the target's connections on every transport. |
 

@@ -143,17 +143,12 @@ func (s *MemoryStore) ClaimDue(now time.Time) (*Entry, error) {
 // RenewLease extends the lease on an entry this instance still holds, and
 // reports ErrLeaseLost once another instance has taken it over.
 func (s *MemoryStore) RenewLease(id string) (*Entry, error) {
-	return s.updateHeld(id, func(e *Entry, now time.Time) {
-		e.ClaimedUntil = now.Add(s.cfg.LeaseTTL)
-	})
+	return s.updateHeld(id, renewEdit(s.cfg.LeaseTTL))
 }
 
 // Complete marks an entry this instance holds as successfully fired.
 func (s *MemoryStore) Complete(id string) error {
-	_, err := s.updateHeld(id, func(e *Entry, now time.Time) {
-		e.State = StateDone
-		e.FiredAt = &now
-	})
+	_, err := s.updateHeld(id, completeEdit)
 
 	return err
 }
@@ -161,22 +156,12 @@ func (s *MemoryStore) Complete(id string) error {
 // Fail records a failed attempt: a retry while attempts remain, a dead letter
 // once they are spent — never done, so the failure stays visible.
 func (s *MemoryStore) Fail(id string, reason string) (*Entry, error) {
-	return s.updateHeld(id, func(e *Entry, now time.Time) {
-		state, fireAt := failureOutcome(e, now, s.cfg)
-
-		e.State = state
-		e.FireAt = mongoTime(fireAt)
-		e.ClaimedUntil = time.Time{}.UTC()
-		e.LastError = reason
-	})
+	return s.updateHeld(id, failEdit(reason, s.cfg))
 }
 
 // MarkDead retires an entry that can never succeed.
 func (s *MemoryStore) MarkDead(id string, reason string) error {
-	_, err := s.updateHeld(id, func(e *Entry, _ time.Time) {
-		e.State = StateDead
-		e.LastError = reason
-	})
+	_, err := s.updateHeld(id, markDeadEdit(reason))
 
 	return err
 }
@@ -224,7 +209,7 @@ func (s *MemoryStore) CancelForGame(gameID string) (int64, error) {
 
 // updateHeld applies edit to the entry, but only while this instance still
 // holds its lease, and returns the result. It is the in-memory leaseFilter.
-func (s *MemoryStore) updateHeld(id string, edit func(e *Entry, now time.Time)) (*Entry, error) {
+func (s *MemoryStore) updateHeld(id string, edit heldEdit) (*Entry, error) {
 	objectID, err := bson.ObjectIDFromHex(id)
 	if err != nil {
 		return nil, fmt.Errorf("parsing schedule entry id %q: %w", id, err)

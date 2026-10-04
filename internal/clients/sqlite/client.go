@@ -36,6 +36,27 @@ CREATE TABLE IF NOT EXISTS sessions (
     data       TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS schedule (
+    id              TEXT    PRIMARY KEY,
+    game_id         TEXT    NOT NULL,
+    action          TEXT    NOT NULL,
+    payload         BLOB,
+    script_version  TEXT    NOT NULL,
+    idempotency_key TEXT    UNIQUE NOT NULL,
+    state           TEXT    NOT NULL,
+    fire_at         INTEGER NOT NULL,
+    claimed_until   INTEGER NOT NULL,
+    claimed_by      TEXT    NOT NULL,
+    attempts        INTEGER NOT NULL,
+    last_error      TEXT    NOT NULL,
+    fired_at        INTEGER,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_claim   ON schedule (state, fire_at, claimed_until);
+CREATE INDEX IF NOT EXISTS idx_schedule_game    ON schedule (game_id, state);
+CREATE INDEX IF NOT EXISTS idx_schedule_fire_at ON schedule (fire_at);
 `
 
 // Open opens (or creates) the SQLite database at dsn, enables WAL mode,

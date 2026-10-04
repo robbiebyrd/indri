@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
 	scheduleRepo "github.com/robbiebyrd/indri/internal/repo/schedule"
@@ -21,10 +20,7 @@ type stores struct {
 }
 
 // openStores builds every repository over the one backend named, so games,
-// users and sessions always live in the same database.
-//
-// Timers are the exception: the schedule store exists only for MongoDB and in
-// memory, so the SQL backends keep timers in memory, and say so at boot.
+// users, sessions and timers always live in the same database.
 func openStores(ctx context.Context, backend string, clients *ClientsInjector) (stores, error) {
 	switch backend {
 	case backendMongoDB:
@@ -45,7 +41,7 @@ func openStores(ctx context.Context, backend string, clients *ClientsInjector) (
 			game:     gameRepo.NewSQLiteStore(ctx, clients.SQLDB, clients.LockManager, clients.Publisher),
 			user:     userRepo.NewSQLiteStore(ctx, clients.SQLDB),
 			session:  sessionRepo.NewSQLiteStore(ctx, clients.SQLDB),
-			schedule: memoryTimers(backend),
+			schedule: scheduleRepo.NewSQLiteStore(ctx, clients.SQLDB, scheduleRepo.Config{}),
 		}, nil
 	case backendPostgres:
 		return postgresStores(ctx, clients)
@@ -102,18 +98,10 @@ func postgresStores(ctx context.Context, clients *ClientsInjector) (stores, erro
 		return stores{}, err
 	}
 
-	return stores{game: game, user: user, session: session, schedule: memoryTimers(backendPostgres)}, nil
-}
+	schedule, err := scheduleRepo.NewPostgresStore(ctx, clients.SQLDB, scheduleRepo.Config{})
+	if err != nil {
+		return stores{}, err
+	}
 
-// memoryTimers is the schedule store for a backend with no schedule store of
-// its own. Timers kept in memory are lost when the server stops and are not
-// shared between instances, which an operator must hear about.
-func memoryTimers(backend string) *scheduleRepo.MemoryStore {
-	log.Printf(
-		"WARNING: INDRI_DB_BACKEND is %s, which has no timer store; script timers (indri.after) are kept in memory,"+
-			" lost on restart and not shared between instances",
-		backend,
-	)
-
-	return scheduleRepo.NewMemoryStore(scheduleRepo.Config{})
+	return stores{game: game, user: user, session: session, schedule: schedule}, nil
 }

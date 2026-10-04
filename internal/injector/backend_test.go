@@ -1,12 +1,9 @@
 package injector
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,19 +17,6 @@ import (
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 )
-
-// captureLog collects what the code under test logs, for the test to assert on
-// and to keep out of the test binary's own output.
-func captureLog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-
-	var buf bytes.Buffer
-
-	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-
-	return &buf
-}
 
 func clientsWith(db *sql.DB) *ClientsInjector {
 	return &ClientsInjector{
@@ -48,18 +32,14 @@ func typeName(v any) string {
 	return fmt.Sprintf("%T", v)
 }
 
-// INDRI_DB_BACKEND picks one backend for games, users and sessions together: a
-// server must never keep its users in one database and their sessions in
-// another.
+// INDRI_DB_BACKEND picks one backend for games, users, sessions and timers
+// together: a server must never keep its users in one database and their
+// sessions in another.
 func TestOpenStores_EveryRepoFollowsTheBackend(t *testing.T) {
 	for _, tc := range []struct {
 		backend string
 		db      func(t *testing.T) *sql.DB
 		want    [4]any
-
-		// warns: the backend keeps timers in memory although its other data
-		// is durable, which an operator has to be told.
-		warns bool
 	}{
 		{
 			backend: "memory",
@@ -69,27 +49,20 @@ func TestOpenStores_EveryRepoFollowsTheBackend(t *testing.T) {
 		{
 			backend: "sqlite",
 			db:      repotest.SQLite,
-			want:    [4]any{&gameRepo.SQLiteStore{}, &userRepo.SQLStore{}, &sessionRepo.SQLStore{}, &scheduleRepo.MemoryStore{}},
-			warns:   true,
+			want:    [4]any{&gameRepo.SQLiteStore{}, &userRepo.SQLStore{}, &sessionRepo.SQLStore{}, &scheduleRepo.SQLStore{}},
 		},
 		{
 			backend: "postgres",
 			db:      repotest.Postgres,
-			want:    [4]any{&gameRepo.PostgresStore{}, &userRepo.SQLStore{}, &sessionRepo.SQLStore{}, &scheduleRepo.MemoryStore{}},
-			warns:   true,
+			want:    [4]any{&gameRepo.PostgresStore{}, &userRepo.SQLStore{}, &sessionRepo.SQLStore{}, &scheduleRepo.SQLStore{}},
 		},
 	} {
 		t.Run(tc.backend, func(t *testing.T) {
 			db := tc.db(t)
-			logged := captureLog(t)
 
 			got, err := openStores(context.Background(), tc.backend, clientsWith(db))
 			if err != nil {
 				t.Fatalf("openStores(%s): %v", tc.backend, err)
-			}
-
-			if warned := strings.Contains(logged.String(), "timers (indri.after) are kept in memory"); warned != tc.warns {
-				t.Errorf("warned about in-memory timers = %v, want %v; logged %q", warned, tc.warns, logged.String())
 			}
 
 			for i, store := range []any{got.game, got.user, got.session, got.schedule} {

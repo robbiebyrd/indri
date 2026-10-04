@@ -32,6 +32,19 @@ func TestLockForUpdate(t *testing.T) {
 	}
 }
 
+func TestClaimLock(t *testing.T) {
+	// A claim locks the row it picks and passes over rows another claimer has
+	// locked, so concurrent claimers each take a different row rather than
+	// queueing on the first. SQLite's one connection already serialises them.
+	if got := SQLite.ClaimLock(); got != "" {
+		t.Errorf("SQLite.ClaimLock = %q, want none", got)
+	}
+
+	if got := Postgres.ClaimLock(); got != " FOR UPDATE SKIP LOCKED" {
+		t.Errorf("Postgres.ClaimLock = %q, want \" FOR UPDATE SKIP LOCKED\"", got)
+	}
+}
+
 func TestIsUniqueViolation(t *testing.T) {
 	sqliteErr := errors.New("constraint failed: UNIQUE constraint failed: users.email (2067)")
 	pgErr := fmt.Errorf("inserting: %w", &pgconn.PgError{Code: "23505"})

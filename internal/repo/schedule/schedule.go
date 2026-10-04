@@ -1,10 +1,11 @@
 // Package schedule is the durable store for deferred game events.
 //
-// A game script asks for an action to run later; the entry is written to
-// MongoDB and survives a restart. Any number of server instances poll the same
-// collection, and each due entry is leased to exactly one of them by an atomic
-// FindOneAndUpdate — the same compare-and-set idiom the game store uses for its
-// version fence. Mongo is the only mandatory dependency in this stack, so the
+// A game script asks for an action to run later; the entry is written to the
+// database INDRI_DB_BACKEND names — MongoDB, SQLite or PostgreSQL — and
+// survives a restart. Any number of server instances poll the same entries, and
+// each due entry is leased to exactly one of them atomically: by a
+// FindOneAndUpdate on MongoDB, the same compare-and-set idiom the game store
+// uses for its version fence, and by a row-locking transaction on SQL. The
 // scheduler works in the default single-instance mode as well as under
 // INDRI_LOCK_BACKEND=redis; nothing here needs Redis.
 //
@@ -15,8 +16,9 @@
 //
 // Entries are also cleaned up unconditionally. There is no game deletion
 // anywhere in this repo, so nothing will ever cascade-cancel the timers of an
-// abandoned game; a TTL index on fireAt expires every entry a generous grace
-// window after its fire time, whether or not it ever fired.
+// abandoned game; every entry expires a generous grace window after its fire
+// time, whether or not it ever fired — through a TTL index on fireAt on
+// MongoDB, and on SQL by the store itself each time it schedules.
 package schedule
 
 import (
@@ -703,6 +705,46 @@ func applyClaim(e *Entry, owner string, now time.Time, lease time.Duration) {
 	e.ClaimedUntil = now.Add(lease)
 	e.UpdatedAt = now
 	e.Attempts++
+}
+
+// heldEdit is one change to an entry this instance holds the lease on, made at
+// now. The stores that change an entry in Go rather than in a query — the
+// in-memory and SQL stores — apply the same edits, below, behind their own
+// lease fence.
+type heldEdit func(e *Entry, now time.Time)
+
+// renewEdit extends the lease from now.
+func renewEdit(lease time.Duration) heldEdit {
+	return func(e *Entry, now time.Time) {
+		e.ClaimedUntil = now.Add(lease)
+	}
+}
+
+// completeEdit marks the entry fired.
+func completeEdit(e *Entry, now time.Time) {
+	e.State = StateDone
+	e.FiredAt = &now
+}
+
+// failEdit records a failed attempt: a retry while attempts remain, a dead
+// letter once they are spent — never done, so the failure stays visible.
+func failEdit(reason string, cfg Config) heldEdit {
+	return func(e *Entry, now time.Time) {
+		state, fireAt := failureOutcome(e, now, cfg)
+
+		e.State = state
+		e.FireAt = mongoTime(fireAt)
+		e.ClaimedUntil = time.Time{}.UTC()
+		e.LastError = reason
+	}
+}
+
+// markDeadEdit retires an entry that can never succeed.
+func markDeadEdit(reason string) heldEdit {
+	return func(e *Entry, _ time.Time) {
+		e.State = StateDead
+		e.LastError = reason
+	}
 }
 
 // failureOutcome decides what a failed attempt becomes. Attempts are counted
