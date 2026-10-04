@@ -55,6 +55,11 @@ func New() *Transport {
 	// origin policy directly instead of going through its middleware.
 	m.Upgrader.CheckOrigin = transport.NewOriginPolicy(vars.AllowedOrigins).Allows
 
+	// Offer permessage-deflate; a client that does not ask is served plain
+	// frames. gorilla implements it without context takeover only, so each
+	// message is compressed on its own rather than against the ones before it.
+	m.Upgrader.EnableCompression = true
+
 	return &Transport{m: m}
 }
 
