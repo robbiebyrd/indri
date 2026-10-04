@@ -74,3 +74,5 @@ Lua is asymmetric by design: scripts SEND actions to the server, but they do not
 ### 2026-09-12T00:40:46.154Z - Proof thread-safety set NOT_APPLICABLE: Single-threaded; observers fan out synchronously after the reducer dispatch.
 
 ### 2026-09-12T00:40:46.228Z - Proof configurability set PROVEN: LuaBridgeOptions injects socket, state, log, onError and instructionBudget; no hard-coded dependency on MessageHandler.
+
+### 2026-10-04T18:44:09.000Z - DUPLICATE DELIVERY. This story was also completed independently on main (commit c07e901, completed_at 2026-09-16T04:03:51.395Z); this branch completed it first (completed_at 2026-09-12T00:40:46.330Z) and its record carries the QA, proof and device confirmation main's copy lacks. This file is the canonical record; main's copy is superseded when the integration branch is rebased onto main (story 087).

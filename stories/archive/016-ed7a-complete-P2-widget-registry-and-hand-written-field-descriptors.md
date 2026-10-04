@@ -75,3 +75,5 @@ Each widget must declare its config shape so a dashboard can auto-draw a configu
 ### 2026-09-10T00:01:18.616Z - Proof resilience set NOT_APPLICABLE: No IO or external dependency; failure modes are programmer errors surfaced at registration or test time.
 
 ### 2026-09-10T00:01:18.777Z - Proof thread-safety set NOT_APPLICABLE: Single-threaded module state populated at startup; clearRegistry exists only for test isolation.
+
+### 2026-10-04T18:44:09.000Z - DUPLICATE DELIVERY. This story was also completed independently on main (commit c07e901, completed_at 2026-09-16T03:58:38.942Z); this branch completed it first (completed_at 2026-09-10T00:01:18.942Z) and its record carries the QA, proof and device confirmation main's copy lacks. This file is the canonical record; main's copy is superseded when the integration branch is rebased onto main (story 087).

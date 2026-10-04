@@ -82,3 +82,5 @@ Device-confirmed by Robbie on the iOS simulator. Web bundle renders 10/10 probes
 ### 2026-09-10T00:12:34.933Z - Proof thread-safety set NOT_APPLICABLE: Single Lua state, single-threaded. Lua runs synchronously on the JS thread; the instruction-budget caveat is documented for 019.
 
 ### 2026-09-10T00:12:35.004Z - Proof configurability set NOT_APPLICABLE: The safe-library set is deliberately fixed, not configurable - a knob here would be a sandbox hole.
+
+### 2026-10-04T18:44:09.000Z - DUPLICATE DELIVERY. This story was also completed independently on main (commit c07e901, completed_at 2026-09-16T03:32:06.731Z); this branch completed it first (completed_at 2026-09-10T00:12:35.107Z) and its record carries the QA, proof and device confirmation main's copy lacks. This file is the canonical record; main's copy is superseded when the integration branch is rebased onto main (story 087).

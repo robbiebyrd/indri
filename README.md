@@ -5,14 +5,15 @@ A Go framework for real-time multiplayer party games.
 Indri gives you the parts every "everyone grab your phone" game needs — accounts, sessions, lobbies,
 rooms, teams, hosts, reconnection, and live state sync — so a game is reduced to a JSON template and a
 handful of action handlers. Players connect over WebSocket, GraphQL, REST+SSE or WebRTC; state lives in
-MongoDB and every write is diffed and pushed back to the room as a delta.
+MongoDB, PostgreSQL, SQLite or memory (`INDRI_DB_BACKEND`) and every write is diffed and pushed back
+to the room as a delta.
 
 Released into the public domain ([Unlicense](LICENSE)).
 
 ## How it works
 
 ```
-client ──ws──► action router ──► handler ──► store ──► MongoDB
+client ──ws──► action router ──► handler ──► store ──► MongoDB / PostgreSQL / SQLite / memory
                                                │ diff
 client ◄──────── broadcast ◄─── event bus ◄────┘
 ```
@@ -22,7 +23,7 @@ document; the store diffs the before/after state and publishes the delta; the se
 everyone in that game. A client holds the last full snapshot (a *keyframe*) and replays deltas over it.
 
 Because the server is the sole writer it computes deltas itself rather than tailing a database change
-feed — so MongoDB needs no replica set, and the same mechanism would work over any store. On a single
+feed — so MongoDB needs no replica set, and the same mechanism works over every store. On a single
 instance the bus is an in-memory channel; set `INDRI_LOCK_BACKEND=redis` and it becomes Redis Pub/Sub,
 so deltas reach players connected to other instances.
 
@@ -36,7 +37,8 @@ of its own and runs on the stock `cmd/server` binary.
 
 ## Quick start
 
-Requires Go 1.25+, Docker (for MongoDB and Redis), and pnpm if you want the reference client.
+Requires Go 1.26 (`go.mod`; `mise.toml` pins the toolchain CI uses), Docker for MongoDB and Redis —
+or neither, with `INDRI_DB_BACKEND=sqlite` or `memory` — and pnpm if you want the reference client.
 
 ```bash
 cp .env.example .env       # then edit as needed
@@ -148,12 +150,12 @@ Single-instance deployments use in-process locks and an in-process delta bus. Se
 ```
 cmd/server/          entry point
 internal/
-  clients/           MongoDB, Redis
+  clients/           MongoDB, PostgreSQL, SQLite, Redis
   transport/         Conn/Transport interfaces; ws, graphql, sse, rest, webrtc adapters + Multi
   entrypoints/       HTTP server, connection lifecycle
   handlers/          action router (connection-independent dispatch) + one package per built-in action
   services/          game, stage, broadcast, auth, session, mutation, lock, events
-  repo/              MongoDB stores, environment config, script loader
+  repo/              game/user/session/schedule stores (Mongo, SQL, memory), config, script loader
   models/            Game, Stage, Scene, Team, Player, User, Session, Script
   injector/          three-stage dependency wiring
 example/tictactoe/   worked example game
@@ -172,8 +174,10 @@ air                      # hot reload
 cd client && pnpm run typecheck && pnpm test
 ```
 
-Tests that need MongoDB skip themselves when none is reachable, so `go test ./...` is safe on a bare
-checkout. Set `INDRI_TEST_MONGO_URI` to point them at a database.
+Every store's contract suite runs on memory and SQLite always, and on MongoDB and PostgreSQL where they
+are reachable — those subtests skip otherwise, so `go test ./...` is safe on a bare checkout. Point them
+at databases with `INDRI_TEST_MONGO_URI` and `INDRI_TEST_POSTGRES_URI`
+(`docker compose --profile postgres up -d postgres` starts one).
 
 ## Further reading
 

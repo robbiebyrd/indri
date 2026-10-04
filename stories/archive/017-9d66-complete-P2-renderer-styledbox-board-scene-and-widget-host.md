@@ -79,3 +79,5 @@ The compiled style and percentage geometry need RN components to render them. Be
 ### 2026-09-10T00:29:05.612Z - Proof thread-safety set NOT_APPLICABLE: React components; no shared mutable state outside React's own model.
 
 ### 2026-09-10T00:29:05.697Z - Proof configurability set NOT_APPLICABLE: Driven entirely by layout data; no separate configuration surface.
+
+### 2026-10-04T18:44:09.000Z - DUPLICATE DELIVERY. This story was also completed independently on main (commit c07e901, completed_at 2026-09-16T03:58:39.136Z); this branch completed it first (completed_at 2026-09-10T00:29:05.789Z) and its record carries the QA, proof and device confirmation main's copy lacks. This file is the canonical record; main's copy is superseded when the integration branch is rebased onto main (story 087).

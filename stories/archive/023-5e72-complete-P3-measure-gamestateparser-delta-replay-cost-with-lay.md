@@ -71,3 +71,5 @@ reapply() deep-clones the entire game via JSON round-trip and replays every reta
 ### 2026-09-10T00:01:40.132Z - Proof input-validation set NOT_APPLICABLE: No external input; the harness builds its own state.
 
 ### 2026-09-10T00:01:40.259Z - Proof thread-safety set NOT_APPLICABLE: Single-threaded synchronous measurement.
+
+### 2026-10-04T18:44:09.000Z - DUPLICATE DELIVERY. This story was also completed independently on main (commit c07e901, completed_at 2026-09-16T03:58:39.885Z); this branch completed it first (completed_at 2026-09-10T00:01:40.416Z) and its record carries the QA, proof and device confirmation main's copy lacks. This file is the canonical record; main's copy is superseded when the integration branch is rebased onto main (story 087).

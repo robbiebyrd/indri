@@ -77,3 +77,5 @@ game.data.layout arrives from the server as untrusted map[string]interface{} wit
 ### 2026-09-09T23:48:25.857Z - Proof thread-safety set NOT_APPLICABLE: Pure function over a value; mutation is confined to zod's freshly parsed copy, never the caller's object.
 
 ### 2026-09-09T23:48:25.945Z - Proof configurability set NOT_APPLICABLE: knownWidgetTypes and sceneIds are the only knobs and both are optional caller inputs; MAX_SUBGRID_DEPTH and the 8..4096 range are fixed by spec.
+
+### 2026-10-04T18:44:09.000Z - DUPLICATE DELIVERY. This story was also completed independently on main (commit c07e901, completed_at 2026-09-16T03:58:38.749Z); this branch completed it first (completed_at 2026-09-09T23:48:26.032Z) and its record carries the QA, proof and device confirmation main's copy lacks. This file is the canonical record; main's copy is superseded when the integration branch is rebased onto main (story 087).

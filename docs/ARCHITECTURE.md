@@ -137,14 +137,19 @@ mutations, REST posts and SSE streams share one code path.
 
 ### `internal/repo`
 
-Mongo stores plus `env` (envconfig-backed, `INDRI_` prefix, cached singleton) and `script`
+The game, user, session and schedule stores, plus `env` (envconfig-backed, `INDRI_` prefix, cached
+singleton; `Settings()` lists every setting, and `internal/cli` turns each into a flag) and `script`
 (reads and unmarshals the JSON script file once at boot).
 
-`repo/game` is split by concern: `game.go` (CRUD, `Mutate`, `saveWithVersion`), `player.go`, `team.go`,
-`host.go`. Each repo package's `interface.go` declares a `Storer` interface with a
-`var _ Storer = (*Store)(nil)` compile-time assertion; this exists only as a drift guard (change a
-`Store` method and the build breaks unless the interface is updated). Nothing consumes the
-interfaces as an abstraction yet — callers use the concrete `*Store` types.
+`repo/game` is split by concern: `core.go` (the backend-independent half — `Mutate`, the version fence,
+change deltas), `player.go` (the slot model: `AssignSlot`, `RemovePlayer[If]`, connect/disconnect),
+`host.go`, and one persistence port per backend — `game.go` (MongoDB), `memory.go`, `sql.go` (SQLite and
+PostgreSQL, one implementation; the dialect lives in `repo/sqldialect`). `repo/user` and `repo/session`
+follow the same pattern with a Mongo `Store`, a `MemoryStore` and a `SQLStore`. Each repo package's
+`interface.go` declares a `Storer` and asserts every backend satisfies it, and services and the
+injector take the interfaces, so `INDRI_DB_BACKEND` (`injector/backend.go`) picks one backend for all
+of them. Each package has one contract suite that runs against every backend (`repotest` opens the
+databases).
 
 ## Concurrency
 
@@ -355,6 +360,8 @@ server-supplied dot paths.
 
 ## Testing
 
-`go test -race ./...` in CI. Tests that need MongoDB (`internal/repo/game/game_concurrency_test.go`)
-call `t.Skipf` when no database is reachable, so CI stays green without one. Point them elsewhere with
-`INDRI_TEST_MONGO_URI`; they use the `indri_test` database.
+`go test -race ./...` in CI, with MongoDB and PostgreSQL services. Every store's contract suite runs on
+memory and SQLite always; its `/mongodb` and `/postgres` subtests skip when that database is not
+reachable (`INDRI_TEST_MONGO_URI`, default localhost, `indri_test` database; `INDRI_TEST_POSTGRES_URI`,
+each test in a schema of its own). A second CI step runs the suite with no database at all and fails
+on any other skip, so a test cannot quietly go back to reporting green without running.

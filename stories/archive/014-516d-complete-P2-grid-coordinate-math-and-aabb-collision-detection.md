@@ -75,3 +75,5 @@ The board grid ranges from 8x8 to 4096x4096. At the maximum that is 16.7 million
 ### 2026-09-09T23:42:41.311Z - Proof thread-safety set NOT_APPLICABLE: Pure functions, no shared mutable state.
 
 ### 2026-09-09T23:42:41.398Z - Proof configurability set NOT_APPLICABLE: MIN_DIM/MAX_DIM are fixed by the spec (8..4096), deliberately not configurable.
+
+### 2026-10-04T18:44:09.000Z - DUPLICATE DELIVERY. This story was also completed independently on main (commit c07e901, completed_at 2026-09-16T03:58:38.560Z); this branch completed it first (completed_at 2026-09-09T23:42:41.498Z) and its record carries the QA, proof and device confirmation main's copy lacks. This file is the canonical record; main's copy is superseded when the integration branch is rebased onto main (story 087).

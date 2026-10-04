@@ -74,3 +74,5 @@ Lua runs synchronously on the UI thread, so a runaway script freezes the app and
 ### 2026-09-10T00:28:21.774Z - Proof thread-safety set NOT_APPLICABLE: One state, single-threaded, synchronous on the JS thread. Per-coroutine hook caveat documented; coroutine is not opened.
 
 ### 2026-09-10T00:28:21.879Z - Proof configurability set PROVEN: instructionBudget and onError are the only knobs; the safe-library set stays fixed because a knob there would be a sandbox hole.
+
+### 2026-10-04T18:44:09.000Z - DUPLICATE DELIVERY. This story was also completed independently on main (commit c07e901, completed_at 2026-09-16T03:58:39.520Z); this branch completed it first (completed_at 2026-09-10T00:28:22.083Z) and its record carries the QA, proof and device confirmation main's copy lacks. This file is the canonical record; main's copy is superseded when the integration branch is rebased onto main (story 087).

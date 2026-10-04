@@ -176,6 +176,11 @@ walked; arrays and scalars are compared whole with `reflect.DeepEqual`.
 The client (`client/services/game-state-parser.ts`) rebuilds state by cloning the last keyframe and
 replaying timestamp-ordered deltas over it, discarding deltas older than the keyframe's cutoff.
 
+The wire format is **JSON with dotted paths**, on every transport. origin/main's compact format
+(positional integer paths over MessagePack, `?debug=1` for JSON) was measured and declined — deflate
+removes the same redundancy — and is kept as `plans/compact-delta-protocol.md`. The size levers chosen
+instead are WebSocket compression (story 093) and sending the layout once per connection (story 094).
+
 **A write that never publishes is invisible to players.** This is now the single most important rule in
 the repo, because nothing in the database enforces it:
 
@@ -210,8 +215,8 @@ mutation.Run(ctx, lockManager, key, load, apply, save)
   cause a lost update. `mutation.Run` retries up to 10 times, then returns `ErrConflict`.
 - `apply` may return `mutation.ErrAbort` to signal "no change needed" and skip the write.
 - `gameRepo.Store.Mutate` is the concrete binding. **Use `Mutate` for any read-modify-write on a game.**
-  Multi-field edits (add player to team, change team, set host) all go through it; see
-  `internal/repo/game/{player,team,host}.go`.
+  Multi-field edits (seat a player in a slot, move them between teams, free a slot, set host) all go
+  through it; see `internal/repo/game/{player,host}.go`.
 - Single-field sets that don't depend on prior state can use `UpdateField`/`DeleteField`, which
   `$inc` the version so they stay coherent with `Mutate`'s CAS.
 

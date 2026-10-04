@@ -1,0 +1,30 @@
+=== COMPARISON with baseline.txt, after story 087 ===
+commit: b0d15b69363e750a27d9346b2dd8c4569717b430 (+ 087 working tree)
+date:   2026-10-04T18:49:29Z
+go:     go version go1.27.1 darwin/arm64
+
+go build ./... : PASS
+go vet ./...   : PASS
+go test -race -count=1 ./... (MongoDB + PostgreSQL up): 43 packages ok (baseline 27), 0 FAIL, 0 data races, 0 skips
+baseline-ok packages no longer ok: none
+packages newly under test:
+  github.com/robbiebyrd/indri/internal/cli
+  github.com/robbiebyrd/indri/internal/clients/postgres
+  github.com/robbiebyrd/indri/internal/clients/sqlite
+  github.com/robbiebyrd/indri/internal/handlers/actions/create
+  github.com/robbiebyrd/indri/internal/handlers/actions/inquire
+  github.com/robbiebyrd/indri/internal/handlers/actions/join
+  github.com/robbiebyrd/indri/internal/handlers/actions/leave
+  github.com/robbiebyrd/indri/internal/handlers/actions/login
+  github.com/robbiebyrd/indri/internal/handlers/actions/reconnect
+  github.com/robbiebyrd/indri/internal/handlers/actions/refresh
+  github.com/robbiebyrd/indri/internal/handlers/actions/register
+  github.com/robbiebyrd/indri/internal/handlers/utils
+  github.com/robbiebyrd/indri/internal/injector
+  github.com/robbiebyrd/indri/internal/repo/ids
+  github.com/robbiebyrd/indri/internal/repo/sqldialect
+  github.com/robbiebyrd/indri/internal/repo/user
+
+client, clean install (rm -rf node_modules; pnpm 11.28.0 install --frozen-lockfile): lockfile unchanged, typecheck PASS, tests 417/417 (baseline 413/413)
+
+No regression against the baseline.

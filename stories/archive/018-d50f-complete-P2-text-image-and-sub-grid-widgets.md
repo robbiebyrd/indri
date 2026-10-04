@@ -78,3 +78,5 @@ The initial widget set. Sub-grid is recursive and needs clipping, because RN's d
 ### 2026-09-10T00:54:59.533Z - Proof thread-safety set NOT_APPLICABLE: React components; no shared mutable state.
 
 ### 2026-09-10T00:54:59.614Z - Proof configurability set PROVEN: Field descriptors are the config surface. Honest limitation recorded: FieldDescriptor has no composite kind, so sub-grid's grid/widgets are declared as text with a description - the weakest part of this story.
+
+### 2026-10-04T18:44:09.000Z - DUPLICATE DELIVERY. This story was also completed independently on main (commit c07e901, completed_at 2026-09-16T03:58:39.330Z); this branch completed it first (completed_at 2026-09-10T00:54:59.701Z) and its record carries the QA, proof and device confirmation main's copy lacks. This file is the canonical record; main's copy is superseded when the integration branch is rebased onto main (story 087).

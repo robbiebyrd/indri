@@ -78,3 +78,5 @@ Lua must drive behaviour without owning state. The server's delta stream is auth
 ### 2026-09-10T00:55:28.776Z - Proof thread-safety set NOT_APPLICABLE: Single Lua state, synchronous on the JS thread. Re-entrancy is the analogous hazard here and is explicitly guarded.
 
 ### 2026-09-10T00:55:28.856Z - Proof configurability set PROVEN: HostDeps injects send, activeSceneId and log, so this module has no dependency on MessageHandler; story 024 supplies the real socket.
+
+### 2026-10-04T18:44:09.000Z - DUPLICATE DELIVERY. This story was also completed independently on main (commit c07e901, completed_at 2026-09-16T03:58:39.705Z); this branch completed it first (completed_at 2026-09-10T00:55:28.950Z) and its record carries the QA, proof and device confirmation main's copy lacks. This file is the canonical record; main's copy is superseded when the integration branch is rebased onto main (story 087).
