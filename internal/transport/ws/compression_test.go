@@ -2,16 +2,21 @@ package ws
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	coderws "github.com/coder/websocket"
 
 	"github.com/robbiebyrd/indri/internal/services/events"
 	"github.com/robbiebyrd/indri/internal/transport"
@@ -181,6 +186,13 @@ func TestCompression_NegotiatedWhenTheClientOffersIt(t *testing.T) {
 		t.Fatalf("Sec-WebSocket-Extensions answered %q, want permessage-deflate", accepted)
 	}
 
+	// Without context takeover each delta is deflated alone, and a game's
+	// deltas shrink by about a quarter instead of most of the way: the
+	// repetition deflate removes is between messages, not inside one.
+	if strings.Contains(accepted, "server_no_context_takeover") {
+		t.Fatalf("Sec-WebSocket-Extensions answered %q: the server refuses context takeover", accepted)
+	}
+
 	raw, wire := 0, 0
 
 	for i, f := range readFrames(t, r, len(msgs)) {
@@ -222,4 +234,55 @@ func TestCompression_AClientThatDoesNotAskConnectsUncompressed(t *testing.T) {
 	}
 
 	t.Logf("a nine-move game: %d bytes of delta JSON, %d bytes on the wire uncompressed", raw, wire)
+}
+
+// The read limit is on what a message inflates to, not on the bytes it took on
+// the wire. Zeros deflate to almost nothing, so a limit counted on the wire
+// would let a client hand the server an allocation of any size it liked in one
+// small frame.
+func TestCompression_ReadLimitBoundsTheInflatedMessage(t *testing.T) {
+	var delivered atomic.Int32
+
+	// A limit below the library's own default, so the test fails if the
+	// configured limit is never applied.
+	tr := New()
+	tr.maxMessageSize = 1024
+	tr.Handle(transport.Handlers{Message: func(transport.Conn, []byte) { delivered.Add(1) }})
+
+	mux := http.NewServeMux()
+	tr.Register(mux)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(func() {
+		server.Close()
+		_ = tr.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+path,
+		&coderws.DialOptions{CompressionMode: coderws.CompressionContextTakeover})
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+
+	defer client.CloseNow()
+
+	client.SetReadLimit(-1)
+
+	bomb := make([]byte, 16<<10)
+	if err := client.Write(ctx, coderws.MessageText, bomb); err != nil {
+		t.Fatalf("sending the message: %v", err)
+	}
+
+	_, _, err = client.Read(ctx)
+	if status := coderws.CloseStatus(err); status != coderws.StatusMessageTooBig {
+		t.Errorf("the server answered a %d-byte inflated message with %v (close status %v), want %v",
+			len(bomb), err, status, coderws.StatusMessageTooBig)
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) || delivered.Load() != 0 {
+		t.Errorf("an over-limit message was delivered %d times", delivered.Load())
+	}
 }

@@ -20,8 +20,8 @@ WebRTC data channels, WebTransport) without rewriting the app each time.
      `Register(mux)` (each transport owns its HTTP routes), `Broadcast`,
      `BroadcastFilter`, `Conns`, `Close`, `IsClosed`.
 
-   WebSocket is one adapter (`internal/transport/ws`, the ONLY place melody is
-   imported). `transport.Multi` aggregates several transports so `broadcast`
+   WebSocket is one adapter (`internal/transport/ws`, the ONLY non-test place
+   its library, coder/websocket, is imported). `transport.Multi` aggregates several transports so `broadcast`
    fans out to all of them at once; each push conn carries its `sessionId` key,
    which is how broadcast targets it.
 
@@ -51,5 +51,5 @@ WebRTC data channels, WebTransport) without rewriting the app each time.
 - The session bearer token (not connection state) is the source of auth, which
   is what makes stateless GraphQL mutations and the subscription's
   `connection_init` auth work uniformly.
-- Do NOT reach for `*melody.Session` outside `internal/transport/ws`, and do NOT
+- Do NOT reach for the WebSocket library's types outside `internal/transport/ws`, and do NOT
   make handlers write to a connection — return `Responses` instead.

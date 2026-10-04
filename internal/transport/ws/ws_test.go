@@ -32,7 +32,7 @@ func TestRegister_FailedUpgradeIsNotAnsweredTwice(t *testing.T) {
 		status    int
 	}{
 		"not a websocket handshake": {
-			status: http.StatusBadRequest,
+			status: http.StatusUpgradeRequired,
 		},
 		"origin not allowed": {
 			handshake: true,
@@ -44,7 +44,7 @@ func TestRegister_FailedUpgradeIsNotAnsweredTwice(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			tr := New()
-			tr.m.Upgrader.CheckOrigin = transport.NewOriginPolicy("http://localhost:8081").Allows
+			tr.policy = transport.NewOriginPolicy("http://localhost:8081")
 
 			r := httptest.NewRequest(http.MethodGet, path, nil)
 			if tc.handshake {
@@ -60,16 +60,14 @@ func TestRegister_FailedUpgradeIsNotAnsweredTwice(t *testing.T) {
 
 			w := serve(t, tr, r)
 
-			// The upgrader answers with the bare status text; anything appended
-			// to it is a second, superfluous write from the route.
-			want := http.StatusText(tc.status) + "\n"
-
+			// One answer is one line of body; a second line is a second,
+			// superfluous write from the route.
 			if w.Code != tc.status {
 				t.Errorf("status = %d, want %d", w.Code, tc.status)
 			}
 
-			if got := w.Body.String(); got != want {
-				t.Errorf("body = %q, want %q", got, want)
+			if got := w.Body.String(); strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "\n") {
+				t.Errorf("body = %q, want exactly one answer", got)
 			}
 		})
 	}

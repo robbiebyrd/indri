@@ -12,7 +12,7 @@ browser / native client
 internal/entrypoints/http/server.go      net/http mux, timeouts, one shared OriginPolicy
                                          (allowlist + CORS), graceful shutdown
         ▼
-internal/transport/                      Transport interface: ws (melody), graphql (gqlgen),
+internal/transport/                      Transport interface: ws (coder/websocket), graphql (gqlgen),
                                          sse, rest, webrtc (pion) — aggregated by
                                          transport.Multi. Resolves the session, then:
         ▼
@@ -88,7 +88,7 @@ streams behave identically rather than approximately:
 
 | Adapter | Route | Notes |
 |---|---|---|
-| `ws` | `/ws` | melody-backed WebSocket. The **only** package that imports melody. Origin check, ping/pong, size limits. |
+| `ws` | `/ws` | WebSocket over coder/websocket, on the shared `Registry` and `BufferedConn`. The only non-test importer of the library. Origin check, ping/pong, permessage-deflate with context takeover, and a read limit counted on the inflated message. |
 | `graphql` | `/graphql` | gqlgen. Typed mutations → `router.Dispatch` (auth from the `Authorization` header); a `gameUpdates` subscription (graphql-transport-ws, auth from `connection_init`) whose push conn is a channel-backed `Conn` fed by the existing broadcast. Dynamic data uses a `JSON` scalar (`json.RawMessage`). |
 | `sse` | `/events` | Server-Sent Events, push-only. Authenticated at the handshake from `Authorization` or a `token` query parameter — the browser `EventSource` API cannot set headers. Clears the server's `WriteTimeout` per stream (unlike a WebSocket upgrade, SSE never hijacks the connection), emits a `:ping` comment while idle, and frames each delta as `data:`. |
 | `rest` | `/api/<action>` | The inbound half for SSE clients: one POST route per action, arguments validated then dispatched to `router.Dispatch` (auth from the `Authorization` header). Holds no connections — its `Registry` stays empty, so it contributes routes and nothing to fan-out. |

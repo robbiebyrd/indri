@@ -47,7 +47,7 @@ const resolversFile = "../../transport/graphql/resolvers/schema.resolvers.go"
 const scriptDispatcherPkg = "script"
 
 // registeredActions runs the real registration against an injector carrying
-// only a melody hub. Handler constructors just store the injector, and
+// only a WebSocket transport. Handler constructors just store the injector, and
 // registerHandlers dereferences nothing else, so no database is needed. It
 // returns each action mapped to the base package name of the handler bound to
 // it, so tests can check not just presence but correct wiring.
@@ -577,9 +577,8 @@ func (c *fakeConn) written() [][]byte {
 // bareTransport is a Registry promoted to a full Transport, standing in for
 // WebSocket -- mirrors the fakeTransport pattern in
 // internal/transport/registry_test.go and internal/transport/webrtc/webrtc_test.go.
-// WebSocket's melody-backed session cannot be faked this way (there is no
-// AddSink seam without a real upgrade), so it is the one leg stood in for
-// rather than built for real; GraphQL, SSE and WebRTC below are the real
+// A WebSocket conn joins its Registry only through a real upgrade, so it is the
+// one leg stood in for rather than built for real; GraphQL, SSE and WebRTC below are the real
 // transports services.go builds, registering a conn through the exact same
 // Registry.AddSink seam a real handshake on each would use.
 type bareTransport struct{ *transport.Registry }

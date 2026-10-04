@@ -5,7 +5,7 @@ status: in_progress
 priority: P2
 type: feature
 created: "2026-10-04T18:33:52.000Z"
-updated: "2026-10-04T19:17:36.000Z"
+updated: "2026-10-04T19:33:42.000Z"
 dependencies: ["083-40ee"]
 ---
 
@@ -30,4 +30,14 @@ Story 083 found no compression anywhere: melody.New() leaves gorilla's EnableCom
 ### 2026-10-04T19:17:36.000Z - FINDING, needs Boss. gorilla/websocket (melody's dependency) implements permessage-deflate WITHOUT context takeover only: it answers "permessage-deflate; server_no_context_takeover; client_no_context_takeover", so each message is deflated alone. Story 083's 2007 -> 292 figure (.integration/scratch/stream.py) modelled one deflate stream per connection, i.e. context takeover. Measured on the wire here, the same nine-move tictactoe game: 1926 bytes uncompressed -> 1390 compressed (-28%), not -85%. Modelling per-message deflate on 083's exact data gives 2007 -> 1436, which agrees. The 083 decision to decline the compact protocol rested on the 85% figure. Options for Boss: (a) accept -28%; (b) replace gorilla/melody with a library that supports context takeover (coder/websocket does, and is already a test dependency) -- a transport rewrite inside internal/transport/ws only; (c) application-layer deflate with one stream per connection (context takeover by hand, client inflates); (d) revisit the compact protocol plan.
 
 ### 2026-10-04T19:17:36.000Z - PLATFORMS. Web: Chrome 154 (Playwright, page on the server's own origin, INDRI_ALLOWED_ORIGINS overridden to it for the check) reports ws.extensions = "permessage-deflate; server_no_context_takeover; client_no_context_takeover" -- negotiated. iOS and Android: NOT checked -- needs a device or simulator build of the client, which this session cannot run; left for Boss. The fallback criterion waits on those two results and on the finding above.
+
+### 2026-10-04T19:33:42.000Z - DECISION (Boss): swap the WebSocket library to coder/websocket for context takeover.
+
+### 2026-10-04T19:33:42.000Z - SECURITY. The background review of 3a1b15e flagged a decompression bomb, confirmed by test: gorilla counts its read limit on compressed frame bytes and melody reads whole messages, so with the 32 KiB limit a client's deflated 1 MiB message was delivered (TestCompression_ReadLimitBoundsTheInflatedMessage failed on the gorilla build: "delivered 1 times"). Not pushed. Fixed by the swap: coder/websocket applies SetReadLimit to the inflated reader.
+
+### 2026-10-04T19:33:42.000Z - IMPLEMENTED. internal/transport/ws rewritten on coder/websocket (melody and gorilla dropped from go.mod by go mod tidy). It embeds transport.Registry like the other adapters; a conn is a BufferedConn (keys, drop-when-full outbox) drained by a writer goroutine with WriteWait, plus a ping loop (PingPeriod, PongWait). Accept uses CompressionContextTakeover, with the origin checked first by the shared OriginPolicy (InsecureSkipVerify only disables the library's own, different origin rule). A close from this side (kick, shutdown) deregisters and fires Disconnect once the queued frames are flushed, without waiting up to 5 s for the client's close reply. A non-handshake request is now answered 426 Upgrade Required (was 400); the test still asserts a single answer. Tests: context takeover asserted (no server_no_context_takeover in the answer), read limit pinned at 1 KiB under the library default and a 16 KiB zero message refused with 1009 and never delivered. Mutation: SetReadLimit removed -> killed. Conformance suite and all ws tests green, -race -count=20; full go test -race ./... green.
+
+### 2026-10-04T19:33:42.000Z - MEASURED. Same nine-move game on the wire: 1926 bytes uncompressed; 1390 with gorilla's per-message deflate; 273 now (-86%), in line with 083's projection.
+
+### 2026-10-04T19:33:42.000Z - PLATFORMS. Web: Chrome 154 against the new build negotiates "permessage-deflate" (context takeover) and a refresh round-trips. iOS and Android: still NOT checked; they need a device or simulator build, left for Boss. The fallback criterion waits on those results.
 

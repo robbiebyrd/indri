@@ -82,7 +82,7 @@ change stream. `docker-compose.yml` starts a standalone `mongod`.
 
 `internal/transport` decouples the wire protocol from everything above it: `Conn` (one connection) and
 `Transport` (the hub — `Handle`, `Register(mux)`, `Broadcast`/`BroadcastFilter`, `Conns`, `Close`). `ws`
-(melody — the only melody importer), `graphql` (gqlgen), `sse` (push-only event stream) and `rest`
+(coder/websocket, with permessage-deflate and context takeover; the only importer outside tests), `graphql` (gqlgen), `sse` (push-only event stream) and `rest`
 (`POST /api/<action>`) are adapters; `transport.Multi` aggregates them so broadcast reaches all of
 them. Adding a protocol is a new adapter, nothing above the interface.
 
