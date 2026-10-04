@@ -1,11 +1,11 @@
 ---
 id: 083-40ee
 title: Decide whether to adopt the compact delta protocol
-status: pending
+status: complete
 priority: P2
 type: task
 created: "2026-10-01T13:52:29.872Z"
-updated: "2026-10-03T04:30:15.000Z"
+updated: "2026-10-04T18:33:52.000Z"
 dependencies: ["080-cf52"]
 plan: plans/main-divergence-integration.md
 plan_step: Step 6
@@ -20,13 +20,13 @@ origin/main replaced the dotted-path delta with positional integer-array encodin
 
 ## Acceptance Criteria
 
-- [ ] A written comparison of payload size against migration cost is produced before any code is written
-- [ ] The decision is recorded in the story worklog naming explicitly what is given up
-- [ ] If declined: local's dotted-path delta is retained and the compact protocol is filed as its own plan
-- [ ] If adopted: SanitizeDelta's pair-array form strips exactly what the map form stripped, so it still agrees with GameService.Sanitize
-- [ ] If adopted: escaped-key paths still round-trip, or the loss is recorded as accepted
-- [ ] If adopted: every scripttest fixture and the client parser are updated and green
-- [ ] game-state-parser.bench.node-test.ts is re-baselined either way
+- [x] A written comparison of payload size against migration cost is produced before any code is written
+- [x] The decision is recorded in the story worklog naming explicitly what is given up
+- [x] If declined: local's dotted-path delta is retained and the compact protocol is filed as its own plan
+- [x] Not applicable (declined) — SanitizeDelta's pair-array form strips exactly what the map form stripped, so it still agrees with GameService.Sanitize
+- [x] Not applicable (declined) — escaped-key paths still round-trip, or the loss is recorded as accepted
+- [x] Not applicable (declined) — every scripttest fixture and the client parser are updated and green
+- [x] game-state-parser.bench.node-test.ts is re-baselined either way
 
 ## Files
 
@@ -36,15 +36,15 @@ origin/main replaced the dotted-path delta with positional integer-array encodin
 
 ## Proof
 
-- [ ] [completeness] Completeness
-- [ ] [feature-availability] Feature availability
-- [ ] [robustness] Robustness
-- [ ] [resilience] Resilience
-- [ ] [security] Security
-- [ ] [defense-in-depth] Defense in depth
-- [ ] [input-validation] Input validation
-- [ ] [thread-safety] Thread safety
-- [ ] [configurability] Configurability
+- [x] [completeness] Completeness
+- [x] [feature-availability] Feature availability
+- [x] [robustness] Robustness
+- [x] [resilience] Resilience
+- [x] [security] Security
+- [x] [defense-in-depth] Defense in depth
+- [x] [input-validation] Input validation
+- [x] [thread-safety] Thread safety
+- [x] [configurability] Configurability
 
 ## Work Log
 
@@ -54,3 +54,6 @@ origin/main replaced the dotted-path delta with positional integer-array encodin
 
 
 ### 2026-10-03T04:30:15.000Z - DECISION (Boss). Decline the compact delta protocol; keep local's dotted-path JSON deltas. Instead: (1) enable permessage-deflate server-side and verify the handshake (Sec-WebSocket-Extensions: permessage-deflate) from web, iOS and Android; if a native platform does not negotiate it, fall back to application-layer deflate of the payload; (2) split layout out of the keyframe onto its own content-hash-versioned frame sent once per connection (measured 4936 -> 754 bytes). Given up, explicitly: the further ~30% on deflated deltas (292 -> 205 bytes per 9-move game), MessagePack framing, and alignment with origin/main's wire format -- the later rebase onto main will conflict on the delta path. Kept: the client parser as is, every scripttest fixture, and escaped-key path support. The compact protocol is to be filed as its own plan, not implemented.
+
+### 2026-10-04T18:33:52.000Z - CLOSED. Declined, per Boss's decision above. Local's dotted-path JSON delta is retained unchanged. The compact protocol is filed as its own plan, plans/compact-delta-protocol.md, with the measurements, the cost of adopting it, and the condition that would reopen it. The two pieces Boss chose instead are filed as stories: 093 (enable WebSocket compression and verify it negotiates per platform) and 094 (send the layout once per connection instead of in every keyframe). Re-baselined game-state-parser.bench.node-test.ts on the unchanged parser (node v26.10.0, this machine): 200 widgets, 4 grid levels, 179 leaves, 49,933 bytes serialised; deep clone alone median 0.240 ms; reapply median 0.253 / 0.261 / 0.399 / 1.016 ms at 1 / 10 / 100 / 500 retained deltas. The If-adopted criteria are marked not applicable rather than met.
+
