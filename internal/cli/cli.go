@@ -1,5 +1,6 @@
 // Package cli parses the server's command line: -script, and one flag per
 // setting, each overriding the environment variable it is named after.
+// Settings that carry a credential have no flag and come from the environment.
 package cli
 
 import (
@@ -18,6 +19,11 @@ func Parse(fs *flag.FlagSet, args []string) (string, error) {
 	script := fs.String("script", "", "The JSON game script to stamp games from (default ./config.json).")
 
 	for _, s := range env.Settings() {
+		// A credential on the command line is readable by every user (ps).
+		if s.Secret {
+			continue
+		}
+
 		usage := "Overrides " + s.EnvVar + "."
 
 		// Typed flags, so a malformed value is refused as the command line is

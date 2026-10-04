@@ -17,13 +17,13 @@ type Vars struct {
 	AllowedOrigins        string `default:""          envconfig:"ALLOWED_ORIGINS"`
 	RedisHost             string `default:"localhost" envconfig:"REDIS_HOST"`
 	RedisPort             int    `default:"6379"      envconfig:"REDIS_PORT"`
-	RedisPassword         string `default:""          envconfig:"REDIS_PASSWORD"`
+	RedisPassword         string `default:""          envconfig:"REDIS_PASSWORD" secret:"true"`
 	RedisDatabase         int    `default:"0"         envconfig:"REDIS_DATABASE"`
 	LockBackend           string `default:"inprocess" envconfig:"LOCK_BACKEND"`
 	DBBackend             string `default:"mongodb"   envconfig:"DB_BACKEND"`
 	SQLitePath            string `default:"./indri.db" envconfig:"SQLITE_PATH"`
-	PostgresURI           string `default:""          envconfig:"POSTGRES_URI"`
-	MongoURI              string `default:"localhost" envconfig:"MONGO_URI"`
+	PostgresURI           string `default:""          envconfig:"POSTGRES_URI"   secret:"true"`
+	MongoURI              string `default:"localhost" envconfig:"MONGO_URI"      secret:"true"`
 	MongoDatabase         string `default:"indri"     envconfig:"MONGO_DATABASE"`
 	MongoAuthDatabase     string `default:"admin"     envconfig:"MONGO_AUTH_DATABASE"`
 	WSWriteTimeout        int    `default:"10"        envconfig:"WS_WRITE_TIMEOUT"`
@@ -83,6 +83,11 @@ type Setting struct {
 	Default string
 	Kind    reflect.Kind
 
+	// Secret marks a setting that carries a credential (a password, or a URI
+	// that may embed one). It gets no flag: a command line is readable by every
+	// user on the machine, so it is set in the environment only.
+	Secret bool
+
 	field int
 }
 
@@ -106,6 +111,7 @@ func Settings() []Setting {
 			Flag:    strings.ReplaceAll(strings.ToLower(name), "_", "-"),
 			Default: field.Tag.Get("default"),
 			Kind:    field.Type.Kind(),
+			Secret:  field.Tag.Get("secret") == "true",
 			field:   i,
 		})
 	}

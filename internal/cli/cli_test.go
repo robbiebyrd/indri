@@ -24,6 +24,10 @@ func TestParse_RegistersAFlagForEverySetting(t *testing.T) {
 	}
 
 	for _, s := range env.Settings() {
+		if s.Secret {
+			continue
+		}
+
 		if fs.Lookup(s.Flag) == nil {
 			t.Errorf("setting %s has no -%s flag", s.EnvVar, s.Flag)
 		}
@@ -50,5 +54,21 @@ func TestParse_ReturnsTheScriptAndAppliesTheSettings(t *testing.T) {
 func TestParse_RefusesAMalformedValue(t *testing.T) {
 	if _, err := Parse(newFlagSet(), []string{"-listen-port", "lots"}); err == nil {
 		t.Fatal("Parse accepted a port that is not a number")
+	}
+}
+
+// A command line is visible to every user on the machine (ps), so a setting
+// that carries a credential has no flag; it is set in the environment only.
+func TestParse_GivesCredentialsNoFlag(t *testing.T) {
+	fs := newFlagSet()
+
+	if _, err := Parse(fs, nil); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	for _, flagName := range []string{"redis-password", "postgres-uri", "mongo-uri"} {
+		if fs.Lookup(flagName) != nil {
+			t.Errorf("-%s exists; a credential on the command line is readable by every user", flagName)
+		}
 	}
 }
