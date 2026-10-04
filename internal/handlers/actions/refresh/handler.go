@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
+	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
 	"github.com/robbiebyrd/indri/internal/models"
 )
@@ -31,6 +32,12 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 	g, err := h.i.GameService.Get(*session.GameID)
 	if err != nil {
 		return actions.Result{Responses: [][]byte{models.ErrGameNotFound.BytesError()}}, err
+	}
+
+	// A keyframe is the whole game, for its players only: a session that
+	// outlived its seat is no longer one.
+	if !handlerUtils.HoldsSeat(g, session) {
+		return actions.Result{Responses: [][]byte{models.ErrNoGame.BytesError()}}, errors.New(models.ErrNoGame.Description())
 	}
 
 	jsonData, err := json.Marshal(h.i.GameService.Sanitize(g))

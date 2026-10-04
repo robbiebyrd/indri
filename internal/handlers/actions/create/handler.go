@@ -31,6 +31,12 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		return actions.Result{}, fmt.Errorf("game code not provided: %w", err)
 	}
 
+	// Checked before the game exists: a seat that cannot be given must not leave
+	// a game behind with nobody in it.
+	if _, ok := h.i.Script.Teams[*teamId]; !ok {
+		return actions.Result{}, fmt.Errorf("team %q is not one of this game's teams", *teamId)
+	}
+
 	gamePrivate, _ := req.Payload["private"].(bool)
 
 	g, err := h.i.GameService.New(*gameCode, gamePrivate)

@@ -522,3 +522,69 @@ func TestUpdate_ConcurrentUpdatesAreNotLost(t *testing.T) {
 		}
 	})
 }
+
+// LeaveGame takes the session out of its game, team and slot, and keeps its
+// user and token.
+func TestLeaveGame_ClearsTheGameTeamAndSlot(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, store Storer) {
+		user, game := uniqueUser(), "game-"+ids.New()
+
+		created, err := store.New(models.CreateSession{UserID: user, Token: "tok-" + user, GameID: game, TeamID: "red", SlotID: "p0"})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		if err := store.LeaveGame(created.ID, game); err != nil {
+			t.Fatalf("LeaveGame: %v", err)
+		}
+
+		got, err := store.Get(created.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+
+		assertPlace(t, got, "<nil>", "<nil>", "<nil>")
+
+		if str(got.UserID) != user || got.Token != "tok-"+user {
+			t.Fatalf("LeaveGame lost the user or token: user %s, token %q", str(got.UserID), got.Token)
+		}
+
+		// The game's broadcasts look sessions up by game; a session that left
+		// must not be found there.
+		if found, err := store.Find("gameId", game); err != nil || len(found) != 0 {
+			t.Fatalf("Find(gameId) after LeaveGame = %d sessions, %v; want none", len(found), err)
+		}
+	})
+}
+
+// LeaveGame for a game the session is no longer in changes nothing, so a late
+// kick from one game cannot take the player out of the game they moved to.
+func TestLeaveGame_IgnoresAnotherGame(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, store Storer) {
+		created, err := store.New(models.CreateSession{UserID: uniqueUser(), GameID: "g2", TeamID: "blue", SlotID: "p3"})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+
+		if err := store.LeaveGame(created.ID, "g1"); err != nil {
+			t.Fatalf("LeaveGame: %v", err)
+		}
+
+		got, err := store.Get(created.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+
+		assertPlace(t, got, "g2", "blue", "p3")
+	})
+}
+
+// Leaving is idempotent: a session that no longer exists is already out of
+// every game.
+func TestLeaveGame_OnAMissingSessionSucceeds(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, store Storer) {
+		if err := store.LeaveGame("missing-"+ids.New(), "g1"); err != nil {
+			t.Fatalf("LeaveGame: %v", err)
+		}
+	})
+}

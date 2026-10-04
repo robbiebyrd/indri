@@ -165,8 +165,12 @@ req.session.slotId  -- the caller's key in state.players
 ```
 
 `state.players` is keyed by slot, not by user, so the caller's own player is
-`state.players[req.session.slotId]`. A session can outlive its seat, so a script that acts for the
-caller should check `state.players[req.session.slotId].userId == req.session.userId` first.
+`state.players[req.session.slotId]`. A session can outlive its seat; the server refuses a script action
+from a session whose seat in its game is gone before the script runs, so `req.session.slotId` was the
+caller's own seat when the action arrived. Inside `indri.mutate`, check
+`state.players[req.session.slotId].userId == req.session.userId` if the move must not land after a
+concurrent kick. A caller in no game
+(and an unauthenticated one) still reaches the script, which decides what they may do.
 
 `models.Session.Token` (the bearer token) and `models.Session.ID` (the broadcast targeting key) are
 **deliberately not there**. Neither is a script's to read, and neither is needed to decide whether a

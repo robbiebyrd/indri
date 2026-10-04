@@ -19,5 +19,10 @@ type Storer interface {
 	GetByToken(token string) (*models.Session, error)
 	Exists(id string) (bool, error)
 	Update(sessionId string, session *models.UpdateSession) error
+
+	// LeaveGame takes the session out of its game, team and slot if it is still
+	// in gameId, and does nothing otherwise — including when the session is
+	// gone — so a late kick from one game cannot pull a player out of the next.
+	LeaveGame(id string, gameId string) error
 	Delete(id string) error
 }

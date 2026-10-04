@@ -10,5 +10,6 @@ type ServiceInterface interface {
 	FindID(key, value string) (*string, error)
 	Exists(id *string) bool
 	Update(sessionId string, user *models.UpdateSession) error
+	LeaveGame(sessionId string, gameId string) error
 	New(session models.CreateSession) (*models.Session, error)
 }

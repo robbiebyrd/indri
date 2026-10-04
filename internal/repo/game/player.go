@@ -1,6 +1,7 @@
 package game
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -23,6 +24,11 @@ import (
 // only read afterwards: Censor takes no lock because it needs none, reading the
 // word lists and mutating nothing.
 var censor = goaway.NewProfanityDetector()
+
+// ErrSlotNotHeld is a removal refused because the user no longer holds the
+// slot. To a caller freeing their own seat it means the seat is already gone —
+// a kick or another connection got there first — which is not a failure.
+var ErrSlotNotHeld = errors.New("the slot is not held by that user")
 
 // AssignSlot seats userId on teamId and returns their slot.
 //
@@ -106,18 +112,33 @@ func (s *core) AssignSlot(id string, teamId string, userId string, displayName s
 // and GameService raises player:left on that one. It also stops a stale session
 // that still names the slot from removing whoever holds it now.
 func (s *core) RemovePlayer(id string, slotId string, userId string) error {
+	return s.RemovePlayerIf(id, slotId, userId, nil)
+}
+
+// RemovePlayerIf is RemovePlayer, refused unless allowed accepts the game. The
+// check runs inside the write, against the game about to be committed and on
+// every retry, so a condition checked earlier on a copy — that the caller is
+// the host, say — cannot have stopped holding by the time the slot is freed.
+// A nil allowed accepts every game.
+func (s *core) RemovePlayerIf(id string, slotId string, userId string, allowed func(*models.Game) error) error {
 	if err := requireGameAndSlot(id, slotId); err != nil {
 		return err
 	}
 
 	return s.Mutate(s.ctx, id, func(g *models.Game) error {
+		if allowed != nil {
+			if err := allowed(g); err != nil {
+				return err
+			}
+		}
+
 		slot, ok := g.Players[slotId]
 		if !ok {
 			return fmt.Errorf("slot %v not found in game %v", slotId, id)
 		}
 
 		if slot.UserID != userId {
-			return fmt.Errorf("slot %v of game %v is not held by %v", slotId, id, userId)
+			return fmt.Errorf("slot %v of game %v is not held by %v: %w", slotId, id, userId, ErrSlotNotHeld)
 		}
 
 		clearSlot(g, slotId)

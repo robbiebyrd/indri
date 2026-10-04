@@ -188,6 +188,23 @@ func (s *Store) Exists(id string) (bool, error) {
 	return count > 0, nil
 }
 
+// LeaveGame takes a live session out of gameId, if it is still in it.
+func (s *Store) LeaveGame(id string, gameId string) error {
+	_, err := s.collection.Collection().UpdateOne(
+		*s.ctx,
+		liveFilter(bson.D{{Key: "_id", Value: id}, {Key: "gameId", Value: gameId}}),
+		bson.D{
+			{Key: "$unset", Value: bson.D{{Key: "gameId", Value: ""}, {Key: "teamId", Value: ""}, {Key: "slotId", Value: ""}}},
+			{Key: "$set", Value: bson.D{{Key: "updatedAt", Value: time.Now()}}},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("taking session %q out of game %q: %w", id, gameId, err)
+	}
+
+	return nil
+}
+
 // Update sets the update's non-empty fields on a live session; an empty field
 // is left as it is rather than cleared.
 func (s *Store) Update(id string, u *models.UpdateSession) error {

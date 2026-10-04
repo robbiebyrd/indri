@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
+	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
 )
 
@@ -82,7 +83,31 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		return actions.Result{}, fmt.Errorf("the action %q is handled by a game script, but no script engine is loaded", h.action)
 	}
 
+	if err := h.requireSeat(req); err != nil {
+		return actions.Result{}, err
+	}
+
 	return invoke(req, h.i.LuaEngine, h.action, InvocationTimeout)
+}
+
+// requireSeat refuses a caller whose session names a game they no longer hold a
+// seat in: a game action is taken for one of the game's players, and a session
+// can outlive its seat. A caller in no game is the script's to judge.
+func (h *Handler) requireSeat(req actions.Request) error {
+	if req.Session == nil || req.Session.GameID == nil || *req.Session.GameID == "" {
+		return nil
+	}
+
+	g, err := h.i.GameService.Get(*req.Session.GameID)
+	if err != nil {
+		return err
+	}
+
+	if !handlerUtils.HoldsSeat(g, req.Session) {
+		return fmt.Errorf("the caller no longer holds a seat in game %v", g.ID)
+	}
+
+	return nil
 }
 
 // invoke bounds one call to the engine.

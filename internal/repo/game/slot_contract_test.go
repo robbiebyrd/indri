@@ -2,6 +2,7 @@ package game
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
@@ -349,8 +350,8 @@ func TestSlot_AStaleHolderCannotDisconnectOrRemoveTheNewHolder(t *testing.T) {
 			t.Errorf("a stale disconnect published %v", published)
 		}
 
-		if err := b.store.RemovePlayer(g.ID, slot, "u1"); err == nil {
-			t.Fatal("the stale holder removed the new holder")
+		if err := b.store.RemovePlayer(g.ID, slot, "u1"); !errors.Is(err, ErrSlotNotHeld) {
+			t.Fatalf("the stale holder's removal = %v, want ErrSlotNotHeld", err)
 		}
 
 		if p := player(t, b.store, g.ID, slot); p.UserID != "u2" {
@@ -417,6 +418,50 @@ func TestAssignSlot_RejoiningKeepsTheHoldersData(t *testing.T) {
 
 		if p := player(t, b.store, g.ID, slot); p.Score != 7 || p.PrivateData == nil || p.PublicData == nil {
 			t.Fatalf("rejoining wiped the holder's own state: %+v", p)
+		}
+	})
+}
+
+// RemovePlayerIf runs its guard inside the write, against the game as it is
+// about to be committed — not a copy read earlier — so a condition that stopped
+// holding in the meantime refuses the removal.
+func TestRemovePlayerIf_GuardsAgainstTheCommittedGame(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b backend) {
+		g := twoSlotGame(t, b.store)
+		host := assign(t, b.store, g.ID, "red", "host")
+		target := assign(t, b.store, g.ID, "red", "target")
+
+		hostStillHosts := func(g *models.Game) error {
+			if !g.Players[host].Host {
+				return errors.New("the caller is no longer the host")
+			}
+
+			return nil
+		}
+
+		// The host hands the role to the target before the removal runs.
+		if err := b.store.SetPlayerAsHost(g.ID, target); err != nil {
+			t.Fatalf("SetPlayerAsHost: %v", err)
+		}
+
+		if err := b.store.RemovePlayerIf(g.ID, target, "target", hostStillHosts); err == nil {
+			t.Fatal("the removal ran although its guard no longer held")
+		}
+
+		if p := player(t, b.store, g.ID, target); p.UserID != "target" {
+			t.Fatalf("a refused removal still freed the slot: %+v", p)
+		}
+
+		if err := b.store.SetPlayerAsHost(g.ID, host); err != nil {
+			t.Fatalf("SetPlayerAsHost back: %v", err)
+		}
+
+		if err := b.store.RemovePlayerIf(g.ID, target, "target", hostStillHosts); err != nil {
+			t.Fatalf("RemovePlayerIf with its guard holding: %v", err)
+		}
+
+		if p := player(t, b.store, g.ID, target); p.UserID != "" {
+			t.Fatalf("slot %s not freed: %+v", target, p)
 		}
 	})
 }

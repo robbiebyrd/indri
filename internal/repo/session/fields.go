@@ -53,6 +53,14 @@ func applyUpdate(sess *models.Session, u *models.UpdateSession) {
 	sess.UpdatedAt = time.Now()
 }
 
+// leaveGame takes sess out of its game, team and slot, keeping its user.
+func leaveGame(sess *models.Session) {
+	sess.GameID = nil
+	sess.TeamID = nil
+	sess.SlotID = nil
+	sess.UpdatedAt = time.Now()
+}
+
 // expiryCutoff is the creation time at or before which a session has expired.
 func expiryCutoff() time.Time {
 	return time.Now().Add(-sessionMaxAge)

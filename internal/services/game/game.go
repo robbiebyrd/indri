@@ -265,7 +265,13 @@ func (gs *Service) DisconnectPlayer(id string, slotId string, userId string) err
 // RemovePlayer frees userId's slot. It fails if they do not hold it, so a leave
 // and a kick racing each other raise player:left once between them, not twice.
 func (gs *Service) RemovePlayer(id string, slotId string, userId string) error {
-	if err := gs.gameRepo.RemovePlayer(id, slotId, userId); err != nil {
+	return gs.RemovePlayerIf(id, slotId, userId, nil)
+}
+
+// RemovePlayerIf is RemovePlayer, refused unless allowed accepts the game as it
+// is being written; see gameRepo.Storer.RemovePlayerIf.
+func (gs *Service) RemovePlayerIf(id string, slotId string, userId string, allowed func(*models.Game) error) error {
+	if err := gs.gameRepo.RemovePlayerIf(id, slotId, userId, allowed); err != nil {
 		return err
 	}
 

@@ -95,7 +95,10 @@ A user has at most one session; logging in again returns the existing one.
 ```
 
 Re-binds the stored session to this connection and replies with the same authenticated payload. If the
-session was already in a game, a full game keyframe follows immediately.
+session was in a game and its user still holds their seat there, a full game keyframe follows
+immediately. A session that outlived its seat (the player was kicked, or left from another connection)
+is taken out of the game and resumes outside it, with no keyframe. `login` drops a lost seat the same
+way.
 
 That second document is the one action that produces two responses today, so it is also the one place
 the per-transport difference below bites: over GraphQL or `POST /api/reconnect` only the auth payload
@@ -147,7 +150,8 @@ Replies:
 { "action": "refresh" }
 ```
 
-Re-sends a full sanitized keyframe for the session's current game, or a `WSError` if there is none.
+Re-sends a full sanitized keyframe for the session's current game, or a `WSError` if there is none or
+the caller no longer holds their seat in it.
 
 ### `leave`
 
@@ -155,8 +159,14 @@ Re-sends a full sanitized keyframe for the session's current game, or a `WSError
 { "action": "leave" }
 ```
 
-Frees the caller's slot in their game. The slot stays — a game's slots are fixed when it is created —
-and is open to the next player who joins that team.
+Frees the caller's slot in their game and takes their session out of it, so they stop receiving its
+broadcasts. The slot stays — a game's slots are fixed when it is created — and is open to the next
+player who joins that team. A caller whose seat is already gone just leaves; one whose seat could not be
+freed gets an error, being still in the game.
+
+Membership is one game at a time: `join` or `create` into another game frees the caller's seat in the
+one they were in, once the new seat is theirs. Every game action (script actions included) and
+`refresh` refuses a caller whose session names a game they no longer hold a seat in.
 
 ### `kick`
 
@@ -167,7 +177,9 @@ and is open to the next player who joins that team.
 Host-only. The caller is authorized from their own connection's session — never from the payload — and
 must still hold the host slot their session names. The target is named by slot, the key it has in
 `players`. The slot is freed even when its holder's session is in another game or gone; the holder is
-force-disconnected only when their session is in this game and currently connected.
+force-disconnected only when their session is in this game and currently connected, after their
+session is taken out of the game. The host check is repeated inside the write that frees the slot, so a
+caller who stopped hosting in the meantime cannot kick.
 
 ### `layout`
 

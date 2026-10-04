@@ -104,6 +104,11 @@ func (us *Service) Delete(id string) error {
 	return us.sessionRepo.Delete(id)
 }
 
+// LeaveGame takes the session out of gameId, if it is still in it.
+func (us *Service) LeaveGame(sessionId string, gameId string) error {
+	return us.sessionRepo.LeaveGame(sessionId, gameId)
+}
+
 // Update saves session data to the repository.
 func (us *Service) Update(sessionId string, user *models.UpdateSession) error {
 	err := us.sessionRepo.Update(sessionId, user)

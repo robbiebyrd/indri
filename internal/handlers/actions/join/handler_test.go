@@ -125,3 +125,48 @@ func TestJoin_AnUnauthenticatedCallerIsSentToLogin(t *testing.T) {
 		t.Fatalf("an unauthenticated join answered %q, want the login scene", result.Responses)
 	}
 }
+
+// A player sits in one game at a time: joining another frees their seat in the
+// one they were in, which would otherwise hold a ghost of them for good.
+func TestJoin_MovingToAnotherGameFreesTheOldSeat(t *testing.T) {
+	f := handlertest.New(t, handlertest.TwoTeams())
+	first := f.Game(t, "FIRST")
+	f.Game(t, "SECOND")
+	ada := f.Player(t, "ada")
+
+	if _, err := f.Do(New(f.I), ada, map[string]interface{}{"code": "FIRST", "teamId": "red"}); err != nil {
+		t.Fatalf("joining the first game: %v", err)
+	}
+
+	oldSlot := *f.Session(t, ada.ID).SlotID
+
+	if _, err := f.Do(New(f.I), f.Session(t, ada.ID), map[string]interface{}{"code": "SECOND", "teamId": "blue"}); err != nil {
+		t.Fatalf("joining the second game: %v", err)
+	}
+
+	if holder := f.GameByID(t, first.ID).Players[oldSlot].UserID; holder != "" {
+		t.Fatalf("ada still holds slot %s in the game she moved out of", oldSlot)
+	}
+}
+
+// A join that fails keeps the seat the player already had.
+func TestJoin_AFailedMoveKeepsTheOldSeat(t *testing.T) {
+	f := handlertest.New(t, handlertest.TwoTeams())
+	first := f.Game(t, "FIRST")
+	f.Game(t, "SECOND")
+	ada := f.Player(t, "ada")
+
+	if _, err := f.Do(New(f.I), ada, map[string]interface{}{"code": "FIRST", "teamId": "red"}); err != nil {
+		t.Fatalf("joining the first game: %v", err)
+	}
+
+	oldSlot := *f.Session(t, ada.ID).SlotID
+
+	if _, err := f.Do(New(f.I), f.Session(t, ada.ID), map[string]interface{}{"code": "SECOND", "teamId": "green"}); err == nil {
+		t.Fatal("joining a team the game does not have succeeded")
+	}
+
+	if holder := f.GameByID(t, first.ID).Players[oldSlot].UserID; holder != *ada.UserID {
+		t.Fatalf("a failed move cost ada her seat in the first game; it is held by %q", holder)
+	}
+}

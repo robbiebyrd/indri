@@ -30,6 +30,7 @@ type Storer interface {
 	MutateResult(ctx context.Context, id string, apply func(g *models.Game) error) (committed bool, err error)
 	AssignSlot(id string, teamId string, userId string, displayName string) (slotId string, seated bool, err error)
 	RemovePlayer(id string, slotId string, userId string) error
+	RemovePlayerIf(id string, slotId string, userId string, allowed func(*models.Game) error) error
 	ConnectPlayer(id string, slotId string, userId string) error
 	DisconnectPlayer(id string, slotId string, userId string) error
 	HasHost(id string) bool

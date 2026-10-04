@@ -11,17 +11,18 @@ import (
 )
 
 // games is the narrow view of the game service a kick needs: find the game the
-// caller named, and free a slot in it.
+// caller named, and free a slot in it while the caller is still its host.
 type games interface {
 	GetByCode(gameCode string) (*models.Game, error)
-	RemovePlayer(id string, slotId string, userId string) error
+	RemovePlayerIf(id string, slotId string, userId string, allowed func(*models.Game) error) error
 }
 
 // sessions is the narrow view of the session service a kick needs: resolve the
 // target's session, which carries both the game the target is in and the id the
-// transport disconnects.
+// transport disconnects, and take it out of the game.
 type sessions interface {
 	GetByUserID(userId string) (*models.Session, error)
+	LeaveGame(sessionId string, gameId string) error
 }
 
 type Handler struct {
@@ -76,10 +77,15 @@ func handle(req actions.Request, games games, sessions sessions) (actions.Result
 
 	// Free the slot whatever the target's session says: a player can hold a slot
 	// here while their session names another game, or have no session at all.
+	// The host check is made again inside the write, against the game as it is
+	// committed, so a caller who stopped hosting since the check above cannot
+	// still kick.
 	//
 	// A failed removal must not disconnect anybody: the target would still hold
 	// the slot, cut off from the transport and unable to rejoin cleanly or play.
-	if err := games.RemovePlayer(gameId, targetSlotId, target.UserID); err != nil {
+	stillHost := func(g *models.Game) error { return handlerUtils.RequireHost(req.Session, g) }
+
+	if err := games.RemovePlayerIf(gameId, targetSlotId, target.UserID, stillHost); err != nil {
 		return actions.Result{}, fmt.Errorf("freeing slot %v of game %v: %w", targetSlotId, gameId, err)
 	}
 
@@ -93,7 +99,16 @@ func handle(req actions.Request, games games, sessions sessions) (actions.Result
 		return actions.Result{}, nil
 	}
 
-	if targetSession.GameID == nil || *targetSession.GameID != gameId {
+	inThisGame := targetSession.GameID != nil && *targetSession.GameID == gameId
+
+	// Out of the game before the disconnect, so a reconnect with their token
+	// cannot bring them back into it. LeaveGame only acts on this game, so a
+	// target playing elsewhere keeps their session there.
+	if err := sessions.LeaveGame(targetSession.ID, gameId); err != nil {
+		log.Printf("kick: could not take session %v out of game %v: %v\n", targetSession.ID, gameId, err)
+	}
+
+	if !inThisGame {
 		return actions.Result{}, nil
 	}
 

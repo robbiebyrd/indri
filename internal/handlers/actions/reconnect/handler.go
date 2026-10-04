@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
+	handlerUtils "github.com/robbiebyrd/indri/internal/handlers/utils"
 	"github.com/robbiebyrd/indri/internal/injector"
 )
 
@@ -59,6 +60,22 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		g, err := h.i.GameService.Get(*session.GameID)
 		if err != nil {
 			return actions.Result{}, err
+		}
+
+		// A session that outlived its seat resumes outside the game: no keyframe
+		// of a game the user is no longer in, and none of its broadcasts.
+		held, err := handlerUtils.DropLostSeat(h.i.SessionService, session, g)
+		if err != nil {
+			return actions.Result{}, fmt.Errorf("taking session %v out of game %v: %w", session.ID, g.ID, err)
+		}
+
+		if !held {
+			// Handed back as it now stands, out of the game.
+			if fresh, err := h.i.SessionService.Get(session.ID); err == nil {
+				session = fresh
+			}
+
+			return actions.Result{Responses: responses, Session: session}, nil
 		}
 
 		jsonGameBytes, err := json.Marshal(h.i.GameService.Sanitize(g))

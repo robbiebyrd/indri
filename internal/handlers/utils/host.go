@@ -29,13 +29,11 @@ func RequireHost(session *models.Session, g *models.Game) error {
 		return fmt.Errorf("caller %v has no slot in game %v", *session.UserID, g.Code)
 	}
 
-	slot := g.Players[*session.SlotID]
-
-	if slot.UserID != *session.UserID {
+	if !HoldsSeat(g, session) {
 		return fmt.Errorf("caller %v does not hold slot %v of game %v", *session.UserID, *session.SlotID, g.Code)
 	}
 
-	if !slot.Host {
+	if !g.Players[*session.SlotID].Host {
 		return fmt.Errorf("caller %v is not the host of game %v", *session.UserID, g.Code)
 	}
 

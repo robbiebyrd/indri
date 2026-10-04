@@ -180,6 +180,17 @@ func (s *MemoryStore) Update(id string, u *models.UpdateSession) error {
 	return nil
 }
 
+func (s *MemoryStore) LeaveGame(id string, gameId string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if sess, ok := s.live(id); ok && sess.GameID != nil && *sess.GameID == gameId {
+		leaveGame(sess)
+	}
+
+	return nil
+}
+
 // Delete removes a session, invalidating its token. Deleting one that is
 // already gone is not an error.
 func (s *MemoryStore) Delete(id string) error {

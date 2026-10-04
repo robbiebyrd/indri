@@ -27,6 +27,9 @@ import (
 // the production ones.
 type Fixture struct {
 	I *injector.Injector
+
+	// credentials are each player's login, by user id.
+	credentials map[string]map[string]interface{}
 }
 
 // TwoTeams is a script with teams red and blue of two slots each, enough to
@@ -63,7 +66,7 @@ func New(t *testing.T, script *models.Script) *Fixture {
 		t.Fatalf("building the auth service: %v", err)
 	}
 
-	return &Fixture{I: &injector.Injector{
+	return &Fixture{credentials: map[string]map[string]interface{}{}, I: &injector.Injector{
 		ReposInjector: &injector.ReposInjector{GameRepo: games, UserRepo: users, SessionRepo: sessions},
 		ServicesInjector: &injector.ServicesInjector{
 			GameService:    gs,
@@ -93,7 +96,14 @@ func (f *Fixture) Player(t *testing.T, name string) *models.Session {
 		t.Fatalf("logging %s in: %v", name, err)
 	}
 
+	f.credentials[*session.UserID] = map[string]interface{}{"email": email, "password": password}
+
 	return session
+}
+
+// Credentials is the login payload of the player whose session this is.
+func (f *Fixture) Credentials(session *models.Session) map[string]interface{} {
+	return f.credentials[*session.UserID]
 }
 
 // Game creates a game with code.

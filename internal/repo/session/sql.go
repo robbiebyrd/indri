@@ -214,11 +214,47 @@ func (s *SQLStore) FindFirst(key string, value string) (*models.Session, error) 
 	return first(found, key, value)
 }
 
-// Update reads the session, applies the update's non-empty fields and writes it
-// back, in one transaction with the row locked: two updates to different
-// fields would otherwise each write back a stale copy of the other's. Moving
-// it onto a user who has a session is repo.ErrDuplicate.
+// Update applies the update's non-empty fields. Moving the session onto a user
+// who has one is repo.ErrDuplicate.
 func (s *SQLStore) Update(id string, u *models.UpdateSession) error {
+	err := s.modify(id, func(sess *models.Session) bool {
+		applyUpdate(sess, u)
+
+		return true
+	})
+	if errors.Is(err, errUserTaken) {
+		return fmt.Errorf("user %q already has a session: %w", u.UserID, repoErrors.ErrDuplicate)
+	}
+
+	return err
+}
+
+// LeaveGame takes the session out of gameId, if it is still in it.
+func (s *SQLStore) LeaveGame(id string, gameId string) error {
+	err := s.modify(id, func(sess *models.Session) bool {
+		if sess.GameID == nil || *sess.GameID != gameId {
+			return false
+		}
+
+		leaveGame(sess)
+
+		return true
+	})
+	if errors.Is(err, repoErrors.ErrNotFound) {
+		return nil
+	}
+
+	return err
+}
+
+// errUserTaken is modify's report that the unique index on the user refused
+// the write.
+var errUserTaken = errors.New("user already has a session")
+
+// modify reads the session, lets edit change it, and writes it back if edit
+// says it changed — in one transaction with the row locked, so two edits to
+// different fields cannot each write back a stale copy of the other's.
+func (s *SQLStore) modify(id string, edit func(*models.Session) (changed bool)) error {
 	tx, err := s.db.BeginTx(s.ctx, nil)
 	if err != nil {
 		return fmt.Errorf("updating session %q: %w", id, err)
@@ -230,7 +266,9 @@ func (s *SQLStore) Update(id string, u *models.UpdateSession) error {
 		return err
 	}
 
-	applyUpdate(sess, u)
+	if !edit(sess) {
+		return nil
+	}
 
 	data, err := json.Marshal(sess)
 	if err != nil {
@@ -241,7 +279,7 @@ func (s *SQLStore) Update(id string, u *models.UpdateSession) error {
 		s.dialect.Rebind(`UPDATE sessions SET user_id = ?, game_id = ?, data = ? WHERE id = ?`),
 		sess.UserID, sess.GameID, string(data), id)
 	if s.dialect.IsUniqueViolation(err) {
-		return fmt.Errorf("user %q already has a session: %w", u.UserID, repoErrors.ErrDuplicate)
+		return errUserTaken
 	}
 
 	if err != nil {

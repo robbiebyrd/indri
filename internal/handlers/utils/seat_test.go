@@ -3,11 +3,13 @@ package utils
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/robbiebyrd/indri/internal/models"
 	gameRepo "github.com/robbiebyrd/indri/internal/repo/game"
+	sessionRepo "github.com/robbiebyrd/indri/internal/repo/session"
 	"github.com/robbiebyrd/indri/internal/services/lock"
 )
 
@@ -146,5 +148,190 @@ func TestSeatCaller_LeavesTheSessionAloneWhenNoSlotIsFree(t *testing.T) {
 				t.Errorf("the session was updated to %+v for a caller who holds no slot", update)
 			}
 		})
+	}
+}
+
+func TestHoldsSeat(t *testing.T) {
+	g := &models.Game{Players: map[string]models.Player{"p0": {UserID: "u1"}, "p1": {}}}
+
+	for name, tc := range map[string]struct {
+		session *models.Session
+		want    bool
+	}{
+		"the holder":                    {&models.Session{UserID: ref("u1"), SlotID: ref("p0")}, true},
+		"someone else's slot":           {&models.Session{UserID: ref("u2"), SlotID: ref("p0")}, false},
+		"a free slot":                   {&models.Session{UserID: ref("u1"), SlotID: ref("p1")}, false},
+		"a slot the game does not have": {&models.Session{UserID: ref("u1"), SlotID: ref("p9")}, false},
+		"no slot":                       {&models.Session{UserID: ref("u1")}, false},
+		"no user":                       {&models.Session{SlotID: ref("p1")}, false},
+		"an empty user on a free slot":  {&models.Session{UserID: ref(""), SlotID: ref("p1")}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := HoldsSeat(g, tc.session); got != tc.want {
+				t.Fatalf("HoldsSeat = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// seatedFixture is a game with u1 seated on red, and u1's session naming that
+// seat, all in real in-memory stores.
+func seatedFixture(t *testing.T) (seatStore, *sessionRepo.MemoryStore, *models.Session, *models.Game) {
+	t.Helper()
+
+	store, _, _, _, gameId := seatFixture(t)
+
+	slot, err := store.ConnectPlayer(gameId, "red", "u1", "Ada")
+	if err != nil {
+		t.Fatalf("seating u1: %v", err)
+	}
+
+	sessions := sessionRepo.NewMemoryStore()
+
+	session, err := sessions.New(models.CreateSession{UserID: "u1", GameID: gameId, TeamID: "red", SlotID: slot})
+	if err != nil {
+		t.Fatalf("creating u1's session: %v", err)
+	}
+
+	g, err := store.Get(gameId)
+	if err != nil {
+		t.Fatalf("reading the game: %v", err)
+	}
+
+	return store, sessions, session, g
+}
+
+func TestDropLostSeat_KeepsASessionThatHoldsItsSeat(t *testing.T) {
+	_, sessions, session, g := seatedFixture(t)
+
+	held, err := DropLostSeat(sessions, session, g)
+	if err != nil || !held {
+		t.Fatalf("DropLostSeat = %v, %v; want held", held, err)
+	}
+
+	if got, _ := sessions.Get(session.ID); got.GameID == nil {
+		t.Fatal("a session that holds its seat was taken out of the game")
+	}
+}
+
+// A session that outlived its seat — the player was kicked, or left from
+// elsewhere — must stop naming the game, or it keeps receiving its broadcasts.
+func TestDropLostSeat_TakesASessionThatLostItsSeatOutOfTheGame(t *testing.T) {
+	store, sessions, session, g := seatedFixture(t)
+
+	if err := store.RemovePlayer(g.ID, *session.SlotID, "u1"); err != nil {
+		t.Fatalf("freeing the seat: %v", err)
+	}
+
+	g, _ = store.Get(g.ID)
+
+	held, err := DropLostSeat(sessions, session, g)
+	if err != nil || held {
+		t.Fatalf("DropLostSeat = %v, %v; want not held", held, err)
+	}
+
+	if got, _ := sessions.Get(session.ID); got.GameID != nil || got.SlotID != nil {
+		t.Fatalf("the session still names game %v, slot %v", got.GameID, got.SlotID)
+	}
+}
+
+func TestVacateSeat_FreesTheSlotTheSessionNames(t *testing.T) {
+	store, _, session, g := seatedFixture(t)
+
+	if err := VacateSeat(store, session); err != nil {
+		t.Fatalf("VacateSeat: %v", err)
+	}
+
+	got, _ := store.Get(g.ID)
+	if holder := got.Players[*session.SlotID].UserID; holder != "" {
+		t.Fatalf("slot %s is still held by %q", *session.SlotID, holder)
+	}
+}
+
+// A seat already taken by someone else is not the session's to free.
+func TestVacateSeat_LeavesSomeoneElsesSeatAlone(t *testing.T) {
+	store, _, session, g := seatedFixture(t)
+
+	if err := store.RemovePlayer(g.ID, *session.SlotID, "u1"); err != nil {
+		t.Fatalf("freeing the seat: %v", err)
+	}
+
+	if _, err := store.ConnectPlayer(g.ID, "red", "u2", "Bea"); err != nil {
+		t.Fatalf("seating u2: %v", err)
+	}
+
+	if err := VacateSeat(store, session); err == nil {
+		t.Fatal("VacateSeat freed a seat its session's user no longer holds")
+	}
+
+	got, _ := store.Get(g.ID)
+	if holder := got.Players[*session.SlotID].UserID; holder != "u2" {
+		t.Fatalf("slot %s is held by %q, want still u2", *session.SlotID, holder)
+	}
+}
+
+// failingFree is the real store, except that freeing a seat fails the way a
+// store under contention or losing its connection does.
+type failingFree struct{ seatStore }
+
+func (failingFree) RemovePlayer(string, string, string) error {
+	return errors.New("the game store is unavailable")
+}
+
+// movingFixture seats u1 in a first game and returns the session naming that
+// seat, with a second game to move to.
+func movingFixture(t *testing.T) (seatStore, userDirectory, sessionLog, *models.Session, string) {
+	t.Helper()
+
+	store, users, sessions, _, first := seatFixture(t)
+
+	slot, err := store.ConnectPlayer(first, "red", "u1", "Ada")
+	if err != nil {
+		t.Fatalf("seating u1 in the first game: %v", err)
+	}
+
+	second, err := store.New("seat-test-2", &models.Script{
+		Config: models.Config{MaxPlayersPerTeam: 2},
+		Teams:  map[string]models.Team{"red": {Name: "Red"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("creating the second game: %v", err)
+	}
+
+	session := &models.Session{ID: "session-1", UserID: ref("u1"), GameID: ref(first), TeamID: ref("red"), SlotID: ref(slot)}
+
+	return store, users, sessions, session, second.ID
+}
+
+// A move whose old seat could not be freed must say so: the player would
+// otherwise hold a seat in a game they left, for good.
+func TestSeatCaller_ReportsAnOldSeatItCouldNotFree(t *testing.T) {
+	store, users, sessions, session, second := movingFixture(t)
+
+	keyframe, err := SeatCaller(failingFree{store}, users, sessions, session, second, "red")
+	if err == nil {
+		t.Fatal("a move whose old seat could not be freed reported success")
+	}
+
+	if keyframe == nil {
+		t.Fatal("the move itself succeeded, so the caller still needs the new game's keyframe")
+	}
+
+	if update := sessions[session.ID]; update == nil || update.GameID != second {
+		t.Fatalf("the session was not moved to the game the player is now seated in: %+v", update)
+	}
+}
+
+// An old seat already lost — to a kick, or another connection — has nothing to
+// free, and is no failure.
+func TestSeatCaller_AnOldSeatAlreadyGoneIsNotAnError(t *testing.T) {
+	store, users, sessions, session, second := movingFixture(t)
+
+	if err := store.RemovePlayer(*session.GameID, *session.SlotID, "u1"); err != nil {
+		t.Fatalf("freeing the old seat behind the session's back: %v", err)
+	}
+
+	if _, err := SeatCaller(store, users, sessions, session, second, "red"); err != nil {
+		t.Fatalf("SeatCaller with the old seat already gone = %v, want nil", err)
 	}
 }
