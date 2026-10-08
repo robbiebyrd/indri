@@ -189,6 +189,7 @@ func hostReply(L *lua.LState) int {
 
 	document, err := replyDocument(tbl)
 	if err != nil {
+		noteCapError(L, err)
 		L.RaiseError("indri.reply: %s", err.Error())
 	}
 
@@ -241,6 +242,7 @@ func hostSend(L *lua.LState) int {
 
 	payload, err := eventPayload(L.OptTable(2, L.NewTable()))
 	if err != nil {
+		noteCapError(L, err)
 		L.RaiseError("indri.send(%q): %s", action, err.Error())
 	}
 

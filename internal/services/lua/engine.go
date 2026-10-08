@@ -103,6 +103,9 @@ type Engine struct {
 	games GameMutator
 	pool  *statePool
 
+	// kills counts the calls this engine's scripts were stopped in, by why.
+	kills killCounts
+
 	// Dispatch is how an event indri.send queued reaches the router once the
 	// handler that queued it has returned. It is an exported field set at boot
 	// rather than a constructor argument, the same shape as

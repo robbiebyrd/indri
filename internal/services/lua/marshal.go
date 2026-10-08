@@ -69,7 +69,7 @@ func defaultBudget() *budget {
 // countNode charges one node against the budget.
 func (b *budget) countNode() error {
 	if b.nodes++; b.nodes > b.maxNodes {
-		return fmt.Errorf("state exceeds %d nodes", b.maxNodes)
+		return &capError{reason: KillNodeCap, msg: fmt.Sprintf("state exceeds %d nodes", b.maxNodes)}
 	}
 
 	return nil
@@ -80,7 +80,7 @@ func (b *budget) countNode() error {
 // counter tracks the path and not the traversal.
 func (b *budget) descend() error {
 	if b.depth++; b.depth > b.maxDepth {
-		return fmt.Errorf("state depth exceeds %d", b.maxDepth)
+		return &capError{reason: KillDepthCap, msg: fmt.Sprintf("state depth exceeds %d", b.maxDepth)}
 	}
 
 	return nil

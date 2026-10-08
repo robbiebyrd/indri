@@ -450,6 +450,7 @@ action this affects: it resolves to the auth payload, and its keyframe is not re
 | `logout` | logout | |
 | `inquire(inquiryType, inquiry, code)` | inquire | |
 | `layout(code, op, args)` | layout | host-only; result is always null |
+| `scriptAction(name, payload)` | any action a game script declared | `name` must be one; `payload` is passed whole, bounded as below |
 
 An op's own fields ride in `args` because their shape depends on the op, which the GraphQL type system
 cannot express. The resolver flattens `args` into the payload, then sets `code` and `op` last — so an `args`
@@ -501,6 +502,7 @@ is treated as `{}`, so argument-less actions can be POSTed with nothing.
 | `POST /api/inquire` | inquire | `{inquiryType, inquiry?, code?}` |
 | `POST /api/refresh` | refresh | `{layoutHash?}` — returns the current keyframe |
 | `POST /api/layout` | layout | `{code, op, …the op's own fields}` — host-only |
+| `POST /api/<script action>` | that action | the whole body — one route per action the game scripts declared |
 
 **Auth.** `Authorization: Bearer <token>`, the same secret `login`/`reconnect` return.
 `register`/`login`/`reconnect` need none; the rest do. The caller is always resolved from their own
@@ -517,7 +519,10 @@ One request answers with one document, so an action that produced several respon
 resuming into a game must follow it with `POST /api/refresh` for the keyframe.
 
 Arguments are validated before dispatch and unknown body keys are dropped, so a caller cannot smuggle
-extra fields into a payload. `layout` is the one exception, because an op's arguments are objects whose
+extra fields into a payload. A game script's own action is the other exception: its payload's shape is known only to
+its script, so the body is passed through whole, bounded to 32 levels deep and 10 000 values (the
+limits of the Lua conversion it goes through next) and refused with `400` past them. `scriptAction` is
+held to the same bounds. `layout` is the one exception, because an op's arguments are objects whose
 shape depends on the op: its body passes through whole, and the handler rejects every field the op does not
 declare. `TestRestRoutesMatchRegisteredActions` fails if this table drifts from the handler registry in
 either direction.

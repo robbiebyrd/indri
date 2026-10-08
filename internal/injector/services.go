@@ -105,6 +105,12 @@ func GetServices(ctx context.Context, clients *ClientsInjector, repos *ReposInje
 	// script's events silently stop working on a server that loaded fine.
 	le.Dispatch = router.Dispatch
 
+	// The script engine's actions are reachable over REST and GraphQL as well
+	// as WebSocket: each REST route and the scriptAction mutation dispatch only
+	// what the manifest declares, which is frozen by now.
+	api.ScriptActions = le.Actions
+	gql.SetScriptActions(le.Actions)
+
 	// indri.refresh and indri.refreshSelf send a whole keyframe through the
 	// same services a join's keyframe and a delta's fan-out go through.
 	le.Keyframes = keyframeSender{games: gs, broadcast: bs}

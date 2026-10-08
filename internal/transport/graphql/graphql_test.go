@@ -322,7 +322,12 @@ func captureLog(t *testing.T) *syncBuffer {
 func postGraphQL(t *testing.T, sessions resolvers.SessionLookup, token, query string) []byte {
 	t.Helper()
 
-	tr := New(sessions)
+	return postGraphQLTo(t, New(sessions), token, query)
+}
+
+// postGraphQLTo is postGraphQL against a transport the test configured.
+func postGraphQLTo(t *testing.T, tr *Transport, token, query string) []byte {
+	t.Helper()
 
 	mux := http.NewServeMux()
 	tr.Register(mux)
@@ -726,5 +731,83 @@ func TestMutation_KeyframeMutationsPassTheHeldLayoutThrough(t *testing.T) {
 				t.Errorf("%s handed the action layoutHash %v, want \"h\" (payload %v)", name, got, handler.payload)
 			}
 		})
+	}
+}
+
+// scriptActionResult posts a scriptAction mutation to a transport serving the
+// declared script actions, recording what the router was handed.
+func scriptActionResult(t *testing.T, query string, declared ...string) ([]byte, *payloadRecorder, *sessionRecorder) {
+	t.Helper()
+
+	router.Reset()
+	t.Cleanup(router.Reset)
+
+	payloads := &payloadRecorder{}
+	calls := &sessionRecorder{document: keyframe}
+
+	for _, action := range append([]string{"move", "kick", "login", "received"}, declared...) {
+		router.RegisterHandler("test_payload_"+action, action, payloads)
+		router.RegisterHandler("test_calls_"+action, action, calls)
+	}
+
+	tr := New(fakeSessions{token: "good-token", id: ids.New()})
+	tr.SetScriptActions(func() []string { return declared })
+
+	return postGraphQLTo(t, tr, "good-token", query), payloads, calls
+}
+
+// A game's own actions are reachable over GraphQL through one mutation, since
+// gqlgen fixes the schema at build time and a script's actions are only known
+// at boot. The payload is handed over whole.
+func TestMutation_ScriptActionDispatchesADeclaredAction(t *testing.T) {
+	response, payloads, _ := scriptActionResult(t,
+		`mutation { scriptAction(name: "move", payload: {row: 1, col: 2}) }`, "move")
+
+	if strings.Contains(string(response), `"errors"`) {
+		t.Fatalf("scriptAction failed: %s", response)
+	}
+
+	payloads.mu.Lock()
+	defer payloads.mu.Unlock()
+
+	got, _ := json.Marshal(payloads.payload)
+	if want := `{"col":2,"row":1}`; string(got) != want {
+		t.Errorf("payload = %s, want %s", got, want)
+	}
+}
+
+// The name is checked against what the game scripts declared, and nothing
+// else is reachable through it: a built-in has its own typed mutation with its
+// own arguments, and a dispatch phase is not an action at all. Reaching either
+// with a hand-made payload would skip every check its typed arguments make.
+func TestMutation_ScriptActionRefusesAnythingTheScriptsDidNotDeclare(t *testing.T) {
+	for _, name := range []string{"fly", "kick", "login", "received"} {
+		t.Run(name, func(t *testing.T) {
+			response, _, calls := scriptActionResult(t,
+				`mutation { scriptAction(name: "`+name+`", payload: {}) }`, "move")
+
+			if !strings.Contains(string(response), `"errors"`) {
+				t.Errorf("scriptAction(%q) succeeded: %s", name, response)
+			}
+
+			if n, _ := calls.seen(); n != 0 {
+				t.Errorf("scriptAction(%q) dispatched %d times", name, n)
+			}
+		})
+	}
+}
+
+// A script action's payload is bounded as it is over REST, before dispatch.
+func TestMutation_ScriptActionBoundsThePayload(t *testing.T) {
+	deep := strings.Repeat("{a: ", actions.MaxPayloadDepth+1) + "1" + strings.Repeat("}", actions.MaxPayloadDepth+1)
+
+	response, _, calls := scriptActionResult(t, `mutation { scriptAction(name: "move", payload: `+deep+`) }`, "move")
+
+	if !strings.Contains(string(response), `"errors"`) {
+		t.Errorf("a payload nested past the limit was accepted: %s", response)
+	}
+
+	if n, _ := calls.seen(); n != 0 {
+		t.Error("a payload past the limit was dispatched")
 	}
 }

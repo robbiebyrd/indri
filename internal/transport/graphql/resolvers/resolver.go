@@ -2,6 +2,7 @@ package resolvers
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/robbiebyrd/indri/internal/handlers/router"
@@ -29,6 +30,15 @@ type Sinks interface {
 type Resolver struct {
 	Sessions SessionLookup
 	Sinks    Sinks
+
+	// ScriptActions lists the actions the game scripts declared, the only
+	// names scriptAction dispatches. Nil declares none.
+	ScriptActions func() []string
+}
+
+// declared reports whether name is an action the game scripts declared.
+func (r *Resolver) declared(name string) bool {
+	return r.ScriptActions != nil && slices.Contains(r.ScriptActions(), name)
 }
 
 type ctxKey int

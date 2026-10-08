@@ -29,6 +29,12 @@ type Mutation {
   # here and starts again from the sanitised game the caller's own session is in.
   refresh(layoutHash: String): JSON!
 
+  # A game script's own action. gqlgen fixes the schema at build time and a
+  # script's actions are known only at boot, so they share this one field.
+  # name must be an action the game scripts declared; payload is handed to it
+  # whole, bounded in depth and size as it is over REST.
+  scriptAction(name: String!, payload: JSON): JSON
+
   kick(code: String!, slotId: String!): JSON
   logout: JSON
   inquire(inquiryType: String!, inquiry: String, code: String): JSON

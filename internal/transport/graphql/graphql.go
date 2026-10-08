@@ -34,6 +34,15 @@ type Transport struct {
 	// internal/entrypoints/http covers the HTTP half of this transport, but a
 	// WebSocket upgrade is not a CORS request and is decided by the upgrader.
 	origins *transport.OriginPolicy
+
+	resolver *resolvers.Resolver
+}
+
+// SetScriptActions names the actions the game scripts declared, which the
+// scriptAction mutation dispatches. Set at boot from the script engine's
+// manifest; until it is, scriptAction refuses every name.
+func (t *Transport) SetScriptActions(declared func() []string) {
+	t.resolver.ScriptActions = declared
 }
 
 // New builds the GraphQL transport. sessions resolves bearer tokens to sessions.
@@ -44,6 +53,7 @@ func New(sessions resolvers.SessionLookup) *Transport {
 	}
 
 	resolver := &resolvers.Resolver{Sessions: sessions, Sinks: t}
+	t.resolver = resolver
 
 	srv := handler.New(generated.NewExecutableSchema(generated.Config{Resolvers: resolver}))
 	srv.AddTransport(gqlhttp.Options{})

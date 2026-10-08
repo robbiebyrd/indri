@@ -134,6 +134,8 @@ func newState(maxStringBytes int) (*lua.LState, error) {
 		return nil, err
 	}
 
+	forgetCaughtCaps(L)
+
 	// Last, so the shipped modules are compiled against the finished sandbox --
 	// and long before the state is frozen, which is the deadline require has to
 	// meet. See lib.Install.
@@ -199,6 +201,7 @@ func capStringLib(L *lua.LState, maxBytes int) error {
 		// Written as a division so the product is never formed: n*len(s) would
 		// overflow for exactly the arguments this exists to reject.
 		if n > 0 && len(s) > 0 && n > maxBytes/len(s) {
+			noteCap(L, KillStringCap)
 			L.RaiseError("string.rep would produce %d x %d bytes, over the %d byte cap", n, len(s), maxBytes)
 		}
 
@@ -207,6 +210,7 @@ func capStringLib(L *lua.LState, maxBytes int) error {
 
 	strlib.RawSetString("format", L.NewFunction(func(L *lua.LState) int {
 		if err := checkFormat(L.CheckString(1), maxBytes); err != nil {
+			noteCap(L, KillStringCap)
 			L.RaiseError("string.format: %s", err.Error())
 		}
 
@@ -222,6 +226,39 @@ func capStringLib(L *lua.LState, maxBytes int) error {
 // L.Call is unprotected on purpose: an error raised inside the real function
 // must reach the script's own pcall, exactly as it would have without the
 // wrapper.
+// forgetCaughtCaps wraps pcall and xpcall so that an error the script caught
+// takes its cap note with it. A cap noted for counting (see noteCap) is only why
+// the call was killed if nothing caught it; a script that recovers from one and
+// then dies of something else died of that.
+func forgetCaughtCaps(L *lua.LState) {
+	for _, name := range []string{"pcall", "xpcall"} {
+		protected := L.GetGlobal(name)
+		if protected == lua.LNil {
+			continue
+		}
+
+		L.SetGlobal(name, L.NewFunction(func(L *lua.LState) int {
+			top := L.GetTop()
+
+			L.Push(protected)
+
+			for i := 1; i <= top; i++ {
+				L.Push(L.Get(i))
+			}
+
+			L.Call(top, lua.MultRet)
+
+			// The protected call's own results follow the arguments, its
+			// first being whether the call succeeded.
+			if results := L.GetTop() - top; results > 0 && L.Get(top+1) == lua.LFalse {
+				forgetCap(L)
+			}
+
+			return L.GetTop() - top
+		}))
+	}
+}
+
 func delegate(L *lua.LState, fn lua.LValue, nret int) int {
 	top := L.GetTop()
 

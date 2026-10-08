@@ -1,12 +1,14 @@
 package boot
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -72,6 +74,75 @@ func registeredActions(t *testing.T) map[string]string {
 	}
 
 	return actions
+}
+
+// parityScript declares the game actions the parity tests expect every
+// transport to reach.
+const parityScript = `
+indri.on("move", function(req) error("ran:" .. req.action, 0) end)
+indri.on("pass", function(req) error("ran:" .. req.action, 0) end)
+`
+
+// registeredActionsWithScript is registeredActions for a server whose game
+// script declares parityScript's actions, returning the engine too.
+func registeredActionsWithScript(t *testing.T) (map[string]string, *luaService.Engine) {
+	t.Helper()
+
+	engine := scriptEngine(t, parityScript)
+
+	router.Reset()
+	t.Cleanup(router.Reset)
+
+	registerHandlers(&injector.Injector{
+		ClientsInjector:  &injector.ClientsInjector{Transport: ws.New()},
+		ServicesInjector: &injector.ServicesInjector{LuaEngine: engine},
+	})
+
+	actions := make(map[string]string)
+
+	for _, h := range router.RegisteredHandlers() {
+		actions[h.Action] = path.Base(reflect.TypeOf(h.Handler).Elem().PkgPath())
+	}
+
+	if len(engine.Actions()) == 0 {
+		t.Fatal("the parity script declared no actions; the test is not checking anything")
+	}
+
+	return actions, engine
+}
+
+// scriptActionField is the one mutation every game script action shares.
+const scriptActionField = "scriptAction"
+
+// scriptActionReaches reports whether calling scriptAction with action on a
+// served GraphQL transport reaches the script's handler — which raises, so a
+// "ran:<action>" frame in the answer is proof it ran rather than that nothing
+// failed.
+func scriptActionReaches(t *testing.T, engine *luaService.Engine, action string) bool {
+	t.Helper()
+
+	gql := graphqlTransport.New(noSessions{})
+	gql.SetScriptActions(engine.Actions)
+
+	mux := http.NewServeMux()
+	gql.Register(mux)
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	query, _ := json.Marshal(map[string]string{
+		"query": `mutation { ` + scriptActionField + `(name: "` + action + `", payload: {}) }`,
+	})
+
+	resp, err := http.Post(server.URL+"/graphql", "application/json", bytes.NewReader(query))
+	if err != nil {
+		t.Fatalf("calling scriptAction(%q): %v", action, err)
+	}
+	defer resp.Body.Close()
+
+	answer, _ := io.ReadAll(resp.Body)
+
+	return strings.Contains(string(answer), "ran:"+action)
 }
 
 // TestRegisterHandlers_CoversEveryActionPackage guards against an action being
@@ -355,11 +426,17 @@ func TestRegisterHandlers_BindsCorrectHandler(t *testing.T) {
 // costs: every action is reachable over WebSocket and GraphQL, so one that is
 // missing a REST route is unreachable for SSE clients, and a REST route for an
 // action nobody registered is a 404 waiting to happen.
+//
+// The registry includes a game script's actions, so a script action with no
+// REST route fails here as a built-in would.
 func TestRestRoutesMatchRegisteredActions(t *testing.T) {
-	registered := registeredActions(t)
+	registered, engine := registeredActionsWithScript(t)
 
-	exposed := make(map[string]struct{}, len(rest.Actions()))
-	for _, action := range rest.Actions() {
+	api := rest.New(noSessions{})
+	api.ScriptActions = engine.Actions
+
+	exposed := make(map[string]struct{}, len(api.Actions()))
+	for _, action := range api.Actions() {
 		exposed[action] = struct{}{}
 	}
 
@@ -394,9 +471,19 @@ var knownMissingFromGraphQL = map[string]string{}
 // coverage test leaves. TestRegisterHandlers_CoversEveryActionPackage guards the
 // router registry only, so an action registered there but missing from
 // schema.graphqls passes CI while being unreachable for every GraphQL client.
+//
+// A game script's actions have no typed mutation — the schema is fixed at build
+// time — and are reached through scriptAction instead, so each is checked by
+// calling scriptAction with it on a served transport.
 func TestGraphQLMutationsMatchRegisteredActions(t *testing.T) {
-	registered := registeredActions(t)
+	registered, engine := registeredActionsWithScript(t)
 	exposed := graphqlActions(t)
+
+	for _, action := range engine.Actions() {
+		if scriptActionReaches(t, engine, action) {
+			exposed[action] = struct{}{}
+		}
+	}
 
 	for action := range registered {
 		_, hasMutation := exposed[action]
@@ -445,6 +532,13 @@ func graphqlActions(t *testing.T) map[string]struct{} {
 	actions := make(map[string]struct{}, len(schema.Mutation.Fields))
 
 	for _, field := range schema.Mutation.Fields {
+		// scriptAction dispatches whatever declared action it is named, so it
+		// has no one action to read off its source; the caller checks it by
+		// calling it.
+		if field.Name == scriptActionField {
+			continue
+		}
+
 		// gqlgen names a resolver after its field, with an upper-case initial.
 		method := strings.ToUpper(field.Name[:1]) + field.Name[1:]
 
@@ -476,6 +570,10 @@ func resolverDispatches(t *testing.T) map[string]string {
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok {
+			continue
+		}
+
+		if fn.Name.Name == "ScriptAction" {
 			continue
 		}
 

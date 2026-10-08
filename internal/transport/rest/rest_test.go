@@ -583,3 +583,82 @@ func TestDispatch_SingleResponseActionIsUnchangedAndSilent(t *testing.T) {
 		t.Errorf("a single-response action logged %q, want nothing", report)
 	}
 }
+
+// scriptTransport is a REST transport serving the script actions given, as a
+// server whose game scripts declared them does.
+func scriptTransport(t *testing.T, declared ...string) (*recorder, string) {
+	t.Helper()
+
+	rec := &recorder{}
+
+	tr := New(fakeSessions{token: "good-token", id: ids.New()})
+	tr.Dispatch = rec.dispatch
+	tr.ScriptActions = func() []string { return declared }
+
+	mux := http.NewServeMux()
+	tr.Register(mux)
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	return rec, srv.URL
+}
+
+// A game's own actions are as reachable over REST as over WebSocket, or an SSE
+// client could join a game and never make a move. The body is the payload,
+// whole: only the script knows its shape.
+func TestRoutes_ExposeScriptActions(t *testing.T) {
+	rec, url := scriptTransport(t, "move")
+
+	resp := post(t, url+"/api/move", `{"row":1,"col":2,"mark":{"symbol":"X"}}`, bearer("good-token"))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d (%s), want %d", resp.StatusCode, body(t, resp), http.StatusOK)
+	}
+
+	if rec.action != "move" {
+		t.Errorf("dispatched action = %q, want move", rec.action)
+	}
+
+	got, _ := json.Marshal(rec.payload)
+	if want := `{"col":2,"mark":{"symbol":"X"},"row":1}`; string(got) != want {
+		t.Errorf("payload = %s, want %s", got, want)
+	}
+}
+
+// Every built-in route is an allowlist of named arguments. A script action's
+// cannot be, so it is held to the size the script engine accepts instead, and
+// refused before dispatch past it.
+func TestRoutes_BoundAScriptActionsPayload(t *testing.T) {
+	rec, url := scriptTransport(t, "move")
+
+	deep := strings.Repeat(`{"a":`, actions.MaxPayloadDepth+1) + "1" + strings.Repeat("}", actions.MaxPayloadDepth+1)
+
+	resp := post(t, url+"/api/move", deep, bearer("good-token"))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("a payload nested past the limit answered %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	if rec.calls != 0 {
+		t.Error("a payload past the limit was dispatched")
+	}
+}
+
+// Only what the scripts declared is routed. A name nobody declared is the 404
+// any unknown action is, and a built-in keeps its own argument allowlist even
+// when a script declares nothing.
+func TestRoutes_ScriptActionsAreOnlyTheDeclaredOnes(t *testing.T) {
+	rec, url := scriptTransport(t, "move")
+
+	if resp := post(t, url+"/api/fly", `{}`, bearer("good-token")); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("an undeclared action answered %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+
+	resp := post(t, url+"/api/join", `{"code":"ABCD","teamId":"red","smuggled":true}`, bearer("good-token"))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("join answered %d (%s)", resp.StatusCode, body(t, resp))
+	}
+
+	if _, ok := rec.payload["smuggled"]; ok {
+		t.Error("join, a built-in, passed an undeclared argument through")
+	}
+}

@@ -1010,36 +1010,47 @@ directly and is the pattern to copy.
 
 ## Which transports reach a script action
 
-> **This section describes the current state and is deliberately incomplete. Story 062, "Transport
-> parity and observability for script actions", is in progress and will change it. Do not design
-> against what is written here as though it were settled, and do not assume the shape of what
-> replaces it.**
+Every one that carries actions:
 
-As of this build, an action a script declares is reachable over:
-
-| Transport | Reaches a script action? |
+| Transport | How a script action is sent |
 |---|---|
-| WebSocket (`/ws`) | **yes** — `boot.handleClientMessage` → `router.DispatchMessage`, which routes on the `action` field |
-| WebRTC (`game` DataChannel) | **yes** — the adapter pipes messages into the same handler |
-| REST (`POST /api/<action>`) | **no** |
-| GraphQL (mutations) | **no** |
-| SSE (`/events`) | n/a — push-only; an SSE client sends actions over REST or GraphQL, so **no** |
+| WebSocket (`/ws`) | `{"action": "move", …}`, routed on `action` like any other |
+| WebRTC (`game` DataChannel) | the same message, piped into the same handler |
+| REST | `POST /api/move` with the payload as the body |
+| GraphQL | `mutation { scriptAction(name: "move", payload: {row: 1, col: 2}) }` |
+| SSE (`/events`) | push-only; an SSE client sends actions over REST |
 
-REST and GraphQL both expose a **fixed allow-list** of the built-in actions:
-`internal/transport/rest/routes.go` registers a route per entry in its `routes` map, and
-`internal/transport/graphql/schema.graphqls` declares one mutation per built-in. gqlgen generates a
-resolver interface at build time, so per-script mutations cannot be added at boot — which is the
-problem 062 exists to solve.
+REST mounts one route per action `Engine.Actions()` declares, when the server starts. GraphQL cannot:
+gqlgen fixes the schema at build time, so every script action shares the one `scriptAction` field,
+which dispatches only a name the scripts declared — a built-in or a dispatch phase is refused, since
+reaching one with a hand-made payload would skip the checks its typed arguments make.
 
-The parity tests do not close this gap either: `TestRestRoutesMatchRegisteredActions` and
-`TestGraphQLMutationsMatchRegisteredActions` both build their registry from `registerHandlers` with an
-injector carrying no Lua engine, so no script action is ever in the set they compare. That is listed
-as an explicit acceptance criterion on 062.
+A built-in's REST route and mutation accept only its named arguments. A script action's payload has a
+shape only its script knows, so it is passed through whole — a weaker posture, bounded instead: at most
+32 levels deep and 10 000 values (the payload itself counting as one), the limits of the Lua conversion
+it goes through next, and the transport's body-size limit. A payload past them is refused before
+dispatch.
 
-**Practical consequence today:** a game whose verbs live in Lua is a WebSocket (or WebRTC) game. An
-SSE-plus-REST client can register, log in, join and refresh, but cannot send `move`.
+`TestRestRoutesMatchRegisteredActions` and `TestGraphQLMutationsMatchRegisteredActions` include a
+script's actions, and `TestGetServices_ScriptActionsReachRESTAndGraphQL` checks the server really
+hands the manifest to both.
 
-This section will be replaced when 062 lands.
+### When a script is killed
+
+Every call a script is stopped in is counted under why, in `Engine.KillCounts()` and in the process's
+`indri_lua_kills` expvar, and logged as `lua kill <what> reason=<reason> after=<duration>`:
+
+| Reason | Meaning |
+|---|---|
+| `deadline` | the call ran past its budget — read off the context after the call, never off the error |
+| `string_cap` | `string.rep` or `string.format` asked for more than the string cap |
+| `depth_cap` | a value handed to or from the host nested too deep |
+| `node_cap` | a value handed to or from the host held too many values |
+| `script_error` | anything else the script raised or got wrong |
+
+A cap the script caught with `pcall` or `xpcall` is not why it died, and is not counted. The expvar
+is not served over HTTP: the server mounts its own mux rather than `http.DefaultServeMux`, and
+exposing it — or adding a metrics library and endpoint — is a separate decision.
 
 ## When you still need Go
 

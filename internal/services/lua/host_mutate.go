@@ -42,6 +42,10 @@ type GameMutator interface {
 type invocation struct {
 	ctx context.Context
 
+	// capHit is the first cap this call ran into, noted before the host raised
+	// it into Lua, so a kill is counted under the cap and not as a script error.
+	capHit KillReason
+
 	// trigger is why this call is running: a dispatched action, or a lifecycle
 	// event the server raised. It is a value of a closed interface rather than a
 	// flag, so a host function that must behave differently for one kind asks
@@ -198,6 +202,7 @@ func hostMutate(L *lua.LState) int {
 	}
 
 	if err != nil {
+		noteCapError(L, err)
 		L.RaiseError("indri.mutate: %s", err.Error())
 	}
 

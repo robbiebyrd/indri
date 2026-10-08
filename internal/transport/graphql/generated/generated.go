@@ -38,17 +38,18 @@ type DirectiveRoot struct {
 
 type ComplexityRoot struct {
 	Mutation struct {
-		CreateGame func(childComplexity int, code string, teamID string, private *bool, layoutHash *string) int
-		Inquire    func(childComplexity int, inquiryType string, inquiry *string, code *string) int
-		JoinGame   func(childComplexity int, code string, teamID string, layoutHash *string) int
-		Kick       func(childComplexity int, code string, slotID string) int
-		Layout     func(childComplexity int, code string, op string, args model.JSON) int
-		LeaveGame  func(childComplexity int) int
-		Login      func(childComplexity int, email string, password string) int
-		Logout     func(childComplexity int) int
-		Reconnect  func(childComplexity int, token string, layoutHash *string) int
-		Refresh    func(childComplexity int, layoutHash *string) int
-		Register   func(childComplexity int, email string, password string, name string) int
+		CreateGame   func(childComplexity int, code string, teamID string, private *bool, layoutHash *string) int
+		Inquire      func(childComplexity int, inquiryType string, inquiry *string, code *string) int
+		JoinGame     func(childComplexity int, code string, teamID string, layoutHash *string) int
+		Kick         func(childComplexity int, code string, slotID string) int
+		Layout       func(childComplexity int, code string, op string, args model.JSON) int
+		LeaveGame    func(childComplexity int) int
+		Login        func(childComplexity int, email string, password string) int
+		Logout       func(childComplexity int) int
+		Reconnect    func(childComplexity int, token string, layoutHash *string) int
+		Refresh      func(childComplexity int, layoutHash *string) int
+		Register     func(childComplexity int, email string, password string, name string) int
+		ScriptAction func(childComplexity int, name string, payload model.JSON) int
 	}
 
 	Query struct {
@@ -72,6 +73,7 @@ type MutationResolver interface {
 	JoinGame(ctx context.Context, code string, teamID string, layoutHash *string) (model.JSON, error)
 	LeaveGame(ctx context.Context) (model.JSON, error)
 	Refresh(ctx context.Context, layoutHash *string) (model.JSON, error)
+	ScriptAction(ctx context.Context, name string, payload model.JSON) (model.JSON, error)
 	Kick(ctx context.Context, code string, slotID string) (model.JSON, error)
 	Logout(ctx context.Context) (model.JSON, error)
 	Inquire(ctx context.Context, inquiryType string, inquiry *string, code *string) (model.JSON, error)
@@ -213,6 +215,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.Register(childComplexity, args["email"].(string), args["password"].(string), args["name"].(string)), true
+	case "Mutation.scriptAction":
+		if e.ComplexityRoot.Mutation.ScriptAction == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_scriptAction_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.ScriptAction(childComplexity, args["name"].(string), args["payload"].(model.JSON)), true
 
 	case "Query.ping":
 		if e.ComplexityRoot.Query.Ping == nil {
@@ -362,6 +375,12 @@ type Mutation {
   # mutation resolves to the first — has no state to replay them over. It asks
   # here and starts again from the sanitised game the caller's own session is in.
   refresh(layoutHash: String): JSON!
+
+  # A game script's own action. gqlgen fixes the schema at build time and a
+  # script's actions are known only at boot, so they share this one field.
+  # name must be an action the game scripts declared; payload is handed to it
+  # whole, bounded in depth and size as it is over REST.
+  scriptAction(name: String!, payload: JSON): JSON
 
   kick(code: String!, slotId: String!): JSON
   logout: JSON
@@ -742,6 +761,28 @@ func (ec *executionContext) field_Mutation_register_args(ctx context.Context, ra
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_scriptAction_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "name",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNString2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["name"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "payload",
+		func(ctx context.Context, v any) (model.JSON, error) {
+			return ec.unmarshalOJSON2githubᚗcomᚋrobbiebyrdᚋindriᚋinternalᚋtransportᚋgraphqlᚋmodelᚐJSON(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["payload"] = arg1
+	return args, nil
+}
+
 func (ec *executionContext) field_Query___type_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -1111,6 +1152,50 @@ func (ec *executionContext) fieldContext_Mutation_refresh(ctx context.Context, f
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_refresh_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_scriptAction(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Mutation_scriptAction(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().ScriptAction(ctx, fc.Args["name"].(string), fc.Args["payload"].(model.JSON))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v model.JSON) graphql.Marshaler {
+			return ec.marshalOJSON2githubᚗcomᚋrobbiebyrdᚋindriᚋinternalᚋtransportᚋgraphqlᚋmodelᚐJSON(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Mutation_scriptAction(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type JSON does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_scriptAction_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -2549,6 +2634,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 				return ec._Mutation_refresh(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "scriptAction":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_scriptAction(ctx, field)
+			})
+			if out.Values[i] == graphql.RequiredNull {
 				out.Invalids++
 			}
 		case "kick":

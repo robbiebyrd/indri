@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/robbiebyrd/indri/internal/handlers/actions"
 	"github.com/robbiebyrd/indri/internal/transport/graphql/generated"
 	"github.com/robbiebyrd/indri/internal/transport/graphql/model"
 )
@@ -66,6 +67,29 @@ func (r *mutationResolver) Refresh(ctx context.Context, layoutHash *string) (mod
 	// keyframe of one they have not joined. layoutHash names only layout
 	// content the caller already holds.
 	return r.dispatch(ctx, "refresh", withHeldLayout(map[string]interface{}{}, layoutHash))
+}
+
+// ScriptAction is the resolver for the scriptAction field.
+func (r *mutationResolver) ScriptAction(ctx context.Context, name string, payload model.JSON) (model.JSON, error) {
+	// Only what the scripts declared. A built-in reached here would skip every
+	// check its own typed arguments make, and a dispatch phase is not an action.
+	if !r.declared(name) {
+		return nil, fmt.Errorf("%q is not an action the game scripts declared", name)
+	}
+
+	decoded := map[string]interface{}{}
+
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			return nil, fmt.Errorf("decoding the payload of %q: %w", name, err)
+		}
+	}
+
+	if err := actions.CheckScriptPayload(decoded); err != nil {
+		return nil, err
+	}
+
+	return r.dispatch(ctx, name, decoded)
 }
 
 // Kick is the resolver for the kick field.

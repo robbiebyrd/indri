@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
@@ -50,6 +51,12 @@ type Transport struct {
 
 	// Dispatch runs an action. Defaults to the shared router.
 	Dispatch Dispatcher
+
+	// ScriptActions lists the actions the game scripts declared, each routed
+	// at POST /api/<action> with its body as the payload, bounded by
+	// actions.CheckScriptPayload. Set at boot, before Register, from the
+	// script engine's manifest; nil serves none.
+	ScriptActions func() []string
 }
 
 // New builds the REST transport. sessions authenticates bearer tokens.
@@ -66,7 +73,7 @@ func New(sessions SessionLookup) *Transport {
 func (t *Transport) Handle(_ transport.Handlers) {}
 
 func (t *Transport) Register(mux *http.ServeMux) {
-	for action := range routes {
+	for _, action := range t.Actions() {
 		mux.HandleFunc("POST "+prefix+action, t.handle)
 		// Without this, a GET falls through to the catch-all below and reports
 		// the action as unknown rather than as the wrong method.
@@ -81,7 +88,7 @@ func (t *Transport) Register(mux *http.ServeMux) {
 func (t *Transport) handle(w http.ResponseWriter, r *http.Request) {
 	action := strings.TrimPrefix(r.URL.Path, prefix)
 
-	build, ok := routes[action]
+	build, ok := t.builder(action)
 	if !ok {
 		notFound(w, r)
 
@@ -127,6 +134,54 @@ func (t *Transport) handle(w http.ResponseWriter, r *http.Request) {
 
 // decodeBody reads the request body as a JSON object. An empty body is an empty
 // object, so argument-less actions can be POSTed with nothing at all.
+// Actions is every action this transport routes: the built-ins, then the
+// actions the game scripts declared.
+func (t *Transport) Actions() []string {
+	routed := Actions()
+
+	for _, action := range t.scriptActions() {
+		if _, builtIn := routes[action]; !builtIn {
+			routed = append(routed, action)
+		}
+	}
+
+	return routed
+}
+
+// builder is how action's body becomes its payload: its own allowlist for a
+// built-in, the bounded whole body for a declared script action.
+func (t *Transport) builder(action string) (build, bool) {
+	if build, ok := routes[action]; ok {
+		return build, true
+	}
+
+	if slices.Contains(t.scriptActions(), action) {
+		return scriptPayload, true
+	}
+
+	return nil, false
+}
+
+func (t *Transport) scriptActions() []string {
+	if t.ScriptActions == nil {
+		return nil
+	}
+
+	return t.ScriptActions()
+}
+
+// scriptPayload passes a script action's body through whole, since only its
+// script knows the shape, bounded to what the script engine accepts. It is a
+// weaker posture than every built-in route, which drops undeclared keys, and
+// the bound is what keeps it from being an unbounded one.
+func scriptPayload(in map[string]interface{}) (map[string]interface{}, error) {
+	if err := actions.CheckScriptPayload(in); err != nil {
+		return nil, err
+	}
+
+	return in, nil
+}
+
 func decodeBody(r *http.Request, into *map[string]interface{}) error {
 	r.Body = http.MaxBytesReader(nil, r.Body, transport.MaxBodyBytes)
 

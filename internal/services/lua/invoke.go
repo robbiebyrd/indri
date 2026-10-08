@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	lua "github.com/yuin/gopher-lua"
 
@@ -118,7 +119,11 @@ func (e *Engine) run(
 
 	// call installs the per-invocation environment, applies ctx and marks the
 	// state spoiled if the interpreter was interrupted rather than unwound.
+	started := time.Now()
+
 	if _, err := s.call(ctx, fn, value); err != nil {
+		e.recordKill(ctx, inv, time.Since(started))
+
 		// The ledger is dropped with the invocation. A handler that unwound left
 		// the game as it found it — indri.mutate returns its callback's error
 		// rather than writing — so the effects it queued describe a move that

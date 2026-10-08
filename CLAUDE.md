@@ -323,9 +323,15 @@ array (`events.Diff` replaces arrays whole). The host-only `layout` action
 `processed`); `indri.before`/`indri.after_action` are how a script extends a built-in instead, and
 `login`, `logout`, `reconnect` and `register` can never be hooked.
 
-**Script actions are currently WebSocket- and WebRTC-only** — they have no REST route and no GraphQL
-mutation, and the two parity tests below do not cover them. Story 062 is changing that; don't design
-around the gap without reading it.
+**Script actions reach every transport.** WebSocket and WebRTC route them on `action` like any
+other; REST serves `POST /api/<action>` for each one the engine declared; GraphQL has one static
+`scriptAction(name, payload)` mutation (gqlgen fixes the schema at build time), which refuses any name
+the scripts did not declare. A script action's payload has no argument allowlist, so both bound it with
+`actions.CheckScriptPayload` (the Lua conversion budget's depth and value limits) before dispatch. The
+manifest reaches both in `injector/services.go`; `TestGetServices_ScriptActionsReachRESTAndGraphQL`
+fails if it stops. A killed script is counted by reason (`deadline`, `string_cap`, `depth_cap`,
+`node_cap`, `script_error`) in `Engine.KillCounts` and the `indri_lua_kills` expvar, which nothing
+serves over HTTP yet.
 
 ### The Go escape hatch
 
@@ -344,10 +350,9 @@ is never wired up — an unregistered action is silently unreachable, so the tes
 A **built-in** action has three inbound surfaces, and adding one means touching all three: the router
 registration, a mutation in `internal/transport/graphql/schema.graphqls` (plus its resolver), and a
 route in `internal/transport/rest/routes.go`. `TestRestRoutesMatchRegisteredActions` and
-`TestGraphQLMutationsMatchRegisteredActions` catch a missing route and a missing mutation — but both
-build their registry from `registerHandlers` with no Lua engine, so neither sees a script action. A
-Go action registered via `router.RegisterHandler` is likewise WebSocket-only unless you add the other
-two yourself.
+`TestGraphQLMutationsMatchRegisteredActions` catch a missing route and a missing mutation, script
+actions included. A Go action registered via `router.RegisterHandler` is WebSocket-only unless you add
+the other two yourself.
 
 ## Conventions
 
