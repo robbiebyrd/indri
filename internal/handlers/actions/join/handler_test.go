@@ -170,3 +170,30 @@ func TestJoin_AFailedMoveKeepsTheOldSeat(t *testing.T) {
 		t.Fatalf("a failed move cost ada her seat in the first game; it is held by %q", holder)
 	}
 }
+
+// A join that names the layout the caller holds is answered without it.
+func TestJoin_LeavesOutTheLayoutTheCallerHolds(t *testing.T) {
+	f := handlertest.New(t, handlertest.WithLayout())
+	f.Game(t, "JOINME")
+	ada := f.Player(t, "ada")
+
+	full, err := f.Do(New(f.I), ada, map[string]interface{}{"code": "JOINME", "teamId": "red"})
+	if err != nil {
+		t.Fatalf("join: %v", err)
+	}
+
+	if !handlertest.HasLayout(t, full.Responses[0]) {
+		t.Fatal("a join naming no layout was not sent the layout")
+	}
+
+	lean, err := f.Do(New(f.I), f.Session(t, ada.ID), map[string]interface{}{
+		"code": "JOINME", "teamId": "red", "layoutHash": handlertest.LayoutHash(t, full.Responses[0]),
+	})
+	if err != nil {
+		t.Fatalf("rejoin: %v", err)
+	}
+
+	if handlertest.HasLayout(t, lean.Responses[0]) {
+		t.Error("a join naming the layout it holds was sent it again")
+	}
+}

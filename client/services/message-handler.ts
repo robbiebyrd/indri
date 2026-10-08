@@ -32,6 +32,17 @@ type actionHandler = {
  */
 export type GameStateObserver = (game: Game, kind: "keyframe" | "delta") => void
 
+/**
+ * The actions the server answers with a keyframe. Each takes `layoutHash`, the
+ * layout the client already holds, and the keyframe then leaves it out.
+ */
+const KEYFRAME_ACTIONS = new Set(["refresh", "reconnect", "join", "create"])
+
+/** Whether a delta path is the layout, or inside it, or replaces it whole. */
+function touchesLayout(path: string): boolean {
+    return path === "data" || path === "data.layout" || path.startsWith("data.layout.")
+}
+
 export class MessageHandler {
     private readonly transport: ClientTransport
     private stateList: GameStateParser<Game> = new GameStateParser<Game>()
@@ -42,6 +53,13 @@ export class MessageHandler {
     private readonly observers = new Set<GameStateObserver>()
     private readonly openObservers = new Set<() => void>()
     private opened = false
+
+    /**
+     * The layout the last full keyframe carried, under the hash it named. It is
+     * dropped the moment a delta touches the layout: the copy is then stale,
+     * and the next keyframe request has to say it holds nothing.
+     */
+    private heldLayout?: {hash: string, layout: unknown} = undefined
 
     constructor(
         url: string,
@@ -177,7 +195,18 @@ export class MessageHandler {
     }
 
     send(message: object) {
-        this.transport.send(message)
+        this.transport.send(this.withHeldLayout(message))
+    }
+
+    /** Names the held layout on an action the server answers with a keyframe. */
+    private withHeldLayout(message: object): object {
+        const action = (message as {action?: unknown}).action
+
+        if (!this.heldLayout || typeof action !== "string" || !KEYFRAME_ACTIONS.has(action) || "layoutHash" in message) {
+            return message
+        }
+
+        return {...message, layoutHash: this.heldLayout.hash}
     }
 
     /**
@@ -196,6 +225,14 @@ export class MessageHandler {
     }
 
     update(parsedMessage?: any) {
+        const paths = [
+            ...Object.keys(parsedMessage?.updated ?? {}),
+            ...((parsedMessage?.removed ?? []) as string[]),
+        ]
+        if (paths.some(touchesLayout)) {
+            this.heldLayout = undefined
+        }
+
         this.stateList.update(parsedMessage as UpdateMessage)
         this.updateGameState("delta")
     }
@@ -247,10 +284,44 @@ export class MessageHandler {
     }
 
     keyframe(gameData: any) {
-        const g = gameData as Game
+        const g = this.withLayout(gameData) as Game
         this.stateList.set(g as JsonObject, new Date(g.updatedAt ?? new Date().toISOString()))
         this.updateGameState("keyframe")
     }
+
+    /**
+     * Takes the layout off a keyframe, or puts the held one back.
+     *
+     * A keyframe that carries the layout refreshes the held copy. One that
+     * names the held layout and leaves it out gets the held copy back, so the
+     * game reduced from it is whole. One that names a layout this client does
+     * not hold — which it should never be sent — cannot be made whole, so the
+     * game is asked for again, naming nothing.
+     */
+    private withLayout(gameData: any): any {
+        const {layoutHash, ...game} = gameData ?? {}
+
+        if (typeof layoutHash !== "string") {
+            this.heldLayout = undefined
+
+            return game
+        }
+
+        const data = game.data ?? {}
+
+        if ("layout" in data) {
+            this.heldLayout = {hash: layoutHash, layout: data.layout}
+
+            return game
+        }
+
+        if (this.heldLayout?.hash === layoutHash) {
+            return {...game, data: {...data, layout: this.heldLayout.layout}}
+        }
+
+        this.heldLayout = undefined
+        this.send({action: "refresh"})
+
+        return game
+    }
 }
-
-

@@ -319,6 +319,21 @@ from the stage, every scene, every team, and every player before sending.
 
 Sent on `create`, `join`, `refresh`, and after a `reconnect` into an active game.
 
+**The layout is sent once, not in every keyframe.** A game with a layout (`data.layout`) carries
+`layoutHash` at the top level of its keyframe: a SHA-256 of the layout's JSON. Each of the four
+keyframe actions takes an optional `layoutHash`, the hash of the layout the client already holds:
+
+```json
+{ "action": "refresh", "layoutHash": "abeaa61d…" }
+```
+
+When it still names the game's layout, the keyframe carries `layoutHash` and leaves `data.layout` out,
+and the client puts its own copy back. A layout edit reaches the client as a delta on `data.layout…`,
+which makes its copy stale: it then names no hash, and the next keyframe carries the layout again. A
+hash the server does not recognise is answered with the layout. On the tictactoe config this takes a
+keyframe from 4614 bytes to 725. A keyframe a Lua script sends (`indri.refresh`, `indri.refreshSelf`)
+always carries the layout, because the script does not know which one its recipients hold.
+
 `players` is keyed by **slot**, not by user. Every team's slots are declared when the game is created
 (teams in name order, `maxPlayersPerTeam` each, ids `p0`, `p1`, …) and listed in its `playerIds`, so
 slot ids — and the delta paths built from them — never move as players come and go. A slot's `userId`
@@ -426,9 +441,10 @@ action this affects: it resolves to the auth payload, and its keyframe is not re
 |---|---|---|
 | `register(email, password, name)` | register | |
 | `login(email, password)` | login | result carries the bearer token in `sessionId` |
-| `reconnect(token)` | reconnect | |
-| `createGame(code, teamId, private)` | create | |
-| `joinGame(code, teamId)` | join | |
+| `reconnect(token, layoutHash)` | reconnect | `layoutHash` optional on all four keyframe mutations |
+| `createGame(code, teamId, private, layoutHash)` | create | |
+| `joinGame(code, teamId, layoutHash)` | join | |
+| `refresh(layoutHash)` | refresh | the caller's own game's keyframe |
 | `leaveGame` | leave | |
 | `kick(code, slotId)` | kick | host-only |
 | `logout` | logout | |
@@ -437,8 +453,7 @@ action this affects: it resolves to the auth payload, and its keyframe is not re
 
 An op's own fields ride in `args` because their shape depends on the op, which the GraphQL type system
 cannot express. The resolver flattens `args` into the payload, then sets `code` and `op` last — so an `args`
-that carries its own `code` or `op` cannot redirect the edit. There is no `refresh` mutation; use the REST
-route or the WebSocket action for a keyframe.
+that carries its own `code` or `op` cannot redirect the edit.
 
 ```graphql
 mutation { login(email: "u@e.io", password: "…") }        # returns JSON incl. sessionId token
@@ -477,14 +492,14 @@ is treated as `{}`, so argument-less actions can be POSTed with nothing.
 |---|---|---|
 | `POST /api/register` | register | `{email, password, name}` |
 | `POST /api/login` | login | `{email, password}` — result carries the bearer token in `sessionId` |
-| `POST /api/reconnect` | reconnect | `{token}` |
-| `POST /api/create` | create | `{code, teamId, private?}` |
-| `POST /api/join` | join | `{code, teamId}` |
+| `POST /api/reconnect` | reconnect | `{token, layoutHash?}` |
+| `POST /api/create` | create | `{code, teamId, private?, layoutHash?}` |
+| `POST /api/join` | join | `{code, teamId, layoutHash?}` |
 | `POST /api/leave` | leave | — |
 | `POST /api/kick` | kick | `{code, slotId}` — host-only |
 | `POST /api/logout` | logout | — |
 | `POST /api/inquire` | inquire | `{inquiryType, inquiry?, code?}` |
-| `POST /api/refresh` | refresh | — returns the current keyframe |
+| `POST /api/refresh` | refresh | `{layoutHash?}` — returns the current keyframe |
 | `POST /api/layout` | layout | `{code, op, …the op's own fields}` — host-only |
 
 **Auth.** `Authorization: Bearer <token>`, the same secret `login`/`reconnect` return.

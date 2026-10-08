@@ -179,7 +179,11 @@ replaying timestamp-ordered deltas over it, discarding deltas older than the key
 The wire format is **JSON with dotted paths**, on every transport. origin/main's compact format
 (positional integer paths over MessagePack, `?debug=1` for JSON) was measured and declined — deflate
 removes the same redundancy — and is kept as `plans/compact-delta-protocol.md`. The size levers chosen
-instead are WebSocket compression (story 093) and sending the layout once per connection (story 094).
+instead are WebSocket compression (permessage-deflate with context takeover, story 093) and keeping the
+layout out of keyframes the client already has it for (story 094): a keyframe carries `layoutHash`, the
+four keyframe actions take the hash the client holds, and `GameService.Keyframe` leaves the layout out
+when it matches. Render every keyframe through `Keyframe`; marshalling `Sanitize(g)` yourself drops the
+hash.
 
 **A write that never publishes is invisible to players.** This is now the single most important rule in
 the repo, because nothing in the database enforces it:

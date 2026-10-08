@@ -57,3 +57,30 @@ func TestCreate_FreesTheCreatorsSeatInTheirPreviousGame(t *testing.T) {
 		t.Fatalf("ada still holds slot %s in the game she left by creating another", oldSlot)
 	}
 }
+
+// Games stamped from one script share its layout, so a creator who holds it
+// from another game is answered without it.
+func TestCreate_LeavesOutTheLayoutTheCallerHolds(t *testing.T) {
+	f := handlertest.New(t, handlertest.WithLayout())
+	ada := f.Player(t, "ada")
+
+	full, err := f.Do(New(f.I), ada, map[string]interface{}{"code": "FIRST", "teamId": "red"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if !handlertest.HasLayout(t, full.Responses[0]) {
+		t.Fatal("a create naming no layout was not sent the layout")
+	}
+
+	lean, err := f.Do(New(f.I), f.Session(t, ada.ID), map[string]interface{}{
+		"code": "SECOND", "teamId": "red", "layoutHash": handlertest.LayoutHash(t, full.Responses[0]),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if handlertest.HasLayout(t, lean.Responses[0]) {
+		t.Error("a create naming the layout it holds was sent it again")
+	}
+}

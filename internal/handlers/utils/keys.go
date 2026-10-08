@@ -31,3 +31,13 @@ func RequireGameCode(decodedMsg map[string]interface{}) (*string, error) {
 
 	return &gameCode, nil
 }
+
+// HeldLayoutHash is the layout the caller says it already holds, by the hash a
+// keyframe gave it, or "" when it names none. join, create, refresh and
+// reconnect take it, so the keyframe they answer with can leave that layout
+// out; see GameService.Keyframe.
+func HeldLayoutHash(decodedMsg map[string]interface{}) string {
+	hash, _ := decodedMsg["layoutHash"].(string)
+
+	return hash
+}

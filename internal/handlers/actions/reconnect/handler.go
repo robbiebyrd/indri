@@ -78,7 +78,7 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 			return actions.Result{Responses: responses, Session: session}, nil
 		}
 
-		jsonGameBytes, err := json.Marshal(h.i.GameService.Sanitize(g))
+		jsonGameBytes, err := h.i.GameService.Keyframe(g, handlerUtils.HeldLayoutHash(req.Payload))
 		if err != nil {
 			return actions.Result{}, err
 		}

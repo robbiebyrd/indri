@@ -196,6 +196,32 @@ func TestRoutes_DispatchTheSameActionsAndPayloadsAsTheOtherTransports(t *testing
 			payload: map[string]interface{}{},
 		},
 		{
+			// The four keyframe actions take the layout the client holds, so
+			// their keyframe can leave it out.
+			route:   "/api/reconnect",
+			body:    `{"token":"tok","layoutHash":"h"}`,
+			action:  "reconnect",
+			payload: map[string]interface{}{"sessionId": "tok", "layoutHash": "h"},
+		},
+		{
+			route:   "/api/create",
+			body:    `{"code":"ABCD","teamId":"red","layoutHash":"h"}`,
+			action:  "create",
+			payload: map[string]interface{}{"code": "ABCD", "teamId": "red", "layoutHash": "h", "private": false},
+		},
+		{
+			route:   "/api/join",
+			body:    `{"code":"ABCD","teamId":"red","layoutHash":"h"}`,
+			action:  "join",
+			payload: map[string]interface{}{"code": "ABCD", "teamId": "red", "layoutHash": "h"},
+		},
+		{
+			route:   "/api/refresh",
+			body:    `{"layoutHash":"h"}`,
+			action:  "refresh",
+			payload: map[string]interface{}{"layoutHash": "h"},
+		},
+		{
 			route:   "/api/inquire",
 			body:    `{"inquiryType":"games"}`,
 			action:  "inquire",

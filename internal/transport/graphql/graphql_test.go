@@ -653,8 +653,10 @@ func TestMutation_RefreshResolvesTheCallerFromTheBearerTokenAlone(t *testing.T) 
 
 // A gameId or sessionId argument here would let any caller ask for the keyframe
 // of a game they never joined, because the action trusts what it is handed. The
-// field is deliberately argument-free, and the schema is where that is enforced.
-func TestSchema_RefreshTakesNoArguments(t *testing.T) {
+// one argument the field takes is layoutHash, which names layout content the
+// caller already holds and never a game or a caller; the schema is where that is
+// enforced.
+func TestSchema_RefreshTakesNoArgumentNamingAGameOrACaller(t *testing.T) {
 	schema := generated.NewExecutableSchema(generated.Config{}).Schema()
 	if schema.Mutation == nil {
 		t.Fatal("the GraphQL schema declares no Mutation type")
@@ -666,7 +668,63 @@ func TestSchema_RefreshTakesNoArguments(t *testing.T) {
 	}
 
 	for _, arg := range field.Arguments {
+		if arg.Name == "layoutHash" {
+			continue
+		}
+
 		t.Errorf("the refresh mutation takes an argument %q; the caller must be resolved from their"+
 			" bearer token, never from something they can name", arg.Name)
+	}
+}
+
+// payloadRecorder answers with a fixed document and keeps the payload it was
+// handed.
+type payloadRecorder struct {
+	mu      sync.Mutex
+	payload map[string]interface{}
+}
+
+func (h *payloadRecorder) Handle(req actions.Request) (actions.Result, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.payload = req.Payload
+
+	return actions.Result{Responses: [][]byte{[]byte(keyframe)}}, nil
+}
+
+// Every mutation answered with a keyframe takes the layout the client holds,
+// and hands it to the action as REST and WebSocket do, so the keyframe can
+// leave the layout out.
+func TestMutation_KeyframeMutationsPassTheHeldLayoutThrough(t *testing.T) {
+	sessions := fakeSessions{token: "good-token", id: ids.New()}
+
+	cases := map[string]struct {
+		action string
+		query  string
+	}{
+		"reconnect":  {"reconnect", `mutation { reconnect(token: "tok", layoutHash: "h") }`},
+		"createGame": {"create", `mutation { createGame(code: "ABCD", teamId: "red", layoutHash: "h") }`},
+		"joinGame":   {"join", `mutation { joinGame(code: "ABCD", teamId: "red", layoutHash: "h") }`},
+		"refresh":    {"refresh", `mutation { refresh(layoutHash: "h") }`},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			router.Reset()
+			t.Cleanup(router.Reset)
+
+			handler := &payloadRecorder{}
+			router.RegisterHandler("test_"+tc.action, tc.action, handler)
+
+			postGraphQL(t, sessions, "good-token", tc.query)
+
+			handler.mu.Lock()
+			defer handler.mu.Unlock()
+
+			if got := handler.payload["layoutHash"]; got != "h" {
+				t.Errorf("%s handed the action layoutHash %v, want \"h\" (payload %v)", name, got, handler.payload)
+			}
+		})
 	}
 }

@@ -34,7 +34,8 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		return actions.Result{}, err
 	}
 
-	keyframe, err := utils.SeatCaller(h.i.GameService, h.i.UserService, h.i.SessionService, req.Session, g.ID, *teamId)
+	keyframe, err := utils.SeatCaller(h.i.GameService, h.i.UserService, h.i.SessionService, req.Session, g.ID, *teamId,
+		utils.HeldLayoutHash(req.Payload))
 	if keyframe == nil {
 		return actions.Result{}, err
 	}

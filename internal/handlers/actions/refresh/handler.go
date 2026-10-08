@@ -1,7 +1,6 @@
 package refresh
 
 import (
-	"encoding/json"
 	"errors"
 
 	"github.com/robbiebyrd/indri/internal/handlers/actions"
@@ -40,7 +39,7 @@ func (h *Handler) Handle(req actions.Request) (actions.Result, error) {
 		return actions.Result{Responses: [][]byte{models.ErrNoGame.BytesError()}}, errors.New(models.ErrNoGame.Description())
 	}
 
-	jsonData, err := json.Marshal(h.i.GameService.Sanitize(g))
+	jsonData, err := h.i.GameService.Keyframe(g, handlerUtils.HeldLayoutHash(req.Payload))
 	if err != nil {
 		return actions.Result{Responses: [][]byte{models.ErrServerError.BytesError()}}, err
 	}

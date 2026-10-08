@@ -1,7 +1,6 @@
 package game
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -113,19 +112,20 @@ func (gs *Service) Get(id string) (*models.Game, error) {
 	return g, nil
 }
 
-// GetJSONBytes will fetch game data and return JSON bytes. It will create a game if it doesn't exist.
-func (gs *Service) GetJSONBytes(id string) (*[]byte, error) {
+// GetJSONBytes fetches a game and renders its keyframe for a client already
+// holding the layout whose hash is heldLayoutHash ("" for none); see Keyframe.
+func (gs *Service) GetJSONBytes(id string, heldLayoutHash string) (*[]byte, error) {
 	g, err := gs.Get(id)
 	if err != nil {
 		return nil, err
 	}
 
-	gameJSONBytes, err := json.Marshal(gs.Sanitize(g))
+	frame, err := gs.Keyframe(g, heldLayoutHash)
 	if err != nil {
 		return nil, err
 	}
 
-	return &gameJSONBytes, nil
+	return &frame, nil
 }
 
 // GetByCode will fetch game data for a specific game code.

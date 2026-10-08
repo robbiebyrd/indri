@@ -1,6 +1,7 @@
 package injector
 
 import (
+	"encoding/json"
 	"fmt"
 
 	broadcastService "github.com/robbiebyrd/indri/internal/services/broadcast"
@@ -9,13 +10,16 @@ import (
 
 // keyframeSender is the script engine's Keyframes over the game and broadcast
 // services: the sanitized game, for the caller or for everyone in it.
+//
+// Both carry the layout whole. A script's refresh does not know what layout the
+// caller holds, and a broadcast reaches players holding different ones.
 type keyframeSender struct {
 	games     *gameService.Service
 	broadcast *broadcastService.Service
 }
 
 func (k keyframeSender) Keyframe(gameID string) ([]byte, error) {
-	frame, err := k.games.GetJSONBytes(gameID)
+	frame, err := k.games.GetJSONBytes(gameID, "")
 	if err != nil {
 		return nil, fmt.Errorf("rendering a keyframe of game %q: %w", gameID, err)
 	}
@@ -29,5 +33,10 @@ func (k keyframeSender) BroadcastKeyframe(gameID string) error {
 		return err
 	}
 
-	return k.broadcast.Broadcast(&gameID, nil, k.games.Sanitize(g))
+	frame, err := k.games.Keyframe(g, "")
+	if err != nil {
+		return err
+	}
+
+	return k.broadcast.Broadcast(&gameID, nil, json.RawMessage(frame))
 }

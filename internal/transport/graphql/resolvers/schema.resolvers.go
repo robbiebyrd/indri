@@ -29,28 +29,28 @@ func (r *mutationResolver) Login(ctx context.Context, email string, password str
 }
 
 // Reconnect is the resolver for the reconnect field.
-func (r *mutationResolver) Reconnect(ctx context.Context, token string) (model.JSON, error) {
+func (r *mutationResolver) Reconnect(ctx context.Context, token string, layoutHash *string) (model.JSON, error) {
 	// The reconnect action reads the token from the "sessionId" payload field.
-	return r.dispatch(ctx, "reconnect", map[string]interface{}{"sessionId": token})
+	return r.dispatch(ctx, "reconnect", withHeldLayout(map[string]interface{}{"sessionId": token}, layoutHash))
 }
 
 // CreateGame is the resolver for the createGame field.
-func (r *mutationResolver) CreateGame(ctx context.Context, code string, teamID string, private *bool) (model.JSON, error) {
+func (r *mutationResolver) CreateGame(ctx context.Context, code string, teamID string, private *bool, layoutHash *string) (model.JSON, error) {
 	isPrivate := false
 	if private != nil {
 		isPrivate = *private
 	}
 
-	return r.dispatch(ctx, "create", map[string]interface{}{
+	return r.dispatch(ctx, "create", withHeldLayout(map[string]interface{}{
 		"code": code, "teamId": teamID, "private": isPrivate,
-	})
+	}, layoutHash))
 }
 
 // JoinGame is the resolver for the joinGame field.
-func (r *mutationResolver) JoinGame(ctx context.Context, code string, teamID string) (model.JSON, error) {
-	return r.dispatch(ctx, "join", map[string]interface{}{
+func (r *mutationResolver) JoinGame(ctx context.Context, code string, teamID string, layoutHash *string) (model.JSON, error) {
+	return r.dispatch(ctx, "join", withHeldLayout(map[string]interface{}{
 		"code": code, "teamId": teamID,
-	})
+	}, layoutHash))
 }
 
 // LeaveGame is the resolver for the leaveGame field.
@@ -59,12 +59,13 @@ func (r *mutationResolver) LeaveGame(ctx context.Context) (model.JSON, error) {
 }
 
 // Refresh is the resolver for the refresh field.
-func (r *mutationResolver) Refresh(ctx context.Context) (model.JSON, error) {
+func (r *mutationResolver) Refresh(ctx context.Context, layoutHash *string) (model.JSON, error) {
 	// The keyframe is always the game the caller's own session is in: the action
 	// reads it off the session dispatch resolves from the bearer token. There is
 	// deliberately no argument to name a game with, so a caller cannot ask for a
-	// keyframe of one they have not joined.
-	return r.dispatch(ctx, "refresh", map[string]interface{}{})
+	// keyframe of one they have not joined. layoutHash names only layout
+	// content the caller already holds.
+	return r.dispatch(ctx, "refresh", withHeldLayout(map[string]interface{}{}, layoutHash))
 }
 
 // Kick is the resolver for the kick field.

@@ -83,3 +83,14 @@ func (r *Resolver) dispatch(ctx context.Context, action string, payload map[stri
 
 	return out, err
 }
+
+// withHeldLayout adds the layout the client says it holds to an action's
+// payload, as REST and WebSocket send it, so the keyframe the action answers
+// with can leave that layout out.
+func withHeldLayout(payload map[string]interface{}, layoutHash *string) map[string]interface{} {
+	if layoutHash != nil {
+		payload["layoutHash"] = *layoutHash
+	}
+
+	return payload
+}

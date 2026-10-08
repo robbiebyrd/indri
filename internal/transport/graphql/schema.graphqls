@@ -14,9 +14,12 @@ type Query {
 type Mutation {
   register(email: String!, password: String!, name: String!): JSON!
   login(email: String!, password: String!): JSON!
-  reconnect(token: String!): JSON!
-  createGame(code: String!, teamId: String!, private: Boolean): JSON!
-  joinGame(code: String!, teamId: String!): JSON!
+  # layoutHash, on every mutation answered with a keyframe, is the layoutHash a
+  # keyframe gave the client: the layout it already holds. A keyframe for a
+  # client still holding the game's layout leaves the layout out.
+  reconnect(token: String!, layoutHash: String): JSON!
+  createGame(code: String!, teamId: String!, private: Boolean, layoutHash: String): JSON!
+  joinGame(code: String!, teamId: String!, layoutHash: String): JSON!
   leaveGame: JSON
 
   # The keyframe call, and the GraphQL twin of POST /api/refresh. gameUpdates
@@ -24,7 +27,7 @@ type Mutation {
   # reconnect resuming into an active game answers with two documents and a
   # mutation resolves to the first — has no state to replay them over. It asks
   # here and starts again from the sanitised game the caller's own session is in.
-  refresh: JSON!
+  refresh(layoutHash: String): JSON!
 
   kick(code: String!, slotId: String!): JSON
   logout: JSON

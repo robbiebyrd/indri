@@ -13,7 +13,7 @@ import (
 // they leave behind, and renders the game they were seated in.
 type Seater interface {
 	ConnectPlayer(id string, teamId string, userId string, displayName string) (string, error)
-	GetJSONBytes(id string) (*[]byte, error)
+	GetJSONBytes(id string, heldLayoutHash string) (*[]byte, error)
 	SeatFreer
 }
 
@@ -29,7 +29,8 @@ type SessionUpdater interface {
 
 // SeatCaller seats the caller on teamId in game gameId, records that seat on
 // their session, and returns the game's keyframe taken after the seat was
-// written. join and create both end this way.
+// written, leaving out the layout the caller holds as heldLayoutHash. join and
+// create both end this way.
 //
 // A caller who could not be seated keeps the session they had: a session
 // naming a game whose slots it holds none of would receive that game's
@@ -41,6 +42,7 @@ func SeatCaller(
 	session *models.Session,
 	gameId string,
 	teamId string,
+	heldLayoutHash string,
 ) (*[]byte, error) {
 	if session.UserID == nil || *session.UserID == "" {
 		return nil, fmt.Errorf("calling session has no user id")
@@ -76,7 +78,7 @@ func SeatCaller(
 		}
 	}
 
-	keyframe, err := games.GetJSONBytes(gameId)
+	keyframe, err := games.GetJSONBytes(gameId, heldLayoutHash)
 	if err != nil {
 		return nil, err
 	}

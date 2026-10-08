@@ -23,7 +23,7 @@ func (s seatStore) ConnectPlayer(id, teamId, userId, displayName string) (string
 	return slot, err
 }
 
-func (s seatStore) GetJSONBytes(id string) (*[]byte, error) {
+func (s seatStore) GetJSONBytes(id string, _ string) (*[]byte, error) {
 	g, err := s.Get(id)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func seatFixture(t *testing.T) (seatStore, userDirectory, sessionLog, *models.Se
 func TestSeatCaller_RecordsTheSlotOnTheSession(t *testing.T) {
 	store, users, sessions, session, gameId := seatFixture(t)
 
-	keyframe, err := SeatCaller(store, users, sessions, session, gameId, "red")
+	keyframe, err := SeatCaller(store, users, sessions, session, gameId, "red", "")
 	if err != nil {
 		t.Fatalf("SeatCaller: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestSeatCaller_UsesTheDisplayName(t *testing.T) {
 	store, users, sessions, session, gameId := seatFixture(t)
 	users["u1"].DisplayName = ref("Countess")
 
-	if _, err := SeatCaller(store, users, sessions, session, gameId, "red"); err != nil {
+	if _, err := SeatCaller(store, users, sessions, session, gameId, "red", ""); err != nil {
 		t.Fatalf("SeatCaller: %v", err)
 	}
 
@@ -140,7 +140,7 @@ func TestSeatCaller_LeavesTheSessionAloneWhenNoSlotIsFree(t *testing.T) {
 				}
 			}
 
-			if _, err := SeatCaller(store, users, sessions, session, gameId, team); err == nil {
+			if _, err := SeatCaller(store, users, sessions, session, gameId, team, ""); err == nil {
 				t.Fatal("SeatCaller succeeded with no slot to give")
 			}
 
@@ -308,7 +308,7 @@ func movingFixture(t *testing.T) (seatStore, userDirectory, sessionLog, *models.
 func TestSeatCaller_ReportsAnOldSeatItCouldNotFree(t *testing.T) {
 	store, users, sessions, session, second := movingFixture(t)
 
-	keyframe, err := SeatCaller(failingFree{store}, users, sessions, session, second, "red")
+	keyframe, err := SeatCaller(failingFree{store}, users, sessions, session, second, "red", "")
 	if err == nil {
 		t.Fatal("a move whose old seat could not be freed reported success")
 	}
@@ -331,7 +331,7 @@ func TestSeatCaller_AnOldSeatAlreadyGoneIsNotAnError(t *testing.T) {
 		t.Fatalf("freeing the old seat behind the session's back: %v", err)
 	}
 
-	if _, err := SeatCaller(store, users, sessions, session, second, "red"); err != nil {
+	if _, err := SeatCaller(store, users, sessions, session, second, "red", ""); err != nil {
 		t.Fatalf("SeatCaller with the old seat already gone = %v, want nil", err)
 	}
 }

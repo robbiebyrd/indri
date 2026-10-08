@@ -26,11 +26,18 @@ var routes = map[string]build{
 			return nil, err
 		}
 
-		return map[string]interface{}{"sessionId": token}, nil
+		out, err := args(heldLayout)(in)
+		if err != nil {
+			return nil, err
+		}
+
+		out["sessionId"] = token
+
+		return out, nil
 	},
 
 	"create": func(in map[string]interface{}) (map[string]interface{}, error) {
-		out, err := args(required("code", "teamId"))(in)
+		out, err := args(required("code", "teamId"), heldLayout)(in)
 		if err != nil {
 			return nil, err
 		}
@@ -45,14 +52,14 @@ var routes = map[string]build{
 		return out, nil
 	},
 
-	"join":   args(required("code", "teamId")),
+	"join":   args(required("code", "teamId"), heldLayout),
 	"leave":  args(),
 	"kick":   args(required("code", "slotId")),
 	"logout": args(),
 
 	// The keyframe route. An SSE client cannot build state from deltas alone,
 	// so it POSTs here first and replays its stream over the result.
-	"refresh": args(),
+	"refresh": args(heldLayout),
 
 	"inquire": args(required("inquiryType"), optional("inquiry", "code")),
 
@@ -84,6 +91,11 @@ func Actions() []string {
 
 	return names
 }
+
+// heldLayout is the layout a client says it holds, by the hash a keyframe gave
+// it. Every action answered with a keyframe takes it, so that keyframe can
+// leave the layout out.
+var heldLayout = optional("layoutHash")
 
 type argSpec struct {
 	required []string

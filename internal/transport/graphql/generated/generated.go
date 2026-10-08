@@ -38,16 +38,16 @@ type DirectiveRoot struct {
 
 type ComplexityRoot struct {
 	Mutation struct {
-		CreateGame func(childComplexity int, code string, teamID string, private *bool) int
+		CreateGame func(childComplexity int, code string, teamID string, private *bool, layoutHash *string) int
 		Inquire    func(childComplexity int, inquiryType string, inquiry *string, code *string) int
-		JoinGame   func(childComplexity int, code string, teamID string) int
+		JoinGame   func(childComplexity int, code string, teamID string, layoutHash *string) int
 		Kick       func(childComplexity int, code string, slotID string) int
 		Layout     func(childComplexity int, code string, op string, args model.JSON) int
 		LeaveGame  func(childComplexity int) int
 		Login      func(childComplexity int, email string, password string) int
 		Logout     func(childComplexity int) int
-		Reconnect  func(childComplexity int, token string) int
-		Refresh    func(childComplexity int) int
+		Reconnect  func(childComplexity int, token string, layoutHash *string) int
+		Refresh    func(childComplexity int, layoutHash *string) int
 		Register   func(childComplexity int, email string, password string, name string) int
 	}
 
@@ -67,11 +67,11 @@ type ComplexityRoot struct {
 type MutationResolver interface {
 	Register(ctx context.Context, email string, password string, name string) (model.JSON, error)
 	Login(ctx context.Context, email string, password string) (model.JSON, error)
-	Reconnect(ctx context.Context, token string) (model.JSON, error)
-	CreateGame(ctx context.Context, code string, teamID string, private *bool) (model.JSON, error)
-	JoinGame(ctx context.Context, code string, teamID string) (model.JSON, error)
+	Reconnect(ctx context.Context, token string, layoutHash *string) (model.JSON, error)
+	CreateGame(ctx context.Context, code string, teamID string, private *bool, layoutHash *string) (model.JSON, error)
+	JoinGame(ctx context.Context, code string, teamID string, layoutHash *string) (model.JSON, error)
 	LeaveGame(ctx context.Context) (model.JSON, error)
-	Refresh(ctx context.Context) (model.JSON, error)
+	Refresh(ctx context.Context, layoutHash *string) (model.JSON, error)
 	Kick(ctx context.Context, code string, slotID string) (model.JSON, error)
 	Logout(ctx context.Context) (model.JSON, error)
 	Inquire(ctx context.Context, inquiryType string, inquiry *string, code *string) (model.JSON, error)
@@ -112,7 +112,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.ComplexityRoot.Mutation.CreateGame(childComplexity, args["code"].(string), args["teamId"].(string), args["private"].(*bool)), true
+		return e.ComplexityRoot.Mutation.CreateGame(childComplexity, args["code"].(string), args["teamId"].(string), args["private"].(*bool), args["layoutHash"].(*string)), true
 	case "Mutation.inquire":
 		if e.ComplexityRoot.Mutation.Inquire == nil {
 			break
@@ -134,7 +134,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.ComplexityRoot.Mutation.JoinGame(childComplexity, args["code"].(string), args["teamId"].(string)), true
+		return e.ComplexityRoot.Mutation.JoinGame(childComplexity, args["code"].(string), args["teamId"].(string), args["layoutHash"].(*string)), true
 	case "Mutation.kick":
 		if e.ComplexityRoot.Mutation.Kick == nil {
 			break
@@ -190,13 +190,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.ComplexityRoot.Mutation.Reconnect(childComplexity, args["token"].(string)), true
+		return e.ComplexityRoot.Mutation.Reconnect(childComplexity, args["token"].(string), args["layoutHash"].(*string)), true
 	case "Mutation.refresh":
 		if e.ComplexityRoot.Mutation.Refresh == nil {
 			break
 		}
 
-		return e.ComplexityRoot.Mutation.Refresh(childComplexity), true
+		args, err := ec.field_Mutation_refresh_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.Refresh(childComplexity, args["layoutHash"].(*string)), true
 	case "Mutation.register":
 		if e.ComplexityRoot.Mutation.Register == nil {
 			break
@@ -343,9 +348,12 @@ type Query {
 type Mutation {
   register(email: String!, password: String!, name: String!): JSON!
   login(email: String!, password: String!): JSON!
-  reconnect(token: String!): JSON!
-  createGame(code: String!, teamId: String!, private: Boolean): JSON!
-  joinGame(code: String!, teamId: String!): JSON!
+  # layoutHash, on every mutation answered with a keyframe, is the layoutHash a
+  # keyframe gave the client: the layout it already holds. A keyframe for a
+  # client still holding the game's layout leaves the layout out.
+  reconnect(token: String!, layoutHash: String): JSON!
+  createGame(code: String!, teamId: String!, private: Boolean, layoutHash: String): JSON!
+  joinGame(code: String!, teamId: String!, layoutHash: String): JSON!
   leaveGame: JSON
 
   # The keyframe call, and the GraphQL twin of POST /api/refresh. gameUpdates
@@ -353,7 +361,7 @@ type Mutation {
   # reconnect resuming into an active game answers with two documents and a
   # mutation resolves to the first — has no state to replay them over. It asks
   # here and starts again from the sanitised game the caller's own session is in.
-  refresh: JSON!
+  refresh(layoutHash: String): JSON!
 
   kick(code: String!, slotId: String!): JSON
   logout: JSON
@@ -523,6 +531,14 @@ func (ec *executionContext) field_Mutation_createGame_args(ctx context.Context, 
 		return nil, err
 	}
 	args["private"] = arg2
+	arg3, err := graphql.ProcessArgField(ctx, rawArgs, "layoutHash",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOString2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["layoutHash"] = arg3
 	return args, nil
 }
 
@@ -575,6 +591,14 @@ func (ec *executionContext) field_Mutation_joinGame_args(ctx context.Context, ra
 		return nil, err
 	}
 	args["teamId"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "layoutHash",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOString2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["layoutHash"] = arg2
 	return args, nil
 }
 
@@ -663,6 +687,28 @@ func (ec *executionContext) field_Mutation_reconnect_args(ctx context.Context, r
 		return nil, err
 	}
 	args["token"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "layoutHash",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOString2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["layoutHash"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_refresh_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "layoutHash",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOString2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["layoutHash"] = arg0
 	return args, nil
 }
 
@@ -882,7 +928,7 @@ func (ec *executionContext) _Mutation_reconnect(ctx context.Context, field graph
 		},
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Mutation().Reconnect(ctx, fc.Args["token"].(string))
+			return ec.Resolvers.Mutation().Reconnect(ctx, fc.Args["token"].(string), fc.Args["layoutHash"].(*string))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v model.JSON) graphql.Marshaler {
@@ -926,7 +972,7 @@ func (ec *executionContext) _Mutation_createGame(ctx context.Context, field grap
 		},
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Mutation().CreateGame(ctx, fc.Args["code"].(string), fc.Args["teamId"].(string), fc.Args["private"].(*bool))
+			return ec.Resolvers.Mutation().CreateGame(ctx, fc.Args["code"].(string), fc.Args["teamId"].(string), fc.Args["private"].(*bool), fc.Args["layoutHash"].(*string))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v model.JSON) graphql.Marshaler {
@@ -970,7 +1016,7 @@ func (ec *executionContext) _Mutation_joinGame(ctx context.Context, field graphq
 		},
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Mutation().JoinGame(ctx, fc.Args["code"].(string), fc.Args["teamId"].(string))
+			return ec.Resolvers.Mutation().JoinGame(ctx, fc.Args["code"].(string), fc.Args["teamId"].(string), fc.Args["layoutHash"].(*string))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v model.JSON) graphql.Marshaler {
@@ -1036,7 +1082,8 @@ func (ec *executionContext) _Mutation_refresh(ctx context.Context, field graphql
 			return ec.fieldContext_Mutation_refresh(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return ec.Resolvers.Mutation().Refresh(ctx)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Mutation().Refresh(ctx, fc.Args["layoutHash"].(*string))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v model.JSON) graphql.Marshaler {
@@ -1046,8 +1093,28 @@ func (ec *executionContext) _Mutation_refresh(ctx context.Context, field graphql
 		true,
 	)
 }
-func (ec *executionContext) fieldContext_Mutation_refresh(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("Mutation", field, true, true, errors.New("field of type JSON does not have child fields"))
+func (ec *executionContext) fieldContext_Mutation_refresh(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type JSON does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_refresh_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
 }
 
 func (ec *executionContext) _Mutation_kick(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {

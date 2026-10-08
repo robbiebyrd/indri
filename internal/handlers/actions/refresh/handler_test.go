@@ -39,3 +39,31 @@ func TestRefresh_RefusesASessionThatLostItsSeat(t *testing.T) {
 		t.Fatalf("refresh from a lost seat answered %q, want an error and no keyframe", result.Responses)
 	}
 }
+
+// A player who says which layout they hold is sent the keyframe without it;
+// one who names none is sent it.
+func TestRefresh_LeavesOutTheLayoutTheCallerHolds(t *testing.T) {
+	f := handlertest.New(t, handlertest.WithLayout())
+	g := f.Game(t, "GAME")
+	ada := f.Seat(t, "ada", g.ID, "red")
+
+	full, err := f.Do(New(f.I), ada, nil)
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	if !handlertest.HasLayout(t, full.Responses[0]) {
+		t.Fatal("a refresh naming no layout was not sent the layout")
+	}
+
+	hash := handlertest.LayoutHash(t, full.Responses[0])
+
+	lean, err := f.Do(New(f.I), ada, map[string]interface{}{"layoutHash": hash})
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	if handlertest.HasLayout(t, lean.Responses[0]) {
+		t.Error("a refresh naming the layout it holds was sent it again")
+	}
+}

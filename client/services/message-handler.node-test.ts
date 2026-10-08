@@ -218,3 +218,103 @@ test("an inquiry response with no games gives an empty game list", () => {
         assert.deepEqual(lists, [[], [{code: "ABC"}]]);
     });
 });
+
+// --- the layout a keyframe can leave out (story 094) -------------------------
+
+const LAYOUT = {grid: {cols: 12, rows: 12}, scenes: {board: {widgets: {}}}};
+
+function keyframeMessage(withLayout: boolean, layoutHash = "hash-1"): string {
+    return JSON.stringify({
+        id: "g1", code: "ABCD", updatedAt: "2026-10-01T00:00:00.000Z", layoutHash,
+        data: withLayout ? {turn: "X", layout: LAYOUT} : {turn: "X"},
+    });
+}
+
+/** An open handler, the socket it writes to, and the last game it reduced. */
+function openHandler(): {ws: MessageHandler; socket: FakeSocket; game: () => any} {
+    const {ws, socket} = newHandler();
+    socket.open();
+
+    let latest: any;
+    ws.observe((game) => {latest = game});
+
+    return {ws, socket, game: () => latest};
+}
+
+function deliver(socket: FakeSocket, data: string): void {
+    socket.onmessage?.({data});
+}
+
+function sentActions(socket: FakeSocket): any[] {
+    return socket.sent.map((s) => JSON.parse(s));
+}
+
+test("the keyframe actions name the layout the client holds; other actions do not", () => {
+    withFakeSocket(() => {
+        const {ws, socket} = openHandler();
+        deliver(socket, keyframeMessage(true));
+
+        for (const action of ["refresh", "reconnect", "join", "create", "leave"]) {
+            ws.send({action});
+        }
+
+        const sent = sentActions(socket);
+        for (const message of sent.slice(0, 4)) {
+            assert.equal(message.layoutHash, "hash-1", `${message.action} did not name the held layout`);
+        }
+        assert.equal(sent[4].layoutHash, undefined, "leave, which has no keyframe, named a layout");
+    });
+});
+
+test("a keyframe that leaves out the layout the client holds is rebuilt with it", () => {
+    withFakeSocket(() => {
+        const {socket, game} = openHandler();
+        deliver(socket, keyframeMessage(true));
+        deliver(socket, keyframeMessage(false));
+
+        assert.deepEqual(game().data.layout, LAYOUT);
+        assert.equal(game().data.turn, "X");
+    });
+});
+
+test("a delta that touches the layout drops the held copy, so the next keyframe carries it", () => {
+    withFakeSocket(() => {
+        const {ws, socket} = openHandler();
+        deliver(socket, keyframeMessage(true));
+
+        deliver(socket, JSON.stringify({
+            id: "g1", op: "update", ts: "2026-10-01T00:00:01.000Z", type: "game",
+            updated: {"data.layout.grid.cols": 6},
+        }));
+        ws.send({action: "refresh"});
+
+        assert.equal(sentActions(socket).at(-1).layoutHash, undefined,
+            "a client whose layout was edited still claimed to hold the old one");
+    });
+});
+
+test("a delta elsewhere keeps the held layout", () => {
+    withFakeSocket(() => {
+        const {ws, socket} = openHandler();
+        deliver(socket, keyframeMessage(true));
+
+        deliver(socket, JSON.stringify({
+            id: "g1", op: "update", ts: "2026-10-01T00:00:01.000Z", type: "game",
+            updated: {"data.turn": "O"},
+        }));
+        ws.send({action: "refresh"});
+
+        assert.equal(sentActions(socket).at(-1).layoutHash, "hash-1");
+    });
+});
+
+test("a keyframe that leaves out a layout the client does not hold asks again for the whole game", () => {
+    withFakeSocket(() => {
+        const {socket} = openHandler();
+        deliver(socket, keyframeMessage(false, "hash-unknown"));
+
+        const sent = sentActions(socket);
+        assert.equal(sent.at(-1)?.action, "refresh");
+        assert.equal(sent.at(-1)?.layoutHash, undefined);
+    });
+});
