@@ -239,6 +239,13 @@ client-supplied `userId` — `kick` is the reference implementation.
 Sessions are one-per-user: `sessionRepo.New` returns the existing session for a `userId` rather than
 creating a second one (unique index on `userId`).
 
+**A user holds at most one WebSocket** (Boss's rule). When a socket is bound to a session (`login` or
+`reconnect` sets its `sessionId`), every other socket bound to that session is closed with close code
+`4001`, and the newer socket keeps it. A client closed with `4001` must not redial — the session moved
+on purpose, and redialling would kick the newer socket back. A socket with no session is closed with
+`4002` once `INDRI_WS_LOGIN_TIMEOUT` passes (restarted if the socket is ever unbound); the client
+redials on its next send. Both rules live in `internal/transport/ws`.
+
 ### Data model
 
 Collections (MongoDB) or tables (SQL): `game`/`games`, `user`/`users`, `session`/`sessions`. Models live in

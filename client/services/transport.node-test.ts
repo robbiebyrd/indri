@@ -194,6 +194,23 @@ test("onClose reports a remote close with a reason — the signal a supervisor f
     });
 });
 
+// The supervisor decides on the code, not the text: a superseded socket must
+// not be redialled, and only the code says a close was that.
+test("onClose hands over the server's close code", () => {
+    withFakeSocket((latest) => {
+        const transport = new WebSocketTransport();
+        void transport.connect("ws://test");
+        latest().open();
+
+        const codes: (number | undefined)[] = [];
+        transport.onClose((_reason, code) => codes.push(code));
+
+        latest().remoteClose(4001, "the session moved to a newer connection");
+
+        assert.deepEqual(codes, [4001]);
+    });
+});
+
 // Without this, a supervisor tearing a channel down during a switch would see
 // its own close as a failure and immediately fail over again.
 test("close() by the owner does NOT fire onClose", () => {

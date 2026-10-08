@@ -32,8 +32,13 @@ type Transport struct {
 	writeWait      time.Duration
 	pongWait       time.Duration
 	pingPeriod     time.Duration
+	loginTimeout   time.Duration
 	maxMessageSize int64
 	bufferSize     int
+
+	// bindMu serialises binding sockets to sessions, so two sockets binding
+	// to one session at once cannot each close the other; see session.go.
+	bindMu sync.Mutex
 }
 
 // conn is one WebSocket connection: per-connection keys and a buffered,
@@ -42,17 +47,27 @@ type Transport struct {
 type conn struct {
 	*transport.BufferedConn[[]byte]
 
+	t  *Transport
 	ws *websocket.Conn
 
-	// closed is closed by the first Close, so the connection's run notices a
+	// closed is closed by the first close, so the connection's run notices a
 	// server-side close (a kick, a shutdown) without waiting for the socket.
-	closed    chan struct{}
-	closeOnce sync.Once
+	// closeCode and closeReason are what that first close sends the client.
+	closed      chan struct{}
+	closeOnce   sync.Once
+	closeCode   websocket.StatusCode
+	closeReason string
+
+	// deadline closes the socket if it is still bound to no session when it
+	// fires; see session.go.
+	mu       sync.Mutex
+	deadline *time.Timer
 }
 
-func newConn(ws *websocket.Conn, bufferSize int) *conn {
+func newConn(t *Transport, ws *websocket.Conn) *conn {
 	return &conn{
-		BufferedConn: transport.NewBufferedConn[[]byte]("", bufferSize),
+		BufferedConn: transport.NewBufferedConn[[]byte]("", t.bufferSize),
+		t:            t,
 		ws:           ws,
 		closed:       make(chan struct{}),
 	}
@@ -61,10 +76,18 @@ func newConn(ws *websocket.Conn, bufferSize int) *conn {
 // Close stops the connection taking new messages; what is already queued is
 // still written, then the close frame.
 func (c *conn) Close() error {
-	err := c.BufferedConn.Close()
-	c.closeOnce.Do(func() { close(c.closed) })
+	return c.closeWith(websocket.StatusNormalClosure, "")
+}
 
-	return err
+// closeWith is Close, sending the client code and reason in the close frame.
+// Only the first close of a connection decides them.
+func (c *conn) closeWith(code websocket.StatusCode, reason string) error {
+	c.closeOnce.Do(func() {
+		c.closeCode, c.closeReason = code, reason
+		close(c.closed)
+	})
+
+	return c.BufferedConn.Close()
 }
 
 // New builds a WebSocket transport configured from the environment (timeouts,
@@ -78,6 +101,7 @@ func New() *Transport {
 		writeWait:      time.Duration(vars.WSWriteTimeout) * time.Second,
 		pongWait:       time.Duration(vars.WSPongTimeoutSeconds) * time.Second,
 		pingPeriod:     time.Duration(vars.WSPingPeriodSeconds) * time.Second,
+		loginTimeout:   time.Duration(vars.WSLoginTimeoutSeconds) * time.Second,
 		maxMessageSize: int64(vars.WSMaxMessageSizeBytes),
 		bufferSize:     vars.WSMessageBufferSize,
 	}
@@ -129,7 +153,7 @@ func (t *Transport) serve(w http.ResponseWriter, r *http.Request) {
 	// bytes would let one small frame inflate to any size.
 	ws.SetReadLimit(t.maxMessageSize)
 
-	c := newConn(ws, t.bufferSize)
+	c := newConn(t, ws)
 
 	t.run(r.Context(), c)
 }
@@ -147,6 +171,9 @@ func (t *Transport) run(ctx context.Context, c *conn) {
 	defer cancel()
 
 	t.AddSink(c)
+	c.startLoginDeadline()
+
+	defer c.stopLoginDeadline()
 
 	if t.handlers.Connect != nil {
 		t.handlers.Connect(c)
@@ -227,7 +254,7 @@ func (t *Transport) write(ctx context.Context, c *conn, flushed chan<- struct{})
 
 	close(flushed)
 
-	_ = c.ws.Close(websocket.StatusNormalClosure, "")
+	_ = c.ws.Close(c.closeCode, c.closeReason)
 }
 
 // ping keeps an idle connection alive and notices a dead one: a ping that is

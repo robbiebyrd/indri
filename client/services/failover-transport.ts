@@ -10,7 +10,7 @@
 //
 // Exactly one channel is live at a time. Candidates are probed in preference
 // order; the first that comes up wins and is kept until it dies.
-import {Handlers, connectWithTimeout} from "./transport.ts"
+import {CLOSE_LOGIN_DEADLINE, CLOSE_SUPERSEDED, Handlers, connectWithTimeout} from "./transport.ts"
 
 import type {ClientTransport} from "./transport.ts"
 
@@ -61,7 +61,7 @@ export class FailoverTransport implements ClientTransport {
 
     private readonly messageHandlers = new Handlers<(data: string) => void>()
     private readonly openHandlers = new Handlers<() => void>()
-    private readonly closeHandlers = new Handlers<(reason: string) => void>()
+    private readonly closeHandlers = new Handlers<(reason: string, code?: number) => void>()
 
     private pending?: {resolve: () => void, reject: (err: Error) => void} = undefined
     private backoffTimer?: ReturnType<typeof setTimeout> = undefined
@@ -74,6 +74,12 @@ export class FailoverTransport implements ClientTransport {
     // nothing probing.
     private wakeLost?: () => void = undefined
     private lostLatch = false
+
+    // Set when the server closed the channel at its login deadline: the loop
+    // then waits for the app's next send instead of redialling a socket that
+    // would only be closed again. See CLOSE_LOGIN_DEADLINE.
+    private parked = false
+    private wakeParked?: () => void = undefined
 
     constructor(candidates: () => ClientTransport[], opts: FailoverOptions) {
         this.candidates = candidates
@@ -116,6 +122,9 @@ export class FailoverTransport implements ClientTransport {
         }
 
         this.queue.push(message)
+
+        // Something to say is what a parked supervisor was waiting for.
+        this.unpark()
     }
 
     onMessage(handler: (data: string) => void): () => void {
@@ -126,7 +135,7 @@ export class FailoverTransport implements ClientTransport {
         return this.openHandlers.add(handler)
     }
 
-    onClose(handler: (reason: string) => void): () => void {
+    onClose(handler: (reason: string, code?: number) => void): () => void {
         return this.closeHandlers.add(handler)
     }
 
@@ -144,8 +153,9 @@ export class FailoverTransport implements ClientTransport {
         this.wakeBackoff = undefined
 
         // And a loop sitting on a healthy channel, which would otherwise wait
-        // for a close that is never coming.
+        // for a close that is never coming, or parked for a send.
         this.signalLost()
+        this.unpark()
 
         this.release()
         this.queue = []
@@ -179,6 +189,16 @@ export class FailoverTransport implements ClientTransport {
 
                 if (adopted >= 0) {
                     await this.untilLost()
+
+                    if (this.parked) {
+                        await this.untilSend()
+
+                        // A fresh start after a pause, from the most
+                        // preferred channel.
+                        start = 0
+
+                        continue
+                    }
 
                     // Resume AFTER the channel that just died rather than from
                     // the top: a preferred channel that just failed is the
@@ -254,7 +274,7 @@ export class FailoverTransport implements ClientTransport {
         // on open, so subscribing to both would emit twice per connect.
         this.detach = [
             channel.onMessage((data) => this.messageHandlers.emit(data)),
-            channel.onClose((reason) => this.lost(channel, reason)),
+            channel.onClose((reason, code) => this.lost(channel, reason, code)),
         ]
 
         this.settle(true, "")
@@ -267,8 +287,12 @@ export class FailoverTransport implements ClientTransport {
         this.flushQueue()
     }
 
-    /** The active channel died. Wake the loop so it switches. */
-    private lost(channel: ClientTransport, reason: string): void {
+    /**
+     * The active channel died. Wake the loop so it switches — unless the
+     * server closed it on purpose: superseded stops the supervisor for good,
+     * and a login deadline parks it until the next send.
+     */
+    private lost(channel: ClientTransport, reason: string, code?: number): void {
         if (this.active !== channel) {
             // A close from a channel already switched away from. Its
             // server-side connection is gone; nothing here still cares.
@@ -278,9 +302,50 @@ export class FailoverTransport implements ClientTransport {
         this.release()
         this.dropQueue("the channel changed")
 
-        this.closeHandlers.emit(`failover: ${channel.name} closed (${reason})`)
+        if (code === CLOSE_SUPERSEDED) {
+            // Redialling would send `reconnect` and take the session back from
+            // the newer connection, which would then do the same: two tabs of
+            // one user evicting each other forever.
+            this.closed = true
+            console.warn("failover: the session moved to another connection; not reconnecting")
+            this.closeHandlers.emit(
+                `failover: ${channel.name} closed because the session moved to another connection (${reason})`,
+                code,
+            )
+            this.settle(false, "failover: the session moved to another connection")
+            this.signalLost()
+
+            return
+        }
+
+        if (code === CLOSE_LOGIN_DEADLINE) {
+            this.parked = true
+        }
+
+        this.closeHandlers.emit(`failover: ${channel.name} closed (${reason})`, code)
 
         this.signalLost()
+    }
+
+    /** Resolves on the next send, or at once if not parked or already closed. */
+    private untilSend(): Promise<void> {
+        if (!this.parked || this.closed) {
+            this.parked = false
+
+            return Promise.resolve()
+        }
+
+        return new Promise<void>((resolve) => {
+            this.wakeParked = resolve
+        })
+    }
+
+    private unpark(): void {
+        this.parked = false
+
+        const wake = this.wakeParked
+        this.wakeParked = undefined
+        wake?.()
     }
 
     /** Resolves when the active channel is lost, or immediately if it already was. */

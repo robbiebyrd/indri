@@ -373,6 +373,19 @@ Unauthenticated calls to `create`, `join`, and `inquire` instead receive
 
 Sent before the server closes a connection it still owns (for example, a kick).
 
+### WebSocket close codes
+
+Two WebSocket closes are policy, not failures, and carry codes of their own:
+
+| Code | Meaning | What the client does |
+|---|---|---|
+| `4001` | **Superseded.** A user holds one WebSocket at a time; a newer socket was bound to the same session (`login` or `reconnect`), and this one lost it. | Stop. Do not redial: a `reconnect` would take the session back, and two tabs of one user would evict each other forever. Tell the player the session moved to another connection. |
+| `4002` | **Login deadline.** The socket was bound to no session `INDRI_WS_LOGIN_TIMEOUT` seconds (default 10) after it opened. | Redial when there is something to send — the login itself — rather than at once. |
+
+The reference client's failover supervisor (`client/services/failover-transport.ts`) does both, and
+reports the code through `onClose`. A player is not marked offline when one of their connections ends
+while another is still bound to their session.
+
 ---
 
 ## Client-side message classification

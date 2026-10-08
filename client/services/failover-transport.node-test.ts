@@ -7,6 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {FailoverTransport} from "./failover-transport.ts";
+import {CLOSE_LOGIN_DEADLINE, CLOSE_SUPERSEDED} from "./transport.ts";
 
 import type {ClientTransport} from "./transport.ts";
 
@@ -22,7 +23,7 @@ class FakeChannel implements ClientTransport {
     private pending?: {resolve: () => void, reject: (err: Error) => void};
     private readonly messageHandlers = new Set<(data: string) => void>();
     private readonly openHandlers = new Set<() => void>();
-    private readonly closeHandlers = new Set<(reason: string) => void>();
+    private readonly closeHandlers = new Set<(reason: string, code?: number) => void>();
 
     readonly name: string;
     private readonly mode: Mode;
@@ -66,7 +67,7 @@ class FakeChannel implements ClientTransport {
         return () => {this.openHandlers.delete(handler)};
     }
 
-    onClose(handler: (reason: string) => void): () => void {
+    onClose(handler: (reason: string, code?: number) => void): () => void {
         this.closeHandlers.add(handler);
         return () => {this.closeHandlers.delete(handler)};
     }
@@ -99,10 +100,10 @@ class FakeChannel implements ClientTransport {
         pending.reject(new Error(reason));
     }
 
-    /** Test-only: an established channel dies. */
-    die(reason = "gone"): void {
+    /** Test-only: an established channel dies, with the server's close code if it sent one. */
+    die(reason = "gone", code?: number): void {
         for (const handler of [...this.closeHandlers]) {
-            handler(reason);
+            handler(reason, code);
         }
     }
 
@@ -402,6 +403,58 @@ test("losing the active channel is reported through onClose", async () => {
 
     await waitFor(() => reasons.length === 1, "the close to be reported");
     assert.match(reasons[0], /network gone/);
+
+    failover.close();
+});
+
+// A user holds one WebSocket: the server closes the older one with
+// CLOSE_SUPERSEDED when a newer one takes the session. Redialling would send
+// `reconnect` and take the session straight back, and two tabs of one user
+// would then evict each other forever. So the supervisor stops, and says why.
+test("a channel closed as superseded is not redialled, and the close says why", async () => {
+    const first = new FakeChannel("first");
+    const second = new FakeChannel("second");
+    const failover = new FailoverTransport(() => [first, second], OPTS);
+
+    const closes: {reason: string, code?: number}[] = [];
+    failover.onClose((reason, code) => closes.push({reason, code}));
+
+    await failover.connect("ws://test");
+
+    await quietly(async () => {
+        first.die("websocket closed (4001)", CLOSE_SUPERSEDED);
+
+        await waitFor(() => closes.length === 1, "the close to be reported");
+        await new Promise((resolve) => setTimeout(resolve, OPTS.backoffMs * 5));
+    });
+
+    assert.equal(first.connects + second.connects, 1, "a superseded channel was redialled");
+    assert.equal(closes[0].code, CLOSE_SUPERSEDED);
+    assert.match(closes[0].reason, /another connection/);
+
+    failover.close();
+});
+
+// An anonymous socket the server closed at its login deadline is not redialled
+// straight away — that would hold a socket open on the login screen and have
+// it closed again every deadline — but on the app's next send, which is the
+// login itself.
+test("a channel closed at the login deadline parks until the next send", async () => {
+    const channel = new FakeChannel("ws");
+    const failover = new FailoverTransport(() => [channel], OPTS);
+
+    await failover.connect("ws://test");
+
+    channel.die("websocket closed (4002)", CLOSE_LOGIN_DEADLINE);
+    await new Promise((resolve) => setTimeout(resolve, OPTS.backoffMs * 5));
+
+    assert.equal(channel.connects, 1, "a channel closed at the login deadline was redialled with nothing to send");
+
+    failover.send({action: "login"});
+
+    await waitFor(() => channel.sent.length === 1, "the send to go out on a redialled channel");
+    assert.equal(channel.connects, 2);
+    assert.deepEqual(channel.sent, [{action: "login"}]);
 
     failover.close();
 });

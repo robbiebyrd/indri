@@ -55,8 +55,36 @@ func HandleDisconnect(s transport.Conn, t transport.Transport, gs *gameService.S
 		return
 	}
 
+	// One connection ending is not the player going offline while their
+	// session is still connected over another: a newer WebSocket of theirs
+	// replaced this one, or they failed over to another transport.
+	if connectedElsewhere(s, t, *sessionId) {
+		return
+	}
+
 	err = gs.DisconnectPlayer(*session.GameID, *session.SlotID, *session.UserID)
 	if err != nil {
 		log.Printf("could not set player as disconnected: %v\n", err)
 	}
+}
+
+// connectedElsewhere reports whether a connection other than ended is open and
+// bound to sessionId, on any of t's transports.
+func connectedElsewhere(ended transport.Conn, t transport.Transport, sessionId string) bool {
+	conns, err := t.Conns()
+	if err != nil {
+		return false
+	}
+
+	for _, c := range conns {
+		if c == ended || c.IsClosed() {
+			continue
+		}
+
+		if bound, ok := c.Get(transport.SessionIDKey); ok && bound == sessionId {
+			return true
+		}
+	}
+
+	return false
 }

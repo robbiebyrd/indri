@@ -22,6 +22,18 @@
  * two rules that matter: a handler may unsubscribe during its own
  * notification, and a throwing handler must not cost the next one its event.
  */
+/**
+ * Close codes the server ends a WebSocket with, beyond the standard ones
+ * (internal/transport/ws/session.go). They are policy, not failures, and a
+ * supervisor must not treat them as a dead channel to redial at once.
+ */
+
+/** A newer connection of the same user took the session. Do not redial. */
+export const CLOSE_SUPERSEDED = 4001
+
+/** The socket did not log in before its deadline. Redial when next sending. */
+export const CLOSE_LOGIN_DEADLINE = 4002
+
 export class Handlers<T extends (...args: never[]) => void> {
     private readonly handlers = new Set<T>()
 
@@ -84,8 +96,11 @@ export interface ClientTransport {
      * A `close()` by the owner does NOT fire it. Otherwise a supervisor
      * tearing a channel down during a switch would read its own teardown as a
      * failure and immediately switch again.
+     *
+     * `code` is the close code the server sent, where the channel carries one
+     * (only WebSocket does); see CLOSE_SUPERSEDED and CLOSE_LOGIN_DEADLINE.
      */
-    onClose(handler: (reason: string) => void): () => void
+    onClose(handler: (reason: string, code?: number) => void): () => void
 
     close(): void
 }
@@ -145,7 +160,7 @@ export class WebSocketTransport implements ClientTransport {
     // reconnect and can be registered before `connect` is ever called.
     private readonly messageHandlers = new Handlers<(data: string) => void>()
     private readonly openHandlers = new Handlers<() => void>()
-    private readonly closeHandlers = new Handlers<(reason: string) => void>()
+    private readonly closeHandlers = new Handlers<(reason: string, code?: number) => void>()
 
     // Settles the in-flight connect exactly once. Cleared the moment it
     // settles, which is also how a later close knows the open already
@@ -185,7 +200,7 @@ export class WebSocketTransport implements ClientTransport {
                 return
             }
 
-            this.closeHandlers.emit(reason)
+            this.closeHandlers.emit(reason, e.code)
         }
 
         return connected
@@ -228,7 +243,7 @@ export class WebSocketTransport implements ClientTransport {
         return this.openHandlers.add(handler)
     }
 
-    onClose(handler: (reason: string) => void): () => void {
+    onClose(handler: (reason: string, code?: number) => void): () => void {
         return this.closeHandlers.add(handler)
     }
 

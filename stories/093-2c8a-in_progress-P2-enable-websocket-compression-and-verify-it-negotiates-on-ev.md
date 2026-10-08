@@ -5,7 +5,7 @@ status: in_progress
 priority: P2
 type: feature
 created: "2026-10-04T18:33:52.000Z"
-updated: "2026-10-04T19:33:42.000Z"
+updated: "2026-10-08T23:07:20.000Z"
 dependencies: ["083-40ee"]
 ---
 
@@ -40,4 +40,10 @@ Story 083 found no compression anywhere: melody.New() leaves gorilla's EnableCom
 ### 2026-10-04T19:33:42.000Z - MEASURED. Same nine-move game on the wire: 1926 bytes uncompressed; 1390 with gorilla's per-message deflate; 273 now (-86%), in line with 083's projection.
 
 ### 2026-10-04T19:33:42.000Z - PLATFORMS. Web: Chrome 154 against the new build negotiates "permessage-deflate" (context takeover) and a refresh round-trips. iOS and Android: still NOT checked; they need a device or simulator build, left for Boss. The fallback criterion waits on those results.
+
+### 2026-10-08T23:07:20.000Z - SECURITY. The background review of 3b13444 flagged resource exhaustion, confirmed by measurement: context takeover costs about 856 KB per connection (coder's fixed 1.2 MB-class flate.Writer and 32 KB window) against 62 KB uncompressed, over 200 connections in one process, and nothing bounded unauthenticated upgrades. Boss's rules: a user holds one WebSocket, the newer replacing the older; an anonymous socket gets a login deadline; a replaced client stops and says so; a deadline-closed client redials on its next send.
+
+### 2026-10-08T23:07:20.000Z - IMPLEMENTED. internal/transport/ws/session.go: binding a socket's sessionId (login, reconnect) closes every other socket bound to that session with 4001 (StatusSuperseded), serialised by one transport mutex so concurrent bindings leave exactly one, and a closed socket binds nothing. A socket bound to no session is closed with 4002 (StatusLoginDeadline) after INDRI_WS_LOGIN_TIMEOUT (new, default 10 s), restarted on unbind; the deadline re-checks under the same mutex. entrypoints.HandleDisconnect no longer marks a player offline while another connection is bound to their session (the replaced socket's disconnect would otherwise show them offline on the newer one; the same bug existed for a dead failover socket timing out). Client: ClientTransport.onClose carries the close code; FailoverTransport stops for good on 4001 (warns, reports the code and "the session moved to another connection") and parks on 4002 until the next send. No UI shows the 4001 reason yet; it reaches MessageHandler through onClose. Docs: PROTOCOL close-code table, ARCHITECTURE, CLAUDE.md, .env.example.
+
+### 2026-10-08T23:07:20.000Z - VERIFY. ws: 8 new tests (replace, rebind keeps, concurrent bindings leave one, replaced socket acts on nothing more, in-flight bind on a replaced socket refused, deadline closes anonymous, bound outlives it, unbind restarts it), -race -count=10 green. Mutations killed: no eviction, no bindMu, self-eviction, closed socket can bind, no deadline at connect, no restart on unbind. Equivalent mutant: dropping the deadline stop on bind (the callback re-checks). A read-loop "closed socket" guard was removed as redundant (coder discards data frames once the close frame is out; the test pins it). entrypoints: 2 tests over real services, red then green. Client: 3 new node tests, all three branch mutants killed; pnpm test 420/420, typecheck clean, lint 4 pre-existing warnings in untouched files. go test -race ./... green with PostgreSQL.
 

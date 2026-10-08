@@ -88,7 +88,7 @@ streams behave identically rather than approximately:
 
 | Adapter | Route | Notes |
 |---|---|---|
-| `ws` | `/ws` | WebSocket over coder/websocket, on the shared `Registry` and `BufferedConn`. The only non-test importer of the library. Origin check, ping/pong, permessage-deflate with context takeover, and a read limit counted on the inflated message. |
+| `ws` | `/ws` | WebSocket over coder/websocket, on the shared `Registry` and `BufferedConn`. The only non-test importer of the library. Origin check, ping/pong, permessage-deflate with context takeover, a read limit counted on the inflated message, one socket per user (a newer one supersedes, close `4001`) and a login deadline for anonymous sockets (close `4002`), in `session.go`. |
 | `graphql` | `/graphql` | gqlgen. Typed mutations → `router.Dispatch` (auth from the `Authorization` header); a `gameUpdates` subscription (graphql-transport-ws, auth from `connection_init`) whose push conn is a channel-backed `Conn` fed by the existing broadcast. Dynamic data uses a `JSON` scalar (`json.RawMessage`). |
 | `sse` | `/events` | Server-Sent Events, push-only. Authenticated at the handshake from `Authorization` or a `token` query parameter — the browser `EventSource` API cannot set headers. Clears the server's `WriteTimeout` per stream (unlike a WebSocket upgrade, SSE never hijacks the connection), emits a `:ping` comment while idle, and frames each delta as `data:`. |
 | `rest` | `/api/<action>` | The inbound half for SSE clients: one POST route per action, arguments validated then dispatched to `router.Dispatch` (auth from the `Authorization` header). Holds no connections — its `Registry` stays empty, so it contributes routes and nothing to fan-out. |
