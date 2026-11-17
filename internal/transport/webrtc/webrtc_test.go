@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -61,6 +62,21 @@ func newTestTransport(t *testing.T, sessions SessionLookup) *Transport {
 	return tr
 }
 
+// loopbackClientAPI builds the in-process client's pion API with ICE held to
+// the loopback interface. The default API gathers a host candidate on every
+// interface the machine has, and the server answers with one per interface
+// too; on a host with dozens of bridges and veths (a Docker or CI runner) the
+// resulting candidate-pair checks take longer than testTimeout under -race.
+// Loopback is the only path an in-process peer needs.
+func loopbackClientAPI() *pion.API {
+	se := pion.SettingEngine{}
+	se.SetIPFilter(func(ip net.IP) bool { return ip.IsLoopback() })
+	se.SetIncludeLoopbackCandidate(true)
+	se.SetNetworkTypes([]pion.NetworkType{pion.NetworkTypeUDP4})
+
+	return pion.NewAPI(pion.WithSettingEngine(se))
+}
+
 func newTestServer(t *testing.T, tr *Transport) string {
 	t.Helper()
 
@@ -80,7 +96,7 @@ func newTestServer(t *testing.T, tr *Transport) string {
 func clientHandshake(t *testing.T, url, bearer string, labels ...string) (*pion.PeerConnection, map[string]*pion.DataChannel) {
 	t.Helper()
 
-	clientPC, err := pion.NewPeerConnection(pion.Configuration{})
+	clientPC, err := loopbackClientAPI().NewPeerConnection(pion.Configuration{})
 	if err != nil {
 		t.Fatalf("client NewPeerConnection: %v", err)
 	}
@@ -330,7 +346,7 @@ func TestTransport_PendingPeerTTLClosesUnconnectedPeer(t *testing.T) {
 
 	url := newTestServer(t, tr)
 
-	clientPC, err := pion.NewPeerConnection(pion.Configuration{})
+	clientPC, err := loopbackClientAPI().NewPeerConnection(pion.Configuration{})
 	if err != nil {
 		t.Fatalf("client NewPeerConnection: %v", err)
 	}
@@ -389,7 +405,7 @@ func TestTransport_ExceedingMaxPeersReturns503WithoutAllocating(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	clientPC1, err := pion.NewPeerConnection(pion.Configuration{})
+	clientPC1, err := loopbackClientAPI().NewPeerConnection(pion.Configuration{})
 	if err != nil {
 		t.Fatalf("client1 NewPeerConnection: %v", err)
 	}
@@ -422,7 +438,7 @@ func TestTransport_ExceedingMaxPeersReturns503WithoutAllocating(t *testing.T) {
 		t.Fatalf("peerCount after first offer = %d, want 1", got)
 	}
 
-	clientPC2, err := pion.NewPeerConnection(pion.Configuration{})
+	clientPC2, err := loopbackClientAPI().NewPeerConnection(pion.Configuration{})
 	if err != nil {
 		t.Fatalf("client2 NewPeerConnection: %v", err)
 	}

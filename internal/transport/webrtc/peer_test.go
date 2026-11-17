@@ -246,7 +246,7 @@ func TestAnswerOffer_SDPContainsCandidates(t *testing.T) {
 
 	// A bare pion PeerConnection with default settings plays the client --
 	// exactly what a real browser peer looks like from this side.
-	clientPC, err := pion.NewPeerConnection(pion.Configuration{})
+	clientPC, err := loopbackClientAPI().NewPeerConnection(pion.Configuration{})
 	if err != nil {
 		t.Fatalf("client NewPeerConnection: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestAnswerOffer_HonorsContextDeadline(t *testing.T) {
 	gatherCtx, gatherCancel := context.WithTimeout(context.Background(), testTimeout)
 	defer gatherCancel()
 
-	clientPC, err := pion.NewPeerConnection(pion.Configuration{})
+	clientPC, err := loopbackClientAPI().NewPeerConnection(pion.Configuration{})
 	if err != nil {
 		t.Fatalf("client NewPeerConnection: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestAnswerOffer_ClosedMidGatherReturnsError(t *testing.T) {
 	gatherCtx, gatherCancel := context.WithTimeout(context.Background(), testTimeout)
 	defer gatherCancel()
 
-	clientPC, err := pion.NewPeerConnection(pion.Configuration{})
+	clientPC, err := loopbackClientAPI().NewPeerConnection(pion.Configuration{})
 	if err != nil {
 		t.Fatalf("client NewPeerConnection: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestAnswerOffer_DataChannelMessagesFlowBothWays(t *testing.T) {
 
 	// The client is a bare pion PeerConnection with default settings --
 	// exactly what a real browser peer looks like from this side.
-	clientPC, err := pion.NewPeerConnection(pion.Configuration{})
+	clientPC, err := loopbackClientAPI().NewPeerConnection(pion.Configuration{})
 	if err != nil {
 		t.Fatalf("client NewPeerConnection: %v", err)
 	}
