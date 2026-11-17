@@ -519,8 +519,11 @@ func TestSend_MaximumFanOutAtEveryDepthStopsOnTheSharedBudget(t *testing.T) {
 	// Short on purpose. The budget is what the tree is bounded by, so the test
 	// costs whatever it is set to; the production 100ms would buy nothing here
 	// but a slower test. The property under test is the derivation, which does
-	// not depend on the number.
-	const budget = 5 * time.Millisecond
+	// not depend on the number — but the budget must outlast the root's own
+	// first round of sends, or no hop ever gets to descend and the depth check
+	// below fails. 5ms and 20ms did not under -race on a 16-core Linux host
+	// (every hop stopped at depth 1); 50ms does.
+	const budget = 50 * time.Millisecond
 
 	// The dispatches that outlive the budget fail with a deadline, and each logs
 	// its correlation id. Expected output, so it is captured and then checked
