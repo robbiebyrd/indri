@@ -20,7 +20,14 @@ func Serve(ctx context.Context, i *injector.Injector) error {
 	// endpoint, the SSE stream and the REST actions. Browsers need the CORS
 	// response headers to use any of the HTTP transports cross-origin, and a
 	// rejected origin is refused here rather than separately by each transport.
-	handler := transport.OriginPolicyFromEnv().Middleware(mux)
+	origins := transport.OriginPolicyFromEnv()
+	if origins.Open() {
+		log.Printf("WARNING: origin policy %s: any web page a visitor opens can reach this server through their browser", origins)
+	} else {
+		log.Printf("origin policy %s", origins)
+	}
+
+	handler := origins.Middleware(mux)
 
 	server := &http.Server{
 		Addr:              i.EnvVars.ListenAddress + ":" + strconv.Itoa(i.EnvVars.ListenPort),

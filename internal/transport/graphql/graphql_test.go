@@ -33,23 +33,33 @@ import (
 // browser clears the CORS middleware, sends its mutations happily, and then
 // silently never receives a delta.
 func TestRegister_SubscriptionUpgradeUsesTheOriginPolicy(t *testing.T) {
+	const list = "http://localhost:8081"
+
 	cases := map[string]struct {
+		policy     string
 		origin     string
 		sameOrigin bool
 		allowed    bool
 	}{
-		"allowlisted cross origin": {origin: "http://localhost:8081", allowed: true},
+		"allowlisted cross origin": {policy: list, origin: "http://localhost:8081", allowed: true},
 		// With a list, the server's own origin gets no pass (a DNS-rebinding
 		// page presents it); it must be listed like any other.
-		"same origin, unlisted": {sameOrigin: true, allowed: false},
-		"no origin (native)":    {allowed: true},
-		"disallowed origin":     {origin: "http://evil.example"},
+		"same origin, unlisted": {policy: list, sameOrigin: true, allowed: false},
+		"no origin (native)":    {policy: list, allowed: true},
+		"disallowed origin":     {policy: list, origin: "http://evil.example"},
+		// The default: with no list, no browser origin is admitted, its own
+		// included. Native clients, which send none, still are.
+		"no list, cross origin":       {policy: "", origin: "http://localhost:8081"},
+		"no list, same origin":        {policy: "", sameOrigin: true},
+		"no list, no origin (native)": {policy: "", allowed: true},
+		// Open mode is an explicit opt-in.
+		`"*", any cross origin`: {policy: "*", origin: "http://evil.example", allowed: true},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			tr := New(nil)
-			tr.origins = transport.NewOriginPolicy("http://localhost:8081")
+			tr.origins = transport.NewOriginPolicy(tc.policy)
 
 			mux := http.NewServeMux()
 			tr.Register(mux)

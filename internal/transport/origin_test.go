@@ -6,18 +6,72 @@ import (
 	"testing"
 )
 
-// Without an allowlist every origin may connect. Connections carry no ambient
-// credentials — no cookies; a client authenticates with login or a token it
-// holds — so a foreign page cannot act as a player by opening one. (It can
-// still reach a server on localhost or a private network through a visitor's
-// browser; .env.example says so.)
-func TestOriginPolicyAllows_WithoutAListAcceptsEveryOrigin(t *testing.T) {
-	policy := NewOriginPolicy("")
+// Without an allowlist no browser origin may connect, the server's own
+// included: an open default lets any page a visitor opens reach a server on
+// their localhost or private network through their browser. Requests with no
+// Origin (native and CLI clients) are not subject to that, and still pass.
+func TestOriginPolicyAllows_WithoutAListRefusesEveryBrowserOrigin(t *testing.T) {
+	policy := NewOriginPolicy("  ")
 
-	for _, origin := range []string{"", "http://evil.example", "http://localhost:5004", "http://%zz"} {
-		if !policy.Allows(request(origin, "localhost:5004")) {
-			t.Errorf("Allows(origin=%q) with no allowlist = false, want true", origin)
+	if !policy.Allows(request("", "localhost:5004")) {
+		t.Error("Allows(no origin) with no allowlist = false, want true")
+	}
+
+	for _, origin := range []string{"http://evil.example", "http://localhost:5004", "http://localhost:8081", "http://%zz"} {
+		if policy.Allows(request(origin, "localhost:5004")) {
+			t.Errorf("Allows(origin=%q) with no allowlist = true, want false", origin)
 		}
+	}
+}
+
+// "*" is the explicit opt-in to open mode: every origin may connect. It wins
+// over any other entry in the same list, since a list that admits everything
+// and also names some origins can only mean everything.
+func TestOriginPolicyAllows_StarAcceptsEveryOrigin(t *testing.T) {
+	for _, list := range []string{"*", " * ", "http://localhost:8081, *"} {
+		policy := NewOriginPolicy(list)
+
+		for _, origin := range []string{"", "http://evil.example", "http://localhost:5004", "http://%zz"} {
+			if !policy.Allows(request(origin, "localhost:5004")) {
+				t.Errorf("Allows(origin=%q) with list %q = false, want true", origin, list)
+			}
+		}
+	}
+}
+
+// Boot logs the policy in force, so an operator can see from the log alone
+// whether browsers are refused, listed or all admitted — and open mode, the
+// one with a known risk, says so.
+func TestOriginPolicyString_NamesThePolicyInForce(t *testing.T) {
+	cases := map[string]struct {
+		list     string
+		want     string
+		wantOpen bool
+	}{
+		"empty": {list: "", want: "closed: no browser origin is allowed; set INDRI_ALLOWED_ORIGINS to list some"},
+		"list": {
+			list: "http://localhost:8081, http://localhost:19006",
+			want: "allowlist: http://localhost:19006, http://localhost:8081",
+		},
+		"star": {
+			list:     "*",
+			want:     "open: every browser origin is allowed (INDRI_ALLOWED_ORIGINS=\"*\")",
+			wantOpen: true,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			policy := NewOriginPolicy(tc.list)
+
+			if got := policy.String(); got != tc.want {
+				t.Errorf("String() = %q, want %q", got, tc.want)
+			}
+
+			if got := policy.Open(); got != tc.wantOpen {
+				t.Errorf("Open() = %v, want %v", got, tc.wantOpen)
+			}
+		})
 	}
 }
 

@@ -33,13 +33,14 @@ GraphQL name the action in the route or the mutation instead, so their payloads 
 
 Every route is origin-checked by one shared policy (`transport.OriginPolicy`, applied in
 `internal/entrypoints/http`). Requests with no `Origin` header (native apps, CLI tools,
-server-to-server) are always allowed. With `INDRI_ALLOWED_ORIGINS` empty (the default) every browser
-origin is allowed: connections carry no cookies or other ambient credentials — a client authenticates
-with `login` or a token it holds — so a foreign page that opens one can't act as a player. It can still
-reach a server on a visitor's localhost or private network, so set a list for anything not public. With
-a list set, only its origins are allowed, matched as exact strings (scheme, host and port must all
-agree); the server's own origin gets no pass, since a DNS-rebinding page presents it, so React Native's
-iOS WebSocket — which sends it — must be listed. Allowed
+server-to-server) are always allowed. With `INDRI_ALLOWED_ORIGINS` empty (the default) no browser
+origin is allowed, the server's own included. With a list set, only its origins are allowed, matched as
+exact strings (scheme, host and port must all agree); the server's own origin gets no pass, since a
+DNS-rebinding page presents it, so React Native's iOS WebSocket — which sends it — must be listed. With
+`"*"` every browser origin is allowed: connections carry no cookies or other ambient credentials — a
+client authenticates with `login` or a token it holds — so a foreign page that opens one can't act as a
+player, but it can reach a server on a visitor's localhost or private network, so open mode is an
+explicit opt-in and boot logs a warning. Allowed
 cross-origin requests get the matching CORS response headers, and preflights are answered centrally.
 
 ---

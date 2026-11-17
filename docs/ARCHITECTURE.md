@@ -352,7 +352,7 @@ server-supplied dot paths.
 | Variable | Default | Note |
 |---|---|---|
 | `INDRI_LISTEN_ADDRESS` / `INDRI_LISTEN_PORT` | `localhost` / `5002` | |
-| `INDRI_ALLOWED_ORIGINS` | `""` | Comma-separated, matched as exact strings (host *and* port; `localhost` ≠ `127.0.0.1`). Empty accepts every origin: no ambient credentials, so a foreign page can't act as a player, though any page can reach a localhost/LAN server through a visitor's browser. A list accepts only its origins plus clients with no `Origin`; list React Native iOS's own-origin. |
+| `INDRI_ALLOWED_ORIGINS` | `""` | Comma-separated, matched as exact strings (host *and* port; `localhost` ≠ `127.0.0.1`). Clients with no `Origin` are always allowed. Empty refuses every browser origin, the server's own included. A list accepts only its origins; list React Native iOS's own-origin. `"*"` accepts every origin: no ambient credentials, so a foreign page can't act as a player, though any page can reach a localhost/LAN server through a visitor's browser — so it is an opt-in, and boot logs a warning. Boot logs the policy in force either way. |
 | `INDRI_MONGO_URI` / `INDRI_MONGO_DATABASE` | `localhost` / `indri` | A replica set is not required. |
 | `INDRI_LOCK_BACKEND` | `inprocess` | Multi-instance switch: `redis` moves both the lock manager and the event bus to Redis. |
 | `INDRI_REDIS_*` | localhost:6379 | Only used in `redis` mode. |

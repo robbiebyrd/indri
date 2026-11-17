@@ -2,6 +2,7 @@ package transport
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/robbiebyrd/indri/internal/repo/env"
@@ -21,35 +22,71 @@ const (
 // shares one policy, so a browser that can open a WebSocket can also open an
 // SSE stream and POST an action.
 //
-// Without an allowlist every origin may connect. Connections carry no ambient
-// credentials — no cookies; a client authenticates with login or a token it
-// holds — so a foreign page cannot act as a player by opening one. It can still
-// reach a server on localhost or a private network through a visitor's browser,
-// which is why a deployment that cares sets INDRI_ALLOWED_ORIGINS. With an
-// allowlist, the list is the whole policy: its origins, plus requests with no
-// Origin (native and CLI clients). The server's own origin gets no pass then,
-// since a DNS-rebinding page presents exactly that; a React Native iOS client,
-// which sends it, must be listed.
+// Requests with no Origin (native and CLI clients) are always allowed. Beyond
+// that, INDRI_ALLOWED_ORIGINS is the whole policy:
+//
+//   - Empty (the default): closed. No browser origin is allowed, the server's
+//     own included. An open default would let any page a visitor opens reach
+//     a server on their localhost or private network through their browser.
+//   - A list: exactly its origins. The server's own origin gets no pass, since
+//     a DNS-rebinding page presents exactly that; a React Native iOS client,
+//     which sends it, must be listed.
+//   - "*": open. Every origin is allowed. Connections carry no ambient
+//     credentials (no cookies; a client authenticates with login or a token
+//     it holds), so a foreign page cannot act as a player — but the
+//     localhost/LAN reach above applies, which is why open is an opt-in and
+//     boot warns about it. "*" anywhere in the list wins over the rest.
 //
 // A nil *OriginPolicy is a transport built without one — a wiring bug, not a
 // configuration — and denies every cross-origin request.
 type OriginPolicy struct {
 	allowed map[string]struct{}
+	open    bool
 }
 
-// NewOriginPolicy parses a comma-separated origin allowlist (the
-// INDRI_ALLOWED_ORIGINS value). Entries are matched as exact strings: scheme,
-// host and port all have to agree.
+// openEntry is the INDRI_ALLOWED_ORIGINS entry that opts into open mode.
+const openEntry = "*"
+
 func NewOriginPolicy(allowedOrigins string) *OriginPolicy {
 	allowed := make(map[string]struct{})
 
+	policy := &OriginPolicy{allowed: allowed}
+
 	for _, o := range strings.Split(allowedOrigins, ",") {
-		if o = strings.TrimSpace(o); o != "" {
+		switch o = strings.TrimSpace(o); o {
+		case "":
+		case openEntry:
+			policy.open = true
+		default:
 			allowed[o] = struct{}{}
 		}
 	}
 
-	return &OriginPolicy{allowed: allowed}
+	return policy
+}
+
+// Open reports whether every browser origin is allowed ("*").
+func (p *OriginPolicy) Open() bool {
+	return p != nil && p.open
+}
+
+// String names the policy in force, for the boot log.
+func (p *OriginPolicy) String() string {
+	switch {
+	case p.Open():
+		return `open: every browser origin is allowed (INDRI_ALLOWED_ORIGINS="*")`
+	case p == nil || len(p.allowed) == 0:
+		return "closed: no browser origin is allowed; set INDRI_ALLOWED_ORIGINS to list some"
+	}
+
+	origins := make([]string, 0, len(p.allowed))
+	for o := range p.allowed {
+		origins = append(origins, o)
+	}
+
+	sort.Strings(origins)
+
+	return "allowlist: " + strings.Join(origins, ", ")
 }
 
 // OriginPolicyFromEnv builds the policy from INDRI_ALLOWED_ORIGINS, so every
@@ -71,7 +108,7 @@ func (p *OriginPolicy) Allows(r *http.Request) bool {
 		return false
 	}
 
-	if len(p.allowed) == 0 {
+	if p.open {
 		return true
 	}
 
