@@ -303,7 +303,11 @@ test("benchmark: reapply() cost with a 200-widget layout in game state", () => {
 
     // Deliberately generous: this catches a catastrophic regression (an
     // accidental O(n^2) in the hot path, say) and nothing finer. Tight timing
-    // assertions would be flaky on shared CI.
+    // assertions would be flaky on shared CI. Most of the run is setup — each
+    // 500-delta sample first replays 499 deltas, every one of which reapplies
+    // the history before it — so the total varies a lot by machine: ~8s on an
+    // Apple-silicon laptop, ~12s on a 16-core Linux host. 30s keeps headroom
+    // for a slow CI runner while still failing on a change in complexity.
     const elapsed = performance.now() - started;
-    assert.ok(elapsed < 10_000, `benchmark completed in ${ms(elapsed)} ms, budget 10000 ms`);
+    assert.ok(elapsed < 30_000, `benchmark completed in ${ms(elapsed)} ms, budget 30000 ms`);
 });
