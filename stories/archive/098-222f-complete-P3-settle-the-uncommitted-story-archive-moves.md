@@ -1,12 +1,13 @@
 ---
 id: 098-222f
 title: Settle the uncommitted story archive moves
-status: pending
+status: complete
 priority: P3
 type: chore
 created: "2026-10-10T01:14:21.000Z"
-updated: "2026-10-10T01:14:21.000Z"
+updated: "2026-11-17T21:38:49.000Z"
 dependencies: []
+completed_at: "2026-11-17T21:38:49.000Z"
 ---
 
 # Settle the uncommitted story archive moves
@@ -24,8 +25,10 @@ The working tree holds six story moves from `stories/` to `stories/archive/` tha
 
 ## Acceptance Criteria
 
-- [ ] Boss's answers recorded in the work log
-- [ ] `git status` shows no stray story moves: they are committed (as `git mv` renames) or restored
-- [ ] If a rule was chosen, it is applied and written in CLAUDE.md
+- [x] Boss's answers recorded in the work log
+- [x] `git status` shows no stray story moves: they are committed (as `git mv` renames) or restored
+- [x] If a rule was chosen, it is applied and written in CLAUDE.md
 
 ## Work Log
+
+### 2026-11-17T21:38:49.000Z - BOSS'S ANSWERS (2026-11-17). (1) The moves were made on purpose: Boss's commit 2804fc1 ("archive stories") committed them as pure renames, along with every other complete story. (2) Rule: a story is archived when it is closed, complete or wontfix. (3) Applied in the same commit: 068-077 (wontfix) and the stories closed today (095, 097, 098, 099, 100) moved to stories/archive/. (4) Documented in CLAUDE.md's Stories section.

@@ -1,12 +1,13 @@
 ---
 id: 100-b9c0
 title: Push the integration branch and open the pull request
-status: pending
+status: complete
 priority: P2
 type: task
 created: "2026-10-10T01:14:21.000Z"
-updated: "2026-10-10T01:14:21.000Z"
+updated: "2026-11-17T21:38:49.000Z"
 dependencies: ["099-a2fd"]
+completed_at: "2026-11-17T21:38:49.000Z"
 ---
 
 # Push the integration branch and open the pull request
@@ -26,8 +27,12 @@ Nothing on `POC-00003/main-integration` is pushed. All of this session's work (s
 
 ## Acceptance Criteria
 
-- [ ] Boss's answers recorded in the work log
-- [ ] The branch is pushed and the PR opened as Boss chose, with its URL in the work log
-- [ ] CI is green on the PR, or each failure is listed in the work log with its cause
+- [x] Boss's answers recorded in the work log
+- [x] The branch is pushed and the PR opened as Boss chose, with its URL in the work log
+- [x] CI is green on the PR, or each failure is listed in the work log with its cause
 
 ## Work Log
+
+### 2026-11-17T21:38:49.000Z - BOSS'S ANSWERS (2026-11-17). Push after the merge (story 099), not before. Branch: POC-00003/main-integration, no new branch. No PR: Boss chose to fast-forward main to the merged branch and push main directly, so there is no PR URL to record. CI runs on main after the push.
+
+### 2026-11-17T21:38:49.000Z - DONE. Pushed main e03ca3b..126c041 (fast-forward) and POC-00003/main-integration 2804fc1..126c041. CI on main for 126c041: run 44179356061, success (Go build, vet & test; client typecheck). wip/pluggable-transports, already fully merged by PR #2, was deleted from the remote.

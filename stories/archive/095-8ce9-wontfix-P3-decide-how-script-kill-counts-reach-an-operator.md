@@ -1,11 +1,11 @@
 ---
 id: 095-8ce9
 title: Decide how script kill counts reach an operator
-status: pending
+status: wontfix
 priority: P3
 type: task
 created: "2026-10-10T01:14:21.000Z"
-updated: "2026-10-10T01:14:21.000Z"
+updated: "2026-11-17T21:38:49.000Z"
 dependencies: ["062-e7ab"]
 ---
 
@@ -26,9 +26,11 @@ Story 062 counts every killed Lua invocation by reason (`deadline`, `string_cap`
 
 ## Acceptance Criteria
 
-- [ ] Boss's answers recorded in the work log
-- [ ] Kill counts readable the way Boss chose (or the story closed as wontfix if not needed), with a test that reads them over that path
-- [ ] .env.example and docs/SCRIPTING.md describe how to read them
-- [ ] VERIFY: go test -race ./...
+- [x] Boss's answers recorded in the work log
+- [x] Kill counts readable the way Boss chose (or the story closed as wontfix if not needed), with a test that reads them over that path
+- [REJECTED] .env.example and docs/SCRIPTING.md describe how to read them (not needed: nothing new to read; the counts stay in-process.)
+- [REJECTED] VERIFY: go test -race ./... (not needed: no code change.)
 
 ## Work Log
+
+### 2026-11-17T21:38:49.000Z - BOSS'S ANSWER (2026-11-17). Wontfix for now: in-process Engine.KillCounts and the indri_lua_kills expvar are enough until there is a real operator need. No endpoint, no new listener, nothing else counted. Reopen with this story's questions if an operator needs the numbers from a running server.
